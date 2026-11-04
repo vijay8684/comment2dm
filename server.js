@@ -74,7 +74,12 @@ billing.registerPostParser(app);
 
 function requireSameOriginForStateChanges(request, response, next) {
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) return next();
-  if (request.path === '/instagram/webhook' || request.path === '/billing/webhook') return next();
+  if (
+    request.path === '/instagram/webhook' ||
+    request.path === '/api/instagram/webhook' ||
+    request.path === '/billing/webhook' ||
+    request.path === '/api/billing/webhook'
+  ) return next();
   if (request.headers.authorization && request.headers.authorization.startsWith('Bearer ')) return next();
 
   const fetchSite = request.get('sec-fetch-site');
@@ -705,6 +710,16 @@ app.post('/api/instagram/webhook', async (request, response) => {
     if (request.billingBlocked) return;
     const payload = request.body;
     console.log('Incoming Meta Webhook received:', JSON.stringify(payload));
+
+    if (db.collections && db.collections().webhookEvents) {
+      db.collections().webhookEvents.insertOne({
+        event_id: 'webhook_' + Date.now(),
+        raw_payload: payload,
+        received_at: new Date().toISOString(),
+        processed_at: new Date().toISOString()
+      }).catch(err => console.error('Failed to log raw webhook:', err.message));
+    }
+
     if (!payload || payload.object !== 'instagram' || !Array.isArray(payload.entry)) {
       return;
     }
