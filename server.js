@@ -864,66 +864,7 @@ app.get('/api/admin/overview', requireAuth, requireAdmin, async (request, respon
 // Creator Studio AI & Support Chat
 // ==========================================
 
-app.post('/api/creator/generate', requireAuth, async (request, response) => {
-  const body = request.body || {};
-  const tool = typeof body.tool === 'string' ? body.tool.trim().toLowerCase() : 'content';
-  const level = typeof body.level === 'string' ? body.level.trim().toLowerCase() : 'pro';
-  const topic = typeof body.topic === 'string' ? body.topic.trim() : '';
-  const audience = typeof body.audience === 'string' ? body.audience.trim() : '';
-  const format = typeof body.format === 'string' ? body.format.trim() : 'Reel';
-  const tone = typeof body.tone === 'string' ? body.tone.trim() : 'High-energy';
-  const length = typeof body.length === 'string' ? body.length.trim() : '30s';
 
-  if (!topic) return response.status(400).json({ error: 'Please enter a topic or theme.' });
-
-  try {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (apiKey) {
-      const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-      const prompt = `You are Comment2DM AI, a world-class Instagram creator strategist. Write high-converting, viral Instagram content for topic: "${topic}".
-Audience: ${audience || 'General Instagram Creators'}.
-Format: ${format}. Tone: ${tone}. Target Length: ${length}.
-Generate:
-1. 3 Viral Hooks (Curiosity, Contrarian, Problem-Agitation)
-2. Reel Script (Visual beats, on-screen text, spoken copy)
-3. High-Converting Caption with Call To Action to comment a keyword for an instant DM!`;
-
-      const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          model,
-          messages: [{ role: 'system', content: 'You are an elite Instagram viral content strategist.' }, { role: 'user', content: prompt }],
-          max_tokens: 800
-        })
-      });
-      const data = await aiRes.json().catch(() => ({}));
-      const text = data?.choices?.[0]?.message?.content;
-      if (text) return response.json({ output: text, mode: 'ai' });
-    }
-
-    // High quality built-in templates if no API key is set
-    const fallback = `🔥 3 VIRAL HOOKS:
-1. "Stop making this huge mistake with ${topic} (do this instead) 👇"
-2. "The exact strategy I used to master ${topic} in under 7 days..."
-3. "Most people do ${topic} backwards. Here is the framework that actually works:"
-
-🎬 REEL SCRIPT (${length}):
-[0-2s] Pattern Interrupt: Look directly at the camera. Text on screen: "Don't scroll if you care about ${topic}".
-[3-10s] Problem: State the #1 struggle your audience experiences with ${topic}.
-[11-20s] Solution Breakdown: Show 2 simple actionable steps or insider tips.
-[21-30s] Call to Action: "Want the full step-by-step checklist? Comment 'SEND' below and I'll DM you the link instantly!"
-
-📝 CAPTION & KEYWORD CTA:
-If you want to master ${topic} without spending months guessing, you need this system. 
-Save this post for later 📌
-Comment "LINK" below and Comment2DM will send the full guide directly to your inbox! 📩`;
-
-    return response.json({ output: fallback, mode: 'built-in' });
-  } catch (error) {
-    return response.status(500).json({ error: 'AI generation error.' });
-  }
-});
 
 const supportKnowledge = [
   { keys: ['hi', 'hello', 'hey'], answer: 'Hi! Welcome to Comment2DM Support. How can I assist you with your Instagram automations, account connection, or billing today?' },
@@ -988,15 +929,15 @@ function creatorFallback(type, body) {
 }
 
 app.post('/api/creator/generate', requireAuth, async (request, response) => {
-  const { type, topic, audience, tone, count, product, cta, niche, week } = request.body || {};
-  if (!type) return response.status(400).json({ error: 'type is required' });
+  const { type: rawType, tool, topic, audience, tone = 'inspirational', count = 3, product, cta, niche, week } = request.body || {};
+  const type = rawType || tool || 'hooks';
   try {
     let result = null;
     if (GEMINI_KEY) {
       let prompt = '';
-      if (type === 'hooks') prompt = `Generate ${count || 3} scroll-stopping Instagram Reel hooks about "${topic}" for ${audience || 'general audience'} with a ${tone} tone. Return only the hooks, one per line, no numbering.`;
-      else if (type === 'dm_script') prompt = `Write a friendly Instagram DM script for "${product}". CTA: ${cta}. Tone: ${tone}. Max 150 words. Natural, personalized, not spammy.`;
-      else if (type === 'ideas') prompt = `Generate 7 Instagram content ideas for the ${niche} niche for ${week || 'this week'}. Return as JSON array of objects with: title, hook, format (reel/carousel/story/static).`;
+      if (type === 'hooks') prompt = `Generate ${count || 3} scroll-stopping Instagram Reel hooks about "${topic || 'content creation'}" for ${audience || 'general audience'} with a ${tone} tone. Return only the hooks, one per line, no numbering.`;
+      else if (type === 'dm_script') prompt = `Write a friendly Instagram DM script for "${product || 'free guide'}". CTA: ${cta || 'check link'}. Tone: ${tone}. Max 150 words. Natural, personalized, not spammy.`;
+      else if (type === 'ideas') prompt = `Generate 7 Instagram content ideas for the ${niche || 'creators'} niche for ${week || 'this week'}. Return as JSON array of objects with: title, hook, format (reel/carousel/story/static).`;
       const raw = await callGemini(prompt);
       if (raw) {
         if (type === 'hooks') result = raw.split('\n').filter(l => l.trim()).slice(0, count || 3);
@@ -1005,7 +946,7 @@ app.post('/api/creator/generate', requireAuth, async (request, response) => {
       }
     }
     if (!result) result = creatorFallback(type, request.body);
-    return response.json({ success: true, result });
+    return response.json({ success: true, result, output: result });
   } catch (err) {
     return response.status(500).json({ error: err.message || 'Generation failed' });
   }
