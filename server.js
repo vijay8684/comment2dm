@@ -751,6 +751,9 @@ app.post('/api/instagram/webhook', async (request, response) => {
 
         const commentMediaId = String(commentVal.media?.id || commentVal.media_id || commentVal.mediaId || '');
 
+        const fromUsername = commentVal.from?.username || '';
+        const fromId = commentVal.from?.id || '';
+
         for (const auto of activeAutomations) {
           // If automation is specific to one reel, check media ID
           if (auto.media_id && commentMediaId) {
@@ -782,16 +785,53 @@ app.post('/api/instagram/webhook', async (request, response) => {
                 );
               }
 
-              await db.run(
-                'INSERT INTO automation_events (owner_user_id, instagram_user_id, automation_id, comment_id, event_type, keyword, message_text, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [auto.owner_user_id, recipientIgUserId, auto.id, commentId, 'private_reply', auto.keyword, auto.dm_message, 'success', new Date().toISOString()]
-              );
+              if (db.collections && db.collections.automationEvents) {
+                await db.collections.automationEvents.insertOne({
+                  event_id: crypto.randomUUID(),
+                  owner_user_id: auto.owner_user_id,
+                  instagram_user_id: recipientIgUserId,
+                  automation_id: auto.id,
+                  comment_id: commentId,
+                  from_username: fromUsername,
+                  from_id: fromId,
+                  comment_text: commentText,
+                  event_type: 'private_reply',
+                  keyword: auto.keyword,
+                  message_text: auto.dm_message,
+                  status: 'success',
+                  created_at: new Date().toISOString()
+                });
+              } else {
+                await db.run(
+                  'INSERT INTO automation_events (owner_user_id, instagram_user_id, automation_id, comment_id, event_type, keyword, message_text, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                  [auto.owner_user_id, recipientIgUserId, auto.id, commentId, 'private_reply', auto.keyword, auto.dm_message, 'success', new Date().toISOString()]
+                );
+              }
               console.log(`Successfully sent DM & reply for comment ID ${commentId}`);
             } catch (apiErr) {
-              await db.run(
-                'INSERT INTO automation_events (owner_user_id, instagram_user_id, automation_id, comment_id, event_type, keyword, message_text, status, error_message, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [auto.owner_user_id, recipientIgUserId, auto.id, commentId, 'private_reply', auto.keyword, auto.dm_message, 'failed', apiErr.message, new Date().toISOString()]
-              );
+              if (db.collections && db.collections.automationEvents) {
+                await db.collections.automationEvents.insertOne({
+                  event_id: crypto.randomUUID(),
+                  owner_user_id: auto.owner_user_id,
+                  instagram_user_id: recipientIgUserId,
+                  automation_id: auto.id,
+                  comment_id: commentId,
+                  from_username: fromUsername,
+                  from_id: fromId,
+                  comment_text: commentText,
+                  event_type: 'private_reply',
+                  keyword: auto.keyword,
+                  message_text: auto.dm_message,
+                  status: 'failed',
+                  error_message: apiErr.message,
+                  created_at: new Date().toISOString()
+                });
+              } else {
+                await db.run(
+                  'INSERT INTO automation_events (owner_user_id, instagram_user_id, automation_id, comment_id, event_type, keyword, message_text, status, error_message, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                  [auto.owner_user_id, recipientIgUserId, auto.id, commentId, 'private_reply', auto.keyword, auto.dm_message, 'failed', apiErr.message, new Date().toISOString()]
+                );
+              }
               console.error(`Failed to execute automation for comment ${commentId}:`, apiErr.message);
             }
           }
@@ -1000,15 +1040,23 @@ app.get('/api/analytics/events', requireAuth, async (request, response) => {
       col.countDocuments({ ...filter, status: 'failed' })
     ]);
 
-    const mappedEvents = events.map(e => ({
-      id: e.event_id || e._id,
-      senderName: e.instagram_user_id ? `@${e.instagram_user_id}` : 'Commenter',
-      commentText: e.keyword ? `Keyword: "${e.keyword}"` : 'Comment',
-      dmPreview: e.message_text || '–',
-      automationName: 'Automation',
-      status: e.status === 'success' ? 'sent' : e.status,
-      timestamp: e.created_at
-    }));
+    const mappedEvents = events.map(e => {
+      const rawSender = e.from_username || e.username || e.from_id || e.instagram_user_id || 'Commenter';
+      const cleanSender = String(rawSender).replace(/^@+/, '');
+      return {
+        id: e.event_id || e._id,
+        senderName: cleanSender,
+        username: cleanSender,
+        commentText: e.comment_text || (e.keyword ? `Keyword: "${e.keyword}"` : 'Comment'),
+        dmPreview: e.message_text || '–',
+        dmText: e.message_text || '–',
+        automationName: 'Comment to DM',
+        status: e.status === 'success' ? 'sent' : e.status,
+        timestamp: e.created_at,
+        created_at: e.created_at,
+        createdAt: e.created_at
+      };
+    });
 
     return response.json({
       events: mappedEvents,

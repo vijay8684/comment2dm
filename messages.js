@@ -80,10 +80,15 @@
     }
 
     tbody.innerHTML = events.map(ev => {
-      const handle = ev.senderName || ev.username || 'Unknown';
+      const rawHandle = ev.senderName || ev.username || 'Commenter';
+      const handle = String(rawHandle).replace(/^@+/, '');
       const statusClass = ev.status === 'sent' ? 'sent' : ev.status === 'failed' ? 'failed' : 'pending';
       const statusLabel = ev.status === 'sent' ? '✅ Sent' : ev.status === 'failed' ? '❌ Failed' : '⏳ Pending';
       const statusColor = ev.status === 'sent' ? '#10b981' : ev.status === 'failed' ? '#f43f5e' : '#f59e0b';
+      const timeStr = relativeTime(ev.createdAt || ev.created_at || ev.timestamp);
+      const dmMsg = ev.dmText || ev.dmPreview || '–';
+      const commentMsg = ev.commentText || ev.comment_text || '–';
+
       return `<tr>
         <td style="padding-left:20px;">
           <div class="handle-cell">
@@ -91,8 +96,8 @@
             <span style="font-weight:500;">@${handle}</span>
           </div>
         </td>
-        <td><span class="preview-text" title="${ev.commentText || ''}">${trunc(ev.commentText, 55)}</span></td>
-        <td><span class="preview-text" title="${ev.dmText || ''}">${trunc(ev.dmText, 55)}</span></td>
+        <td><span class="preview-text" title="${commentMsg}">${trunc(commentMsg, 55)}</span></td>
+        <td><span class="preview-text" title="${dmMsg}">${trunc(dmMsg, 55)}</span></td>
         <td>${ev.automationName ? `<span class="automation-pill">⚡ ${trunc(ev.automationName, 24)}</span>` : '–'}</td>
         <td>
           <div class="status-cell">
@@ -100,7 +105,7 @@
             <span style="color:${statusColor};">${statusLabel}</span>
           </div>
         </td>
-        <td style="color:rgba(255,255,255,0.4);white-space:nowrap;">${relativeTime(ev.createdAt || ev.created_at)}</td>
+        <td style="color:rgba(255,255,255,0.4);white-space:nowrap;">${timeStr}</td>
       </tr>`;
     }).join('');
   }
