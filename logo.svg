@@ -1,19 +1,51 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 80">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 64" fill="none">
   <defs>
-    <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#4f46e5" />
-      <stop offset="50%" stop-color="#6366f1" />
+    <!-- Brand Neon Gradient -->
+    <linearGradient id="c2d-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="45%" stop-color="#8b5cf6" />
       <stop offset="100%" stop-color="#ec4899" />
     </linearGradient>
+
+    <!-- Glass Surface Gradient -->
+    <linearGradient id="glass-surface" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.12" />
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.02" />
+    </linearGradient>
+
+    <!-- Subtle Drop Glow -->
+    <filter id="soft-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#8b5cf6" flood-opacity="0.35" />
+    </filter>
   </defs>
-  <!-- Icon Mark -->
-  <g transform="translate(10, 10)">
-    <rect x="0" y="0" width="60" height="60" rx="16" fill="url(#logoGrad)" />
-    <path d="M 16 18 C 16 14 19 11 24 11 L 36 11 C 41 11 44 14 44 18 L 44 32 C 44 36 41 39 36 39 L 26 39 L 18 47 L 19 39 C 17 38 16 35 16 32 Z" fill="#ffffff" />
-    <path d="M 25 25 L 35 21 L 32 31 L 29 27 Z" fill="url(#logoGrad)" />
+
+  <!-- ICON MARK (Squircle with Comment-to-DM symbol) -->
+  <g transform="translate(8, 8)">
+    <!-- Squircle Container -->
+    <rect x="0" y="0" width="48" height="48" rx="14" fill="#121217" stroke="rgba(255, 255, 255, 0.1)" stroke-width="1" filter="url(#soft-glow)" />
+    <rect x="0" y="0" width="48" height="48" rx="14" fill="url(#glass-surface)" />
+
+    <!-- Sleek Speech Bubble (Comment) -->
+    <path d="M 14 18 C 14 14.686 16.686 12 20 12 L 28 12 C 31.314 12 34 14.686 34 18 L 34 26 C 34 29.314 31.314 32 28 32 L 21 32 L 15 36 L 16 32 C 14.8 31 14 28.5 14 26 Z" 
+          stroke="url(#c2d-grad)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+
+    <!-- Forward DM Paper Plane / Arrow -->
+    <path d="M 21 21.5 L 34 17 L 30 29.5 L 26.5 25 L 21 21.5 Z" 
+          fill="url(#c2d-grad)" />
+    <path d="M 26.5 25 L 34 17" 
+          stroke="#ffffff" stroke-width="1" stroke-linecap="round" opacity="0.9" />
   </g>
-  <!-- Typography -->
-  <text x="82" y="48" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', sans-serif" font-size="28" font-weight="700" fill="#ffffff" letter-spacing="-0.5">
-    Comment<tspan fill="#818cf8">2</tspan>DM
-  </text>
+
+  <!-- TYPOGRAPHY WORDMARK -->
+  <g transform="translate(70, 0)">
+    <!-- Primary Brand Name -->
+    <text x="0" y="36" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', sans-serif" font-size="25" font-weight="800" fill="#ffffff" letter-spacing="-0.6">
+      Comment<tspan fill="url(#c2d-grad)">2</tspan>DM
+    </text>
+
+    <!-- Subtitle Badge / Descriptor -->
+    <text x="1" y="49" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', sans-serif" font-size="8" font-weight="700" fill="#a1a1aa" letter-spacing="2.2">
+      INSTAGRAM AUTOMATION
+    </text>
+  </g>
 </svg>
