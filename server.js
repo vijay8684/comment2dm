@@ -416,11 +416,13 @@ app.get('/api/instagram/authorize', requireAuth, (request, response, next) => {
       process.env.JWT_SECRET,
       { expiresIn: '15m' }
     );
-    const authorizeUrl = new URL('https://www.instagram.com/oauth/authorize');
+    // Meta Unified Login for Newer Apps (replaces deprecated instagram.com/oauth/authorize)
+    const configId = process.env.META_CONFIG_ID || '29029741390040774';
+    const authorizeUrl = new URL('https://www.facebook.com/v21.0/dialog/oauth');
     authorizeUrl.searchParams.set('client_id', process.env.META_APP_ID);
+    authorizeUrl.searchParams.set('config_id', configId);
     authorizeUrl.searchParams.set('redirect_uri', process.env.META_REDIRECT_URI);
     authorizeUrl.searchParams.set('response_type', 'code');
-    authorizeUrl.searchParams.set('scope', 'instagram_business_basic,instagram_business_manage_comments,instagram_business_manage_messages');
     authorizeUrl.searchParams.set('state', state);
     return response.redirect(authorizeUrl.toString());
   } catch (error) {

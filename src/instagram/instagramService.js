@@ -45,6 +45,28 @@ function metaErrorMessage(data, fallback) {
 async function exchangeCode(code) {
   ensureConfiguration();
 
+  // Attempt 1: Meta Unified Login exchange via graph.facebook.com
+  try {
+    const fbUrl = new URL(`https://graph.facebook.com/${apiVersion}/oauth/access_token`);
+    fbUrl.searchParams.set('client_id', process.env.META_APP_ID);
+    fbUrl.searchParams.set('client_secret', process.env.META_APP_SECRET);
+    fbUrl.searchParams.set('redirect_uri', process.env.META_REDIRECT_URI);
+    fbUrl.searchParams.set('code', code);
+
+    const fbResponse = await fetch(fbUrl);
+    const fbData = await fbResponse.json().catch(() => ({}));
+    if (fbResponse.ok && fbData.access_token) {
+      console.log('Successfully exchanged code via Meta Unified Login.');
+      return {
+        accessToken: fbData.access_token,
+        expiresIn: Number(fbData.expires_in) || (60 * 86400)
+      };
+    }
+  } catch (err) {
+    console.warn('Unified Login exchange notice:', err.message);
+  }
+
+  // Attempt 2: api.instagram.com exchange
   const form = new FormData();
   form.set('client_id', process.env.META_APP_ID);
   form.set('client_secret', process.env.META_APP_SECRET);
@@ -83,14 +105,40 @@ async function exchangeCode(code) {
 }
 
 async function fetchProfile(accessToken) {
+  // Check if token has linked Instagram accounts via Facebook Pages
+  try {
+    const pagesUrl = new URL(`https://graph.facebook.com/${apiVersion}/me/accounts`);
+    pagesUrl.searchParams.set('fields', 'id,name,instagram_business_account{id,username,name,profile_picture_url}');
+    pagesUrl.searchParams.set('access_token', accessToken);
+    const pagesRes = await fetch(pagesUrl);
+    const pagesData = await pagesRes.json().catch(() => ({}));
+    if (pagesRes.ok && Array.isArray(pagesData.data)) {
+      for (const page of pagesData.data) {
+        if (page.instagram_business_account) {
+          const ig = page.instagram_business_account;
+          return {
+            userId: String(ig.id),
+            username: ig.username || page.name,
+            name: ig.name || page.name || '',
+            profilePictureUrl: ig.profile_picture_url || null,
+            followersCount: 0
+          };
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Facebook Page accounts lookup notice:', err.message);
+  }
+
+  // Fallback to graph.instagram.com /me
   const profileUrl = new URL(`https://graph.instagram.com/${apiVersion}/me`);
-  profileUrl.searchParams.set('fields', 'user_id,username,name,profile_picture_url,followers_count');
+  profileUrl.searchParams.set('fields', 'user_id,username,name,profile_picture_url,followers_count,id');
   profileUrl.searchParams.set('access_token', accessToken);
 
   const response = await fetch(profileUrl);
   const data = await response.json().catch(() => ({}));
 
-  if (!response.ok || !data.user_id) {
+  if (!response.ok || (!data.user_id && !data.id)) {
     const error = new Error(`Instagram profile lookup failed (HTTP ${response.status}): ${metaErrorMessage(data, 'No Instagram user profile returned.')}`);
     error.statusCode = 502;
     error.stage = 'profile_lookup';
@@ -99,7 +147,7 @@ async function fetchProfile(accessToken) {
   }
 
   return {
-    userId: String(data.user_id),
+    userId: String(data.user_id || data.id),
     username: data.username || 'Instagram account',
     name: data.name || '',
     profilePictureUrl: data.profile_picture_url || null,
@@ -170,10 +218,22 @@ async function listReels(ownerUserId, instagramUserId, forceRefresh = false) {
 
   try {
     for (let page = 0; page < 2 && nextUrl; page += 1) {
-      const response = await fetch(nextUrl);
-      const data = await response.json().catch(() => ({}));
+      let response = await fetch(nextUrl);
+      let data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        break;
+        // Fallback to Facebook Graph endpoint for Unified Login tokens
+        const fbMediaUrl = new URL(`https://graph.facebook.com/${apiVersion}/${instagramUserId}/media`);
+        fbMediaUrl.searchParams.set('fields', 'id,caption,media_type,media_product_type,permalink,timestamp,thumbnail_url,comments_count,like_count');
+        fbMediaUrl.searchParams.set('limit', '50');
+        fbMediaUrl.searchParams.set('access_token', accessToken);
+        const fbRes = await fetch(fbMediaUrl);
+        const fbData = await fbRes.json().catch(() => ({}));
+        if (fbRes.ok && Array.isArray(fbData.data)) {
+          data = fbData;
+          response = fbRes;
+        } else {
+          break;
+        }
       }
       for (const media of Array.isArray(data.data) ? data.data : []) {
         items.push({
