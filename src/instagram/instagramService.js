@@ -105,7 +105,29 @@ async function exchangeCode(code) {
 }
 
 async function fetchProfile(accessToken) {
-  // Check if token has linked Instagram accounts via Facebook Pages
+  // 1. Meta Unified Login (Facebook Login for Business): check assigned_instagram_accounts
+  try {
+    const assignedUrl = new URL(`https://graph.facebook.com/${apiVersion}/me/assigned_instagram_accounts`);
+    assignedUrl.searchParams.set('fields', 'id,username,name,profile_picture_url');
+    assignedUrl.searchParams.set('access_token', accessToken);
+    const assignedRes = await fetch(assignedUrl);
+    const assignedData = await assignedRes.json().catch(() => ({}));
+    if (assignedRes.ok && Array.isArray(assignedData.data) && assignedData.data.length > 0) {
+      const ig = assignedData.data[0];
+      console.log('Found Instagram account via Unified Login assigned_instagram_accounts:', ig.username, ig.id);
+      return {
+        userId: String(ig.id),
+        username: ig.username || 'Instagram account',
+        name: ig.name || ig.username || '',
+        profilePictureUrl: ig.profile_picture_url || null,
+        followersCount: 0
+      };
+    }
+  } catch (err) {
+    console.warn('assigned_instagram_accounts lookup notice:', err.message);
+  }
+
+  // 2. Check if token has linked Instagram accounts via Facebook Pages
   try {
     const pagesUrl = new URL(`https://graph.facebook.com/${apiVersion}/me/accounts`);
     pagesUrl.searchParams.set('fields', 'id,name,instagram_business_account{id,username,name,profile_picture_url}');
@@ -130,7 +152,7 @@ async function fetchProfile(accessToken) {
     console.warn('Facebook Page accounts lookup notice:', err.message);
   }
 
-  // Fallback to graph.instagram.com /me
+  // 3. Fallback to graph.instagram.com /me (for legacy Instagram Login tokens)
   const profileUrl = new URL(`https://graph.instagram.com/${apiVersion}/me`);
   profileUrl.searchParams.set('fields', 'user_id,username,name,profile_picture_url,followers_count,id');
   profileUrl.searchParams.set('access_token', accessToken);

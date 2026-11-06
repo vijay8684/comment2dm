@@ -450,7 +450,7 @@ app.get('/api/instagram/callback', async (request, response) => {
     return response.redirect('/instagram-accounts.html?instagram_connected=1');
   } catch (error) {
     console.error('Instagram OAuth callback failed:', error.message);
-    return errorRedirect('Instagram authorization could not be completed. Please ensure your Meta App credentials are correct.');
+    return errorRedirect(error.message || 'Instagram authorization could not be completed.');
   }
 });
 
