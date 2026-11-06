@@ -108,18 +108,19 @@ async function fetchProfile(accessToken) {
   // 1. Meta Unified Login (Facebook Login for Business): check assigned_instagram_accounts
   try {
     const assignedUrl = new URL(`https://graph.facebook.com/${apiVersion}/me/assigned_instagram_accounts`);
-    assignedUrl.searchParams.set('fields', 'id,username,name,profile_picture_url');
+    assignedUrl.searchParams.set('fields', 'id,username');
     assignedUrl.searchParams.set('access_token', accessToken);
     const assignedRes = await fetch(assignedUrl);
     const assignedData = await assignedRes.json().catch(() => ({}));
+    console.log('assigned_instagram_accounts status:', assignedRes.status, 'data:', JSON.stringify(assignedData));
     if (assignedRes.ok && Array.isArray(assignedData.data) && assignedData.data.length > 0) {
       const ig = assignedData.data[0];
       console.log('Found Instagram account via Unified Login assigned_instagram_accounts:', ig.username, ig.id);
       return {
         userId: String(ig.id),
         username: ig.username || 'Instagram account',
-        name: ig.name || ig.username || '',
-        profilePictureUrl: ig.profile_picture_url || null,
+        name: ig.username || 'Instagram account',
+        profilePictureUrl: null,
         followersCount: 0
       };
     }
@@ -127,7 +128,39 @@ async function fetchProfile(accessToken) {
     console.warn('assigned_instagram_accounts lookup notice:', err.message);
   }
 
-  // 2. Check if token has linked Instagram accounts via Facebook Pages
+  // 2. Meta Unified Login: check business assets via client_business_id
+  try {
+    const meUrl = new URL(`https://graph.facebook.com/${apiVersion}/me`);
+    meUrl.searchParams.set('fields', 'id,name,client_business_id');
+    meUrl.searchParams.set('access_token', accessToken);
+    const meRes = await fetch(meUrl);
+    const meData = await meRes.json().catch(() => ({}));
+    if (meRes.ok && meData.client_business_id) {
+      console.log('Found client_business_id:', meData.client_business_id);
+      for (const edge of ['owned_instagram_assets', 'client_instagram_assets']) {
+        const bizUrl = new URL(`https://graph.facebook.com/${apiVersion}/${meData.client_business_id}/${edge}`);
+        bizUrl.searchParams.set('fields', 'id,username');
+        bizUrl.searchParams.set('access_token', accessToken);
+        const bizRes = await fetch(bizUrl);
+        const bizData = await bizRes.json().catch(() => ({}));
+        if (bizRes.ok && Array.isArray(bizData.data) && bizData.data.length > 0) {
+          const ig = bizData.data[0];
+          console.log(`Found Instagram account via business ${edge}:`, ig.username, ig.id);
+          return {
+            userId: String(ig.id),
+            username: ig.username || 'Instagram account',
+            name: ig.username || 'Instagram account',
+            profilePictureUrl: null,
+            followersCount: 0
+          };
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Business assets lookup notice:', err.message);
+  }
+
+  // 3. Check if token has linked Instagram accounts via Facebook Pages
   try {
     const pagesUrl = new URL(`https://graph.facebook.com/${apiVersion}/me/accounts`);
     pagesUrl.searchParams.set('fields', 'id,name,instagram_business_account{id,username,name,profile_picture_url}');
@@ -152,7 +185,27 @@ async function fetchProfile(accessToken) {
     console.warn('Facebook Page accounts lookup notice:', err.message);
   }
 
-  // 3. Fallback to graph.instagram.com /me (for legacy Instagram Login tokens)
+  // 4. Verify if this is a Facebook token before trying graph.instagram.com
+  let isFacebookToken = false;
+  try {
+    const fbCheckUrl = new URL(`https://graph.facebook.com/${apiVersion}/me`);
+    fbCheckUrl.searchParams.set('fields', 'id');
+    fbCheckUrl.searchParams.set('access_token', accessToken);
+    const fbCheckRes = await fetch(fbCheckUrl);
+    const fbCheckData = await fbCheckRes.json().catch(() => ({}));
+    if (fbCheckRes.ok && fbCheckData.id) {
+      isFacebookToken = true;
+    }
+  } catch (_) {}
+
+  if (isFacebookToken) {
+    const error = new Error('No Instagram account was selected. Please tick the checkbox [✓] next to your Instagram account in the Meta popup before clicking Next.');
+    error.statusCode = 400;
+    error.stage = 'profile_lookup';
+    throw error;
+  }
+
+  // 5. Fallback to graph.instagram.com /me (only for legacy Instagram Login tokens)
   const profileUrl = new URL(`https://graph.instagram.com/${apiVersion}/me`);
   profileUrl.searchParams.set('fields', 'user_id,username,name,profile_picture_url,followers_count,id');
   profileUrl.searchParams.set('access_token', accessToken);
