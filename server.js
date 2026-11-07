@@ -42,12 +42,23 @@ app.use((request, response, next) => {
   next();
 });
 
+const ADMIN_EMAILS = new Set([
+  'jayvardhanreddy2008@gmail.com',
+  'vijayakrishnareddy910@gmail.com',
+  ...(process.env.ADMIN_EMAIL ? process.env.ADMIN_EMAIL.split(',').map(e => e.trim().toLowerCase()) : [])
+]);
+
+function isAdminEmail(email) {
+  if (!email || typeof email !== 'string') return false;
+  return ADMIN_EMAILS.has(email.trim().toLowerCase());
+}
+
 const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'jayvardhanreddy2008@gmail.com').trim().toLowerCase();
 
 async function loginRateLimit(request, response, next) {
   try {
     const email = typeof request.body?.email === 'string' ? request.body.email.trim().toLowerCase() : '';
-    if (email === ADMIN_EMAIL) return next();
+    if (isAdminEmail(email)) return next();
     const ip = request.ip || request.socket.remoteAddress || 'unknown';
     const allowed = await db.consumeRateLimit(`login:${ip}`, 15 * 60 * 1000, 15);
     if (!allowed) {
@@ -197,7 +208,7 @@ async function requireAuth(request, response, next) {
 }
 
 function requireAdmin(request, response, next) {
-  if (request.user.email.toLowerCase() !== ADMIN_EMAIL) {
+  if (!isAdminEmail(request.user.email)) {
     return response.status(403).json({ error: 'Admin access required.' });
   }
   return next();
@@ -304,7 +315,7 @@ app.get('/api/auth/google/callback', async (request, response) => {
 });
 
 app.get('/api/me', requireAuth, (request, response) => {
-  const isAdmin = request.user && request.user.email && request.user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+  const isAdmin = request.user && isAdminEmail(request.user.email);
   return response.json({ user: { ...request.user, isAdmin } });
 });
 

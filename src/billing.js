@@ -122,7 +122,16 @@ let db;
 let mongo;
 let rz;
 const cache = new Map();
-const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'jayvardhanreddy2008@gmail.com').trim().toLowerCase();
+const ADMIN_EMAILS = new Set([
+  'jayvardhanreddy2008@gmail.com',
+  'vijayakrishnareddy910@gmail.com',
+  ...(process.env.ADMIN_EMAIL ? process.env.ADMIN_EMAIL.split(',').map(e => e.trim().toLowerCase()) : [])
+]);
+
+function isAdminEmail(email) {
+  if (!email || typeof email !== 'string') return false;
+  return ADMIN_EMAILS.has(email.trim().toLowerCase());
+}
 
 async function store() {
   if (db) return db;
@@ -168,7 +177,7 @@ async function auth(req) {
 async function entitlement(uid) {
   const d = await store();
   const user = await d.collection('users').findOne({ id: uid }, { projection: { email: 1 } });
-  if (user?.email?.toLowerCase() === ADMIN_EMAIL) {
+  if (isAdminEmail(user?.email)) {
     return {
       plan: 'elite',
       isAdmin: true,
@@ -223,7 +232,7 @@ async function check(uid, resource) {
 async function billingRateLimit(req, res, next) {
   try {
     const u = await auth(req);
-    if (u?.email?.toLowerCase() === ADMIN_EMAIL) return next();
+    if (isAdminEmail(u?.email)) return next();
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
     const uid = u?.id || 'anon';
     const key = `billing:${req.path}:${uid}`;
@@ -519,9 +528,8 @@ function register(app) {
     try {
       const r = await check(u.id, 'instagramAccounts');
       if (!r.allowed) {
-        return res.status(403).json({
-          error: `Your ${r.plan.toUpperCase()} plan allows ${r.limits.instagramAccounts} Instagram account${r.limits.instagramAccounts === 1 ? '' : 's'}. Upgrade to connect more.`
-        });
+        const errorMsg = `Your ${r.plan.toUpperCase()} plan allows ${r.limits.instagramAccounts} Instagram account${r.limits.instagramAccounts === 1 ? '' : 's'}. Upgrade to connect more.`;
+        return res.redirect(`/instagram-accounts.html?instagram_error=${encodeURIComponent(errorMsg)}`);
       }
       next();
     } catch (e) {
