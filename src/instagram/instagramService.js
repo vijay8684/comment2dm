@@ -44,14 +44,70 @@ function metaErrorMessage(data, fallback) {
 
 async function exchangeCode(code) {
   ensureConfiguration();
+  const cleanCode = typeof code === 'string' ? code.replace(/#_.*$/, '').replace(/#$/, '').trim() : code;
 
-  // Attempt 1: Meta Unified Login exchange via graph.facebook.com
+  // Primary: api.instagram.com exchange (Direct Instagram Login)
+  try {
+    const params = new URLSearchParams();
+    params.set('client_id', process.env.META_APP_ID);
+    params.set('client_secret', process.env.META_APP_SECRET);
+    params.set('grant_type', 'authorization_code');
+    params.set('redirect_uri', process.env.META_REDIRECT_URI);
+    params.set('code', cleanCode);
+
+    const response = await fetch('https://api.instagram.com/oauth/access_token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString()
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (response.ok && data.access_token) {
+      console.log('Successfully exchanged code via api.instagram.com for user:', data.user_id);
+      
+      // Exchange for 60-day long-lived token via graph.instagram.com
+      try {
+        const longLivedUrl = new URL('https://graph.instagram.com/access_token');
+        longLivedUrl.searchParams.set('grant_type', 'ig_exchange_token');
+        longLivedUrl.searchParams.set('client_secret', process.env.META_APP_SECRET);
+        longLivedUrl.searchParams.set('access_token', data.access_token);
+
+        const longLivedResponse = await fetch(longLivedUrl);
+        const longLivedData = await longLivedResponse.json().catch(() => ({}));
+
+        if (longLivedResponse.ok && longLivedData.access_token) {
+          console.log('Successfully exchanged for 60-day long-lived Instagram token.');
+          return {
+            accessToken: longLivedData.access_token,
+            expiresIn: Number(longLivedData.expires_in) || (60 * 86400),
+            userId: data.user_id ? String(data.user_id) : undefined
+          };
+        }
+      } catch (longLivedErr) {
+        console.warn('Long-lived token exchange warning:', longLivedErr.message);
+      }
+
+      // Return short-lived token if long-lived exchange failed
+      return {
+        accessToken: data.access_token,
+        expiresIn: Number(data.expires_in) || (60 * 86400),
+        userId: data.user_id ? String(data.user_id) : undefined
+      };
+    } else {
+      console.warn('api.instagram.com exchange failed, attempting graph.facebook.com fallback:', metaErrorMessage(data, 'Unknown'));
+    }
+  } catch (err) {
+    console.warn('api.instagram.com exchange notice:', err.message);
+  }
+
+  // Fallback: Meta Unified Login exchange via graph.facebook.com
   try {
     const fbUrl = new URL(`https://graph.facebook.com/${apiVersion}/oauth/access_token`);
     fbUrl.searchParams.set('client_id', process.env.META_APP_ID);
     fbUrl.searchParams.set('client_secret', process.env.META_APP_SECRET);
     fbUrl.searchParams.set('redirect_uri', process.env.META_REDIRECT_URI);
-    fbUrl.searchParams.set('code', code);
+    fbUrl.searchParams.set('code', cleanCode);
 
     const fbResponse = await fetch(fbUrl);
     const fbData = await fbResponse.json().catch(() => ({}));
@@ -62,46 +118,18 @@ async function exchangeCode(code) {
         expiresIn: Number(fbData.expires_in) || (60 * 86400)
       };
     }
-  } catch (err) {
-    console.warn('Unified Login exchange notice:', err.message);
-  }
 
-  // Attempt 2: api.instagram.com exchange
-  const form = new FormData();
-  form.set('client_id', process.env.META_APP_ID);
-  form.set('client_secret', process.env.META_APP_SECRET);
-  form.set('grant_type', 'authorization_code');
-  form.set('redirect_uri', process.env.META_REDIRECT_URI);
-  form.set('code', code);
-
-  const response = await fetch('https://api.instagram.com/oauth/access_token', { method: 'POST', body: form });
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok || !data.access_token) {
-    const error = new Error(`Instagram code exchange failed (HTTP ${response.status}): ${metaErrorMessage(data, 'No access token returned.')}`);
+    const error = new Error(`Instagram code exchange failed: ${metaErrorMessage(fbData, 'No access token returned.')}`);
     error.statusCode = 502;
     error.stage = 'code_exchange';
-    error.metaError = data.error;
+    error.metaError = fbData.error;
     throw error;
-  }
-
-  const longLivedUrl = new URL('https://graph.instagram.com/access_token');
-  longLivedUrl.searchParams.set('grant_type', 'ig_exchange_token');
-  longLivedUrl.searchParams.set('client_secret', process.env.META_APP_SECRET);
-  longLivedUrl.searchParams.set('access_token', data.access_token);
-
-  const longLivedResponse = await fetch(longLivedUrl);
-  const longLivedData = await longLivedResponse.json().catch(() => ({}));
-
-  if (!longLivedResponse.ok || !longLivedData.access_token) {
-    const error = new Error(`Instagram long-lived token exchange failed (HTTP ${longLivedResponse.status}): ${metaErrorMessage(longLivedData, 'No long-lived access token returned.')}`);
+  } catch (err) {
+    if (err.statusCode) throw err;
+    const error = new Error(`Instagram code exchange network error: ${err.message}`);
     error.statusCode = 502;
-    error.stage = 'long_lived_exchange';
-    error.metaError = longLivedData.error;
     throw error;
   }
-
-  return { accessToken: longLivedData.access_token, expiresIn: Number(longLivedData.expires_in) || 0 };
 }
 
 async function fetchProfile(accessToken) {
@@ -111,8 +139,21 @@ async function fetchProfile(accessToken) {
     profileUrl.searchParams.set('fields', 'user_id,username,name,profile_picture_url,followers_count,id');
     profileUrl.searchParams.set('access_token', accessToken);
 
-    const response = await fetch(profileUrl);
-    const data = await response.json().catch(() => ({}));
+    let response = await fetch(profileUrl);
+    let data = await response.json().catch(() => ({}));
+
+    // If extended fields failed (e.g. followers_count not available), retry with basic id,username
+    if (!response.ok || (!data.user_id && !data.id)) {
+      const basicUrl = new URL(`https://graph.instagram.com/${apiVersion}/me`);
+      basicUrl.searchParams.set('fields', 'id,username');
+      basicUrl.searchParams.set('access_token', accessToken);
+      const basicRes = await fetch(basicUrl);
+      const basicData = await basicRes.json().catch(() => ({}));
+      if (basicRes.ok && (basicData.user_id || basicData.id)) {
+        data = basicData;
+        response = basicRes;
+      }
+    }
 
     if (response.ok && (data.user_id || data.id)) {
       console.log('Successfully fetched profile via direct Instagram API:', data.username, data.user_id || data.id);
