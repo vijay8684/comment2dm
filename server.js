@@ -140,23 +140,26 @@ function verifyJwt(token) {
 
 const AUTH_SESSION_DAYS = 60; // 60 days persistent login
 const AUTH_SESSION_MS = AUTH_SESSION_DAYS * 24 * 60 * 60 * 1000;
+const SESSION_COOKIE_MS = 24 * 60 * 60 * 1000; // 1-day standard session if remember is false
 
-function sessionCookieOptions() {
+function sessionCookieOptions(remember = true) {
+  const maxAge = remember ? AUTH_SESSION_MS : SESSION_COOKIE_MS;
   return {
     httpOnly: true,
     sameSite: 'lax',
     secure: isProduction,
-    maxAge: AUTH_SESSION_MS,
-    expires: new Date(Date.now() + AUTH_SESSION_MS),
+    maxAge: maxAge,
+    expires: new Date(Date.now() + maxAge),
     path: '/'
   };
 }
 
-async function setAuthCookie(response, user) {
-  const expiresAt = new Date(Date.now() + AUTH_SESSION_MS);
+async function setAuthCookie(response, user, remember = true) {
+  const maxAge = remember ? AUTH_SESSION_MS : SESSION_COOKIE_MS;
+  const expiresAt = new Date(Date.now() + maxAge);
   const sessionToken = await authService.createSession(user.id, expiresAt);
-  response.cookie('nudge_session', sessionToken, sessionCookieOptions());
-  response.cookie('comment2dm_session', sessionToken, sessionCookieOptions());
+  response.cookie('nudge_session', sessionToken, sessionCookieOptions(remember));
+  response.cookie('comment2dm_session', sessionToken, sessionCookieOptions(remember));
   return sessionToken;
 }
 
@@ -220,31 +223,131 @@ function requireAdmin(request, response, next) {
 
 app.post('/api/auth/signup', loginRateLimit, async (request, response, next) => {
   try {
-    const validationError = validateCredentials(request.body, true);
+    const { name, email, password, terms } = request.body || {};
+    if (!terms) {
+      return response.status(400).json({ error: 'You must agree to the Terms of Service and Privacy Policy.' });
+    }
+    const validationError = validateCredentials({ name, email, password }, true);
     if (validationError) return response.status(400).json({ error: validationError });
-    const user = await authService.register({
-      name: request.body.name.trim(),
-      email: request.body.email.trim().toLowerCase(),
-      password: request.body.password
+
+    const result = await authService.register({
+      name: String(name).trim(),
+      email: String(email).trim().toLowerCase(),
+      password: String(password)
     });
-    const sessionToken = await setAuthCookie(response, user);
-    return response.status(201).json({ user, sessionToken });
+    return response.status(200).json(result);
   } catch (error) {
+    if (error.statusCode) {
+      return response.status(error.statusCode).json({ error: error.message });
+    }
+    return next(error);
+  }
+});
+
+app.post('/api/auth/verify-otp', loginRateLimit, async (request, response, next) => {
+  try {
+    const { email, otp, remember } = request.body || {};
+    if (!email || !otp) {
+      return response.status(400).json({ error: 'Email and 6-digit verification code are required.' });
+    }
+    const user = await authService.verifySignupOtp({ email, otp });
+    const sessionToken = await setAuthCookie(response, user, remember !== false);
+    return response.json({ success: true, user, sessionToken });
+  } catch (error) {
+    if (error.statusCode) {
+      return response.status(error.statusCode).json({ error: error.message });
+    }
+    return next(error);
+  }
+});
+
+app.post('/api/auth/resend-otp', loginRateLimit, async (request, response, next) => {
+  try {
+    const { email, type } = request.body || {};
+    if (!email) {
+      return response.status(400).json({ error: 'Email address is required.' });
+    }
+    const result = await authService.resendOtp({ email, type });
+    return response.json(result);
+  } catch (error) {
+    if (error.statusCode) {
+      return response.status(error.statusCode).json({ error: error.message });
+    }
     return next(error);
   }
 });
 
 app.post('/api/auth/login', loginRateLimit, async (request, response, next) => {
   try {
-    const validationError = validateCredentials(request.body, false);
+    const { email, password, remember } = request.body || {};
+    const validationError = validateCredentials({ email, password }, false);
     if (validationError) return response.status(400).json({ error: validationError });
+
     const user = await authService.authenticate(
-      request.body.email.trim().toLowerCase(),
-      request.body.password
+      String(email).trim().toLowerCase(),
+      String(password)
     );
-    const sessionToken = await setAuthCookie(response, user);
+    const sessionToken = await setAuthCookie(response, user, remember !== false);
     return response.json({ user, sessionToken });
   } catch (error) {
+    if (error.statusCode === 403 && error.requireVerification) {
+      return response.status(403).json({
+        error: error.message,
+        requireVerification: true,
+        email: error.email
+      });
+    }
+    if (error.statusCode) {
+      return response.status(error.statusCode).json({ error: error.message });
+    }
+    return next(error);
+  }
+});
+
+app.post('/api/auth/forgot-password', loginRateLimit, async (request, response, next) => {
+  try {
+    const { email } = request.body || {};
+    if (!email) {
+      return response.status(400).json({ error: 'Please enter your email address.' });
+    }
+    const result = await authService.requestPasswordReset(email);
+    return response.json(result);
+  } catch (error) {
+    if (error.statusCode) {
+      return response.status(error.statusCode).json({ error: error.message });
+    }
+    return next(error);
+  }
+});
+
+app.post('/api/auth/verify-reset-otp', loginRateLimit, async (request, response, next) => {
+  try {
+    const { email, otp } = request.body || {};
+    if (!email || !otp) {
+      return response.status(400).json({ error: 'Email and 6-digit verification code are required.' });
+    }
+    const result = await authService.verifyPasswordResetOtp({ email, otp });
+    return response.json(result);
+  } catch (error) {
+    if (error.statusCode) {
+      return response.status(error.statusCode).json({ error: error.message });
+    }
+    return next(error);
+  }
+});
+
+app.post('/api/auth/reset-password', loginRateLimit, async (request, response, next) => {
+  try {
+    const { resetToken, newPassword } = request.body || {};
+    if (!resetToken || !newPassword) {
+      return response.status(400).json({ error: 'Reset token and new password are required.' });
+    }
+    const result = await authService.resetPasswordWithToken({ resetToken, newPassword });
+    return response.json(result);
+  } catch (error) {
+    if (error.statusCode) {
+      return response.status(error.statusCode).json({ error: error.message });
+    }
     return next(error);
   }
 });

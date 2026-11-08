@@ -27,7 +27,8 @@ function collections() {
     payments: database.collection('payments'),
     billing_plans: database.collection('billing_plans'),
     coupons: database.collection('coupons'),
-    subscriptions: database.collection('subscriptions')
+    subscriptions: database.collection('subscriptions'),
+    otps: database.collection('otps')
   };
 }
 
@@ -138,7 +139,10 @@ async function initialize() {
     rateLimits.createIndex({ expires_at: 1 }, { expireAfterSeconds: 0, name: 'rate_limits_ttl' }),
     // Sessions auto-expire:
     sessions.createIndex({ token_hash: 1 }, { unique: true, name: 'sessions_token_unique' }),
-    sessions.createIndex({ expires_at: 1 }, { expireAfterSeconds: 0, name: 'sessions_expires_ttl' })
+    sessions.createIndex({ expires_at: 1 }, { expireAfterSeconds: 0, name: 'sessions_expires_ttl' }),
+    // OTPs auto-expire:
+    collections().otps.createIndex({ expires_at: 1 }, { expireAfterSeconds: 0, name: 'otps_expires_ttl' }),
+    collections().otps.createIndex({ email: 1, type: 1 }, { name: 'otps_email_type' })
   ]);
 
   await migrateJsonData().catch((err) => console.warn('JSON migration notice:', err.message));
@@ -584,6 +588,22 @@ async function updateUserProfile(userId, { name, email, phone, avatarUrl }) {
   return users.updateOne({ id: userId }, { $set: update });
 }
 
+async function markUserVerified(email) {
+  const { users } = collections();
+  return users.updateOne(
+    { email: String(email).trim().toLowerCase() },
+    { $set: { email_verified: true, verified_at: new Date().toISOString(), updated_at: new Date().toISOString() } }
+  );
+}
+
+async function updateUserPasswordByEmail(email, passwordHash) {
+  const { users } = collections();
+  return users.updateOne(
+    { email: String(email).trim().toLowerCase() },
+    { $set: { password_hash: passwordHash, updated_at: new Date().toISOString() } }
+  );
+}
+
 async function deleteUserAccount(userId) {
   const { users, instagramAccounts, automations, automationEvents, sessions } = collections();
   await Promise.allSettled([
@@ -676,6 +696,8 @@ module.exports = {
   getUserByEmail,
   listUsers,
   updateUserPassword,
+  updateUserPasswordByEmail,
+  markUserVerified,
   updateUserProfile,
   deleteUserAccount,
   getInstagramAccounts,
