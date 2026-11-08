@@ -82,50 +82,109 @@
          LEFT SIDE: PRODUCT SHOWCASE
          ============================================== -->
     <aside class="auth-showcase-side">
-      <div style="max-width: 480px;">
-        <span class="badge badge-accent" style="margin-bottom: 20px; display: inline-flex;">Next-Gen Creator Automation</span>
-        <h1 style="font-size: 2.2rem; line-height: 1.25; margin-bottom: 16px; font-weight: 800; color: var(--text-primary);">
-          Turn every Instagram comment into a <span class="brand-gradient-text">direct sale</span>.
-        </h1>
-        <p style="color: var(--text-secondary); font-size: 1.05rem; line-height: 1.6; margin-bottom: 36px;">
-          When viewers comment on your Reels, Comment2DM instantly replies to their comment and delivers your links, guides, or discount codes straight to their private DMs.
-        </p>
+      <!-- Soft ambient violet/lavender glow positioned behind the card -->
+      <div class="auth-showcase-ambient-glow" aria-hidden="true"></div>
 
-        <!-- Live Instagram Automation Preview Card -->
-        <div style="padding: 24px; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); box-shadow: var(--shadow-card);">
-          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
-            <div style="width: 38px; height: 38px; border-radius: 50%; background: var(--grad-brand); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 0.9rem;">M</div>
-            <div>
-              <strong style="font-size: 0.92rem; color: var(--text-primary); display: block;">maya.creator</strong>
-              <small style="color: var(--text-dim);">Commented on Reel "5 AI Tools" · 2s ago</small>
+      <div class="auth-showcase-content">
+        <div>
+          <span class="badge badge-accent" style="margin-bottom: 16px; display: inline-flex;">Next-Gen Creator Automation</span>
+          <h1 style="font-size: clamp(1.75rem, 2.2vw, 2.1rem); line-height: 1.25; margin-bottom: 12px; font-weight: 800; color: var(--text-primary);">
+            Turn every Instagram comment into a <span class="brand-gradient-text">direct sale</span>.
+          </h1>
+          <p style="color: var(--text-secondary); font-size: 0.96rem; line-height: 1.55; margin-bottom: 24px;">
+            When viewers comment on your Reels, Comment2DM instantly replies to their comment and delivers your links, guides, or discount codes straight to their private DMs.
+          </p>
+
+          <!-- Live Instagram Automation Preview Card (Matching Landing Page Preview Card) -->
+          <div class="hero-visual-card auth-showcase-card">
+
+            <!-- Creator Profile Bar -->
+            <div class="visual-topbar">
+              <div class="creator-profile">
+                <div class="creator-avatar-wrap">
+                  <div class="creator-avatar">MC</div>
+                </div>
+                <div class="creator-meta">
+                  <div class="creator-name">
+                    <span>maya.creator</span>
+                    <svg class="verified-badge" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-label="Verified">
+                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                    </svg>
+                  </div>
+                  <span class="creator-sub">Reel "5 AI Tools" · 2s ago</span>
+                </div>
+              </div>
+              <div class="live-status-pill">
+                <span class="status-dot-pulse"></span>
+                <span>Active Rule</span>
+              </div>
             </div>
-          </div>
 
-          <div style="background: var(--bg-elevated); border-radius: 12px; padding: 12px 14px; font-size: 0.88rem; margin-bottom: 12px; color: var(--text-primary); border: 1px solid var(--border-subtle);">
-            💬 "Dropped <strong>LINK</strong> — can you send over the free guide?"
-          </div>
+            <!-- Detected Comment Snippet -->
+            <div class="reel-preview-box" style="margin-bottom: 12px;">
+              <div class="reel-header-row">
+                <span class="reel-tag">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                  Detected Comment
+                </span>
+                <span class="reel-stats">Instant Match</span>
+              </div>
+              <p class="reel-caption-quote" style="margin-bottom: 0;">
+                "Dropped <span class="target-keyword">LINK</span> 🚀 can you send over the free guide?"
+              </p>
+            </div>
 
-          <div style="font-size: 0.8rem; color: var(--accent-emerald); display: flex; align-items: center; gap: 6px; margin-bottom: 12px; padding-left: 4px; font-weight: 600;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="20 6 9 17 4 12"></polyline>
-            </svg>
-            <span>Auto-triggered keyword:</span> <strong>LINK</strong>
-          </div>
+            <!-- Auto-Triggered Keyword Badge -->
+            <div style="font-size: 0.8rem; color: var(--accent-emerald); display: flex; align-items: center; gap: 6px; margin-bottom: 10px; padding-left: 2px; font-weight: 600;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+              <span>Auto-triggered keyword:</span> <span class="keyword-badge">LINK</span>
+            </div>
 
-          <div style="background: rgba(118, 85, 217, 0.1); border-left: 3px solid var(--accent-violet); border-radius: 0 12px 12px 0; padding: 12px 14px; font-size: 0.86rem; color: var(--text-primary);">
-            📩 <strong>Private DM Sent:</strong> "Hey Maya! Here is your VIP link: <u style="color:var(--accent-violet-bright);">comment2dm.com/guide</u> 🔥"
-          </div>
+            <!-- Animated Automation Bridge -->
+            <div class="automation-flow-bridge" style="padding: 2px 0 10px;">
+              <div class="flow-pulse-line"></div>
+              <span style="font-size: 0.72rem; letter-spacing: 0.04em;">COMMENT2DM WEBHOOK PROCESSING</span>
+              <div class="flow-pulse-line"></div>
+            </div>
 
-          <div style="font-size: 0.76rem; color: var(--text-dim); margin-top: 12px; text-align: right;">
-            ⚡ Replied in 1.2 seconds • 100% Meta compliant
+            <!-- Simulated DM Message Bubble -->
+            <div class="dm-preview-card" style="margin-bottom: 12px;">
+              <div class="dm-card-header">
+                <div class="dm-recipient">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                  <span>Direct Message · Automated</span>
+                </div>
+                <span style="font-size: 0.74rem; color: var(--text-dim);">To @maya.creator</span>
+              </div>
+
+              <div class="dm-speech-bubble" style="margin-bottom: 8px;">
+                Hey Maya! 👋 Here is your VIP link: <u style="color:var(--accent-violet-bright); text-decoration:none; font-weight:600;">comment2dm.com/guide</u> 🔥
+              </div>
+
+              <div class="dm-delivery-receipt">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+                <span>Delivered in 1.1s via Comment2DM</span>
+              </div>
+            </div>
+
+            <!-- Speed & Compliance Note -->
+            <div style="font-size: 0.76rem; color: var(--text-dim); display: flex; align-items: center; justify-content: space-between; padding-top: 2px;">
+              <span>⚡ Replied in 1.2 seconds</span>
+              <span>✓ 100% Meta compliant</span>
+            </div>
+
           </div>
         </div>
-      </div>
 
-      <div style="color: var(--text-dim); font-size: 0.84rem; display: flex; gap: 24px; padding-top: 24px; border-top: 1px solid var(--border-subtle); font-weight: 500;">
-        <span>🔒 AES-256 GCM Encrypted</span>
-        <span>⚡ Official Meta Graph API</span>
-        <span>💎 Free Tier Forever</span>
+        <div class="auth-showcase-trust-bar">
+          <span>🔒 AES-256 GCM Encrypted</span>
+          <span>⚡ Official Meta Graph API</span>
+          <span>💎 Free Tier Forever</span>
+        </div>
       </div>
     </aside>
 
