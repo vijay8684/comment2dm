@@ -717,6 +717,9 @@ function keywordMatches(commentText, keyword, triggerType) {
   return keywords.some(kw => cleanComment.includes(kw));
 }
 
+// In-memory set to deduplicate concurrent webhook comment deliveries
+const processingCommentIds = new Set();
+
 app.post('/api/instagram/webhook', async (request, response) => {
   response.status(200).json({ status: 'ok' });
 
@@ -751,119 +754,162 @@ app.post('/api/instagram/webhook', async (request, response) => {
 
         if (!commentId || !commentText || !recipientIgUserId) continue;
 
-        // Duplicate prevention
+        const fromId = String(commentVal.from?.id || '');
+        const fromUsername = String(commentVal.from?.username || '').toLowerCase();
+
+        // 1. DEDUP & LOOP PREVENTION: Ignore comments posted by the Instagram account itself (prevents bot self-reply loop)
+        if (fromId && fromId === recipientIgUserId) {
+          console.log(`[DEDUP] Skipping comment ${commentId}: posted by account itself (${recipientIgUserId}).`);
+          continue;
+        }
+
+        // 2. DEDUP: Ignore comment replies (only respond to root comments on reels, never replies to comments)
+        if (commentVal.parent_id) {
+          console.log(`[DEDUP] Skipping comment reply ${commentId}: it is a reply to parent comment ${commentVal.parent_id}.`);
+          continue;
+        }
+
+        // 3. CONCURRENCY LOCK: Skip if already being processed in-memory right now
+        if (processingCommentIds.has(commentId)) {
+          console.log(`[DEDUP] Skipping comment ${commentId}: currently being processed in memory.`);
+          continue;
+        }
+
+        // 4. DB DEDUPLICATION: Check if comment was already logged or replied to
         const existingEvent = await db.get('SELECT event_id FROM webhook_events WHERE event_id = ?', [commentId]);
         if (existingEvent) {
-          console.log(`Skipping duplicate comment event ${commentId}`);
+          console.log(`[DEDUP] Skipping duplicate comment event ${commentId} (already in webhook_events).`);
           continue;
         }
 
-        await db.run('INSERT OR IGNORE INTO webhook_events (event_id, processed_at) VALUES (?, ?)', [
-          commentId,
-          new Date().toISOString()
-        ]);
-
-        const automations = await db.all(
-          'SELECT * FROM automations WHERE instagram_user_id = ? AND enabled = 1',
-          [recipientIgUserId]
-        );
-
-        let activeAutomations = automations || [];
-        if (activeAutomations.length === 0 && db.collections) {
-          activeAutomations = await db.collections().automations.find({ enabled: { $in: [true, 1, '1'] } }).toArray();
+        if (db.collections && db.collections().automationEvents) {
+          const alreadyDone = await db.collections().automationEvents.findOne({
+            comment_id: commentId,
+            status: 'success'
+          });
+          if (alreadyDone) {
+            console.log(`[DEDUP] Skipping comment ${commentId}: already successfully replied.`);
+            continue;
+          }
         }
 
-        if (activeAutomations.length === 0) {
-          console.log(`No active automations found for Instagram account ${recipientIgUserId}`);
-          continue;
-        }
+        processingCommentIds.add(commentId);
+        try {
+          await db.run('INSERT OR IGNORE INTO webhook_events (event_id, processed_at) VALUES (?, ?)', [
+            commentId,
+            new Date().toISOString()
+          ]);
 
-        const commentMediaId = String(commentVal.media?.id || commentVal.media_id || commentVal.mediaId || '');
+          const automations = await db.all(
+            'SELECT * FROM automations WHERE instagram_user_id = ? AND enabled = 1',
+            [recipientIgUserId]
+          );
 
-        const fromUsername = commentVal.from?.username || '';
-        const fromId = commentVal.from?.id || '';
-
-        for (const auto of activeAutomations) {
-          // If automation is specific to one reel, check media ID
-          if (auto.media_id && commentMediaId) {
-            const autoMediaIdStr = String(auto.media_id);
-            if (!commentMediaId.includes(autoMediaIdStr) && !autoMediaIdStr.includes(commentMediaId)) {
-              continue;
-            }
+          let activeAutomations = automations || [];
+          if (activeAutomations.length === 0 && db.collections) {
+            activeAutomations = await db.collections().automations.find({
+              instagram_user_id: recipientIgUserId,
+              enabled: { $in: [true, 1, '1'] }
+            }).toArray();
           }
 
-          if (keywordMatches(commentText, auto.keyword, auto.trigger_type)) {
-            console.log(`Matched automation ${auto.id} for comment "${commentText}" (ID: ${commentId}). Sending replies...`);
-            try {
-              const tokenData = await instagramService.getDecryptedTokenByInstagramUserId(recipientIgUserId, auto.owner_user_id);
+          if (activeAutomations.length === 0) {
+            console.log(`No active automations found for Instagram account ${recipientIgUserId}`);
+            continue;
+          }
 
-              // 1. Send Private DM
-              await instagramService.sendPrivateReply(
-                recipientIgUserId,
-                commentId,
-                auto.dm_message,
-                tokenData.accessToken
-              );
+          const commentMediaId = String(commentVal.media?.id || commentVal.media_id || commentVal.mediaId || '');
 
-              // 2. Send Public Comment Reply (if configured)
-              if (auto.reply_template) {
-                await instagramService.replyToComment(
+          for (const auto of activeAutomations) {
+            // If automation is specific to one reel, check media ID
+            if (auto.media_id && commentMediaId) {
+              const autoMediaIdStr = String(auto.media_id);
+              if (!commentMediaId.includes(autoMediaIdStr) && !autoMediaIdStr.includes(commentMediaId)) {
+                continue;
+              }
+            }
+
+            if (keywordMatches(commentText, auto.keyword, auto.trigger_type)) {
+              console.log(`Matched automation ${auto.id} for comment "${commentText}" (ID: ${commentId}). Sending replies...`);
+              try {
+                const tokenData = await instagramService.getDecryptedTokenByInstagramUserId(recipientIgUserId, auto.owner_user_id);
+
+                // 1. Send Private DM
+                await instagramService.sendPrivateReply(
+                  recipientIgUserId,
                   commentId,
-                  auto.reply_template,
+                  auto.dm_message,
                   tokenData.accessToken
                 );
+
+                // 2. Send Public Comment Reply (if configured)
+                if (auto.reply_template) {
+                  await instagramService.replyToComment(
+                    commentId,
+                    auto.reply_template,
+                    tokenData.accessToken
+                  );
+                }
+
+                if (db.collections && db.collections().automationEvents) {
+                  await db.collections().automationEvents.insertOne({
+                    event_id: crypto.randomUUID(),
+                    owner_user_id: auto.owner_user_id,
+                    instagram_user_id: recipientIgUserId,
+                    automation_id: auto.id,
+                    comment_id: commentId,
+                    from_username: fromUsername,
+                    from_id: fromId,
+                    comment_text: commentText,
+                    event_type: 'private_reply',
+                    keyword: auto.keyword,
+                    message_text: auto.dm_message,
+                    status: 'success',
+                    created_at: new Date().toISOString()
+                  });
+                } else {
+                  await db.run(
+                    'INSERT INTO automation_events (owner_user_id, instagram_user_id, automation_id, comment_id, event_type, keyword, message_text, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [auto.owner_user_id, recipientIgUserId, auto.id, commentId, 'private_reply', auto.keyword, auto.dm_message, 'success', new Date().toISOString()]
+                  );
+                }
+                console.log(`Successfully sent DM & reply for comment ID ${commentId}`);
+              } catch (apiErr) {
+                if (db.collections && db.collections().automationEvents) {
+                  await db.collections().automationEvents.insertOne({
+                    event_id: crypto.randomUUID(),
+                    owner_user_id: auto.owner_user_id,
+                    instagram_user_id: recipientIgUserId,
+                    automation_id: auto.id,
+                    comment_id: commentId,
+                    from_username: fromUsername,
+                    from_id: fromId,
+                    comment_text: commentText,
+                    event_type: 'private_reply',
+                    keyword: auto.keyword,
+                    message_text: auto.dm_message,
+                    status: 'failed',
+                    error_message: apiErr.message,
+                    created_at: new Date().toISOString()
+                  });
+                } else {
+                  await db.run(
+                    'INSERT INTO automation_events (owner_user_id, instagram_user_id, automation_id, comment_id, event_type, keyword, message_text, status, error_message, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [auto.owner_user_id, recipientIgUserId, auto.id, commentId, 'private_reply', auto.keyword, auto.dm_message, 'failed', apiErr.message, new Date().toISOString()]
+                  );
+                }
+                console.error(`Failed to execute automation for comment ${commentId}:`, apiErr.message);
               }
 
-              if (db.collections && db.collections.automationEvents) {
-                await db.collections.automationEvents.insertOne({
-                  event_id: crypto.randomUUID(),
-                  owner_user_id: auto.owner_user_id,
-                  instagram_user_id: recipientIgUserId,
-                  automation_id: auto.id,
-                  comment_id: commentId,
-                  from_username: fromUsername,
-                  from_id: fromId,
-                  comment_text: commentText,
-                  event_type: 'private_reply',
-                  keyword: auto.keyword,
-                  message_text: auto.dm_message,
-                  status: 'success',
-                  created_at: new Date().toISOString()
-                });
-              } else {
-                await db.run(
-                  'INSERT INTO automation_events (owner_user_id, instagram_user_id, automation_id, comment_id, event_type, keyword, message_text, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                  [auto.owner_user_id, recipientIgUserId, auto.id, commentId, 'private_reply', auto.keyword, auto.dm_message, 'success', new Date().toISOString()]
-                );
-              }
-              console.log(`Successfully sent DM & reply for comment ID ${commentId}`);
-            } catch (apiErr) {
-              if (db.collections && db.collections.automationEvents) {
-                await db.collections.automationEvents.insertOne({
-                  event_id: crypto.randomUUID(),
-                  owner_user_id: auto.owner_user_id,
-                  instagram_user_id: recipientIgUserId,
-                  automation_id: auto.id,
-                  comment_id: commentId,
-                  from_username: fromUsername,
-                  from_id: fromId,
-                  comment_text: commentText,
-                  event_type: 'private_reply',
-                  keyword: auto.keyword,
-                  message_text: auto.dm_message,
-                  status: 'failed',
-                  error_message: apiErr.message,
-                  created_at: new Date().toISOString()
-                });
-              } else {
-                await db.run(
-                  'INSERT INTO automation_events (owner_user_id, instagram_user_id, automation_id, comment_id, event_type, keyword, message_text, status, error_message, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                  [auto.owner_user_id, recipientIgUserId, auto.id, commentId, 'private_reply', auto.keyword, auto.dm_message, 'failed', apiErr.message, new Date().toISOString()]
-                );
-              }
-              console.error(`Failed to execute automation for comment ${commentId}:`, apiErr.message);
+              // CRITICAL: Stop after matching first automation so multiple rules do not fire on the same comment
+              break;
             }
           }
+        } finally {
+          // Release in-memory lock after 60 seconds (absorbs rapid re-deliveries from Meta)
+          setTimeout(() => {
+            processingCommentIds.delete(commentId);
+          }, 60000);
         }
       }
     }
@@ -879,7 +925,9 @@ app.post('/api/instagram/webhook', async (request, response) => {
 app.get('/api/analytics/overview', requireAuth, async (request, response, next) => {
   try {
     const ownerId = request.user.id;
-    const [accounts, activeAutomations, totals, recent, daily] = await Promise.all([
+    const days = parseInt(request.query.days, 10) || 30;
+
+    let [accounts, activeAutomations, totals, recent, daily] = await Promise.all([
       db.get('SELECT COUNT(*) AS count FROM instagram_accounts WHERE owner_user_id = ?', [ownerId]),
       db.get('SELECT COUNT(*) AS count FROM automations WHERE owner_user_id = ? AND enabled = 1', [ownerId]),
       db.get(`SELECT
@@ -898,19 +946,64 @@ app.get('/api/analytics/overview', requireAuth, async (request, response, next) 
         GROUP BY substr(created_at,1,10) ORDER BY date ASC`, [ownerId])
     ]);
 
-    const sent = Number(totals?.messagesSent || 0);
-    const failed = Number(totals?.messagesFailed || 0);
+    let sent = Number(totals?.messagesSent || 0);
+    let failed = Number(totals?.messagesFailed || 0);
+    let commentsCount = Number(totals?.comments || 0);
+
+    // If MongoDB collection is directly accessible, compute exact real-time metrics
+    let leaderboard = [];
+    if (db.collections && db.collections().automationEvents) {
+      const col = db.collections().automationEvents;
+      const countSent = await col.countDocuments({ owner_user_id: ownerId, status: 'success' });
+      const countFailed = await col.countDocuments({ owner_user_id: ownerId, status: 'failed' });
+      const distinctComments = await col.distinct('comment_id', { owner_user_id: ownerId });
+      
+      sent = countSent;
+      failed = countFailed;
+      commentsCount = distinctComments.length || countSent;
+
+      // Build automation leaderboard
+      if (db.collections().automations) {
+        const userAutos = await db.collections().automations.find({ owner_user_id: ownerId }).toArray();
+        for (const auto of userAutos) {
+          const autoSent = await col.countDocuments({ automation_id: auto.id, status: 'success' });
+          const autoFailed = await col.countDocuments({ automation_id: auto.id, status: 'failed' });
+          leaderboard.push({
+            id: auto.id,
+            name: auto.keyword ? `Keyword: ${auto.keyword}` : 'All Comments',
+            account: auto.username || 'Connected Account',
+            sent: autoSent,
+            total: autoSent + autoFailed,
+            active: Boolean(auto.enabled)
+          });
+        }
+      }
+    }
+
     const totalDMs = sent + failed;
     const deliveryRate = totalDMs > 0 ? Math.round((sent / totalDMs) * 100) : 100;
 
+    // Build daily array for bar chart ({ date, count })
+    const dailyDms = (daily && daily.length > 0)
+      ? daily.map(d => ({ date: d.date, count: Number(d.messagesSent || d.count || 0) }))
+      : [];
+
     return response.json({
-      accounts: accounts?.count || 0,
+      // Fields expected by analytics.js frontend
+      dmsSent: sent,
+      commentsProcessed: commentsCount,
+      failed,
+      deliveryRate,
       activeAutomations: activeAutomations?.count || 0,
-      comments: Number(totals?.comments || 0),
+      dailyDms,
+      automations: leaderboard,
+
+      // Fields for legacy compatibility
+      accounts: accounts?.count || 0,
+      comments: commentsCount,
       messagesSent: sent,
       messagesFailed: failed,
-      successfulEvents: Number(totals?.successfulEvents || 0),
-      deliveryRate,
+      successfulEvents: sent,
       recent: recent || [],
       daily: daily || []
     });
