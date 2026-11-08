@@ -956,11 +956,11 @@ app.get('/api/analytics/overview', requireAuth, async (request, response, next) 
       const col = db.collections().automationEvents;
       const countSent = await col.countDocuments({ owner_user_id: ownerId, status: 'success' });
       const countFailed = await col.countDocuments({ owner_user_id: ownerId, status: 'failed' });
-      const distinctComments = await col.distinct('comment_id', { owner_user_id: ownerId });
+      const totalEvents = await col.countDocuments({ owner_user_id: ownerId });
       
       sent = countSent;
       failed = countFailed;
-      commentsCount = distinctComments.length || countSent;
+      commentsCount = totalEvents;
 
       // Build automation leaderboard
       if (db.collections().automations) {
