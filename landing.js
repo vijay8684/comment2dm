@@ -1,51 +1,15 @@
 /**
- * Comment2DM — Premium Landing Page Interactive Engine
- * Brand: Comment2DM | Operating Company: VI TECH Limited
- * Handles: Theme Toggle, Interactive Product Demo, Pricing Switcher, Mobile Navigation & Smooth Scroll
+ * Comment2DM — Client Interaction Engine
+ * Brand: Comment2DM | Company: VI TECH Limited
+ * Theme: Dark Mode Only
+ * Handles: Interactive Product Demo, Pricing Switcher, Mobile Navigation, Scroll Reveals & Session Check
  */
 
 (function () {
   'use strict';
 
   // ==========================================
-  // 1. THEME TOGGLE & PERSISTENCE
-  // ==========================================
-  const themeToggleBtn = document.getElementById('themeToggleBtn');
-
-  function getPreferredTheme() {
-    const saved = localStorage.getItem('comment2dm_theme');
-    if (saved) return saved;
-    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-  }
-
-  function setTheme(theme) {
-    document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('comment2dm_theme', theme);
-    if (themeToggleBtn) {
-      themeToggleBtn.setAttribute('aria-label', `Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`);
-    }
-  }
-
-  // Initial theme sync
-  setTheme(getPreferredTheme());
-
-  if (themeToggleBtn) {
-    themeToggleBtn.addEventListener('click', () => {
-      const current = document.documentElement.getAttribute('data-theme') || 'dark';
-      const nextTheme = current === 'dark' ? 'light' : 'dark';
-      setTheme(nextTheme);
-    });
-  }
-
-  // Listen for system theme changes if user hasn't explicitly set one
-  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', e => {
-    if (!localStorage.getItem('comment2dm_theme')) {
-      setTheme(e.matches ? 'light' : 'dark');
-    }
-  });
-
-  // ==========================================
-  // 2. HEADER SCROLL & MOBILE MENU
+  // 1. HEADER SCROLL & MOBILE MENU
   // ==========================================
   const header = document.getElementById('siteHeader');
   const hamburgerBtn = document.getElementById('hamburgerBtn');
@@ -66,7 +30,6 @@
       hamburgerBtn.setAttribute('aria-expanded', String(isOpen));
     });
 
-    // Close on mobile link click
     document.querySelectorAll('.mobile-nav-link, .mobile-menu-drawer .btn').forEach(link => {
       link.addEventListener('click', () => {
         hamburgerBtn.classList.remove('open');
@@ -75,7 +38,6 @@
       });
     });
 
-    // Close on Escape key
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape' && mobileMenuDrawer.classList.contains('open')) {
         hamburgerBtn.classList.remove('open');
@@ -87,7 +49,7 @@
   }
 
   // ==========================================
-  // 3. CHECK ACTIVE SESSION FOR HEADER ACTIONS
+  // 2. CHECK ACTIVE SESSION FOR HEADER ACTIONS
   // ==========================================
   async function checkActiveSession() {
     try {
@@ -99,20 +61,10 @@
         if (data.user) {
           const navActions = document.querySelector('.nav-actions');
           if (navActions) {
-            const themeBtnHtml = themeToggleBtn ? themeToggleBtn.outerHTML : '';
             navActions.innerHTML = `
-              ${themeBtnHtml}
               <a href="dashboard.html" class="btn btn-secondary btn-sm">Dashboard</a>
               <a href="settings.html" class="btn btn-primary btn-sm">Account</a>
             `;
-            // Re-attach theme toggle listener
-            const newThemeBtn = document.getElementById('themeToggleBtn');
-            if (newThemeBtn) {
-              newThemeBtn.addEventListener('click', () => {
-                const cur = document.documentElement.getAttribute('data-theme') || 'dark';
-                setTheme(cur === 'dark' ? 'light' : 'dark');
-              });
-            }
           }
         }
       }
@@ -121,15 +73,15 @@
   checkActiveSession();
 
   // ==========================================
-  // 4. INTERACTIVE PRODUCT VISUALIZATION
+  // 3. INTERACTIVE PRODUCT DEMO SIMULATOR
   // ==========================================
   const demoScenarios = [
     {
       keyword: 'GUIDE',
-      user: 'priya_ux',
-      commentText: 'Need this resource for our team! GUIDE 🔥',
-      dmMessage: "Hey Priya! 👋 Thanks for commenting. Here is your direct link to download the 2026 Instagram Growth Playbook:",
-      actionButton: "📥 Download Playbook PDF (Free)"
+      user: 'priya_growth',
+      commentText: 'Send the breakdown please! GUIDE 🔥',
+      dmMessage: "Hey Priya! 👋 Thanks for commenting. Here is your direct link to the 2026 Growth Blueprint:",
+      actionButton: "📥 Download Growth Blueprint PDF (Free)"
     },
     {
       keyword: 'SCALE',
@@ -154,9 +106,7 @@
   const simCommentsContainer = document.getElementById('simCommentsList');
   const simDmBubble = document.getElementById('simDmBubble');
   const simDmRecipient = document.getElementById('simDmRecipient');
-  const simDmActionBtn = document.getElementById('simDmActionBtn');
   const simDeliveryBadge = document.getElementById('simDeliveryBadge');
-  const simFlowPulse = document.getElementById('simFlowPulse');
   const demoKeywordInput = document.getElementById('demoKeywordInput');
   const demoTriggerBtn = document.getElementById('demoTriggerBtn');
   const pauseDemoBtn = document.getElementById('pauseDemoBtn');
@@ -164,33 +114,26 @@
   function renderScenario(scenario, isCustom = false) {
     if (!simCommentsContainer || !simDmBubble) return;
 
-    // Pulse flow bridge
-    if (simFlowPulse) {
-      simFlowPulse.style.opacity = '1';
-    }
-
-    // Update Comment Stream
     const avatarLetter = (scenario.user.charAt(0) || 'U').toUpperCase();
     simCommentsContainer.innerHTML = `
-      <div class="sim-comment-item active-trigger">
+      <div class="sim-comment-bubble active-trigger">
         <div class="sim-comment-avatar">${avatarLetter}</div>
-        <div class="sim-comment-content">
+        <div class="sim-comment-body">
           <span class="sim-comment-user">@${scenario.user}</span>
-          ${scenario.commentText.replace(new RegExp(`(${scenario.keyword})`, 'gi'), '<span class="keyword-badge">$1</span>')}
+          ${scenario.commentText.replace(new RegExp(`(${scenario.keyword})`, 'gi'), '<span class="keyword-tag">$1</span>')}
         </div>
       </div>
-      <div class="sim-comment-item" style="opacity: 0.6;">
-        <div class="sim-comment-avatar" style="background:#553C9A;">M</div>
-        <div class="sim-comment-content">
+      <div class="sim-comment-bubble" style="opacity: 0.5;">
+        <div class="sim-comment-avatar" style="background:#4338ca;">M</div>
+        <div class="sim-comment-body">
           <span class="sim-comment-user">@mark_creator</span>
           <span>Great breakdown on reel conversion rules!</span>
         </div>
       </div>
     `;
 
-    // Animate DM Appearance
     simDmBubble.style.opacity = '0';
-    simDmBubble.style.transform = 'translateY(6px)';
+    simDmBubble.style.transform = 'translateY(4px)';
 
     if (simDmRecipient) {
       simDmRecipient.textContent = `@${scenario.user}`;
@@ -198,24 +141,24 @@
 
     setTimeout(() => {
       simDmBubble.innerHTML = `
-        <p>${scenario.dmMessage}</p>
-        <div class="dm-action-button" id="simDmActionBtn">
+        <p class="dm-message-text">${scenario.dmMessage}</p>
+        <div class="dm-cta-btn">
           <span>${scenario.actionButton}</span>
         </div>
       `;
       simDmBubble.style.opacity = '1';
       simDmBubble.style.transform = 'translateY(0)';
-      simDmBubble.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+      simDmBubble.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
 
       if (simDeliveryBadge) {
         simDeliveryBadge.innerHTML = `
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="20 6 9 17 4 12"></polyline>
           </svg>
           <span>Delivered in 1.1s via Comment2DM</span>
         `;
       }
-    }, 280);
+    }, 240);
   }
 
   function startDemoAutoCycle() {
@@ -228,13 +171,11 @@
     }, 4500);
   }
 
-  // Initial render
   if (simCommentsContainer) {
     renderScenario(demoScenarios[0]);
     startDemoAutoCycle();
   }
 
-  // Custom Keyword Trigger Handler
   if (demoTriggerBtn && demoKeywordInput) {
     demoTriggerBtn.addEventListener('click', () => {
       const word = (demoKeywordInput.value || '').trim().toUpperCase();
@@ -259,35 +200,15 @@
     });
   }
 
-  // Pause / Resume Toggle
   if (pauseDemoBtn) {
     pauseDemoBtn.addEventListener('click', () => {
       isDemoPaused = !isDemoPaused;
-      pauseDemoBtn.textContent = isDemoPaused ? '▶ Resume Demo' : '⏸ Pause';
-      pauseDemoBtn.setAttribute('title', isDemoPaused ? 'Resume auto simulation' : 'Pause auto simulation');
+      pauseDemoBtn.textContent = isDemoPaused ? '▶ Play' : '⏸ Pause';
     });
   }
 
   // ==========================================
-  // 5. HOW IT WORKS PROGRESS LINE OBSERVER
-  // ==========================================
-  const hiwSection = document.getElementById('how-it-works');
-  const lineProgress = document.getElementById('hiwLineProgress');
-
-  if (hiwSection && lineProgress) {
-    const observer = new IntersectionObserver((entries) => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          lineProgress.style.width = '100%';
-        }
-      });
-    }, { threshold: 0.35 });
-
-    observer.observe(hiwSection);
-  }
-
-  // ==========================================
-  // 6. PRICING MONTHLY / ANNUAL TOGGLE
+  // 4. PRICING MONTHLY / ANNUAL SWITCH
   // ==========================================
   const billingCycleSwitch = document.getElementById('billingCycleSwitch');
   const monthlyLabel = document.getElementById('monthlyLabel');
@@ -315,7 +236,6 @@
       if (elitePriceEl) elitePriceEl.textContent = isAnnual ? pricingData.elite.annual : pricingData.elite.monthly;
       if (elitePeriodEl) elitePeriodEl.textContent = isAnnual ? pricingData.elite.period : '/ month';
 
-      // Update CTA query params
       const cycle = isAnnual ? 'annual' : 'monthly';
       document.querySelectorAll('[data-plan-target]').forEach(link => {
         const plan = link.getAttribute('data-plan-target');
@@ -325,7 +245,7 @@
   }
 
   // ==========================================
-  // 7. SCROLL REVEAL OBSERVER
+  // 5. PURPOSEFUL SCROLL REVEAL
   // ==========================================
   const revealElements = document.querySelectorAll('.reveal-item');
   if ('IntersectionObserver' in window && revealElements.length > 0) {
@@ -336,7 +256,7 @@
           revealObserver.unobserve(entry.target);
         }
       });
-    }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+    }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
 
     revealElements.forEach(el => revealObserver.observe(el));
   } else {
@@ -344,7 +264,7 @@
   }
 
   // ==========================================
-  // 8. DYNAMIC COPYRIGHT YEAR
+  // 6. DYNAMIC COPYRIGHT YEAR
   // ==========================================
   const currentYearEl = document.getElementById('currentYear');
   if (currentYearEl) {

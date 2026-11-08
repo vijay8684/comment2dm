@@ -18,51 +18,40 @@
   <meta name="twitter:title" content="Comment2DM — Instagram Comment-to-DM Automation" />
   <meta name="twitter:description" content="Automate direct messages to every commenter on your Instagram Reels and Posts." />
 
-  <!-- Google Fonts: Plus Jakarta Sans & Inter -->
+  <!-- Typography -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
-  <!-- Stylesheet -->
+  <!-- Brand Stylesheet -->
   <link rel="stylesheet" href="landing.css" />
-
-  <!-- Instant Theme Sync (Zero Flash on Load) -->
-  <script>
-    (function () {
-      const saved = localStorage.getItem('comment2dm_theme');
-      if (saved === 'light' || (!saved && window.matchMedia('(prefers-color-scheme: light)').matches)) {
-        document.documentElement.setAttribute('data-theme', 'light');
-      } else {
-        document.documentElement.setAttribute('data-theme', 'dark');
-      }
-    })();
-  </script>
 </head>
 <body>
 
   <!-- ==========================================
-       1. STICKY HEADER & REFINED NAVIGATION
+       HEADER & NAVIGATION
   ========================================== -->
   <header class="site-header" id="siteHeader">
     <div class="container nav-container">
-      <!-- Comment2DM Logo with Amber Lightning Symbol -->
+      
+      <!-- Brand Logo with Amber Lightning Mark -->
       <a href="index.html" class="brand-logo" aria-label="Comment2DM Homepage">
-        <svg width="34" height="34" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <rect width="32" height="32" rx="9" fill="#191621" stroke="rgba(255,255,255,0.12)" stroke-width="1.2" />
-          <path d="M9 13C9 10.79 10.79 9 13 9H19C21.21 9 23 10.79 23 13V18C23 20.21 21.21 22 19 22H14.5L10.5 25V22H13C10.79 22 9 20.21 9 18V13Z" stroke="url(#hero-logo-grad)" stroke-width="1.8" stroke-linejoin="round" />
-          <path d="M16 11L13 16H18L15 21" stroke="#FF9B45" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+        <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <rect width="32" height="32" rx="8" fill="#13131a" stroke="rgba(255,255,255,0.1)" stroke-width="1.2" />
+          <path d="M9 13C9 10.79 10.79 9 13 9H19C21.21 9 23 10.79 23 13V18C23 20.21 21.21 22 19 22H14.5L10.5 25V22H13C10.79 22 9 20.21 9 18V13Z" stroke="url(#c2d-logo-g)" stroke-width="1.8" stroke-linejoin="round" />
+          <path d="M16 11L13 16H18L15 21" stroke="#ff9b45" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
           <defs>
-            <linearGradient id="hero-logo-grad" x1="9" y1="9" x2="23" y2="25" gradientUnits="userSpaceOnUse">
-              <stop stop-color="#7655D9" />
-              <stop offset="0.5" stop-color="#936BFF" />
-              <stop offset="1" stop-color="#D946A8" />
+            <linearGradient id="c2d-logo-g" x1="9" y1="9" x2="23" y2="25" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#6366f1" />
+              <stop offset="0.5" stop-color="#8b5cf6" />
+              <stop offset="1" stop-color="#ec4899" />
             </linearGradient>
           </defs>
         </svg>
         <span>Comment<span class="logo-num">2</span>DM</span>
       </a>
 
-      <!-- Center Navigation Links -->
+      <!-- Center Nav Links -->
       <nav aria-label="Main Navigation">
         <ul class="nav-menu">
           <li><a href="#features" class="nav-link">Features</a></li>
@@ -72,62 +61,44 @@
         </ul>
       </nav>
 
-      <!-- Right Action Items -->
+      <!-- Right Action CTAs -->
       <div class="nav-actions">
-        <!-- Theme Toggle -->
-        <button class="theme-toggle-btn" id="themeToggleBtn" type="button" aria-label="Toggle theme">
-          <svg class="moon-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-          </svg>
-          <svg class="sun-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="5"></circle>
-            <line x1="12" y1="1" x2="12" y2="3"></line>
-            <line x1="12" y1="21" x2="12" y2="23"></line>
-            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-            <line x1="1" y1="12" x2="3" y2="12"></line>
-            <line x1="21" y1="12" x2="23" y2="12"></line>
-            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-          </svg>
-        </button>
-
         <a href="login.html?tab=login" class="btn btn-ghost">Login</a>
         <a href="login.html?tab=signup" class="btn btn-primary">Get Started Free</a>
-
-        <!-- Mobile Hamburger Menu Button -->
-        <button class="hamburger-btn" id="hamburgerBtn" type="button" aria-label="Open mobile menu" aria-expanded="false">
+        
+        <button class="hamburger-btn" id="hamburgerBtn" type="button" aria-label="Open navigation menu" aria-expanded="false">
           <span></span><span></span><span></span>
         </button>
       </div>
+
     </div>
   </header>
 
-  <!-- Mobile Menu Drawer -->
+  <!-- Mobile Drawer -->
   <div class="mobile-menu-drawer" id="mobileMenuDrawer" aria-label="Mobile Navigation">
     <a href="#features" class="mobile-nav-link">Features</a>
     <a href="#how-it-works" class="mobile-nav-link">How It Works</a>
     <a href="#pricing" class="mobile-nav-link">Pricing</a>
     <a href="blog.html" class="mobile-nav-link">Blog</a>
-    <div style="height:1px; background:var(--border-subtle); margin:8px 0;"></div>
+    <div style="height:1px; background:var(--border); margin:8px 0;"></div>
     <a href="login.html?tab=login" class="btn btn-secondary btn-block">Login</a>
     <a href="login.html?tab=signup" class="btn btn-primary btn-block">Get Started Free</a>
   </div>
 
   <main>
     <!-- ==========================================
-         2. HERO SECTION (TWO-COLUMN WITH INTERACTIVE DEMO)
+         HERO SECTION
     ========================================== -->
     <section class="hero-section">
       <div class="hero-ambient-glow" aria-hidden="true"></div>
       <div class="container">
         <div class="hero-grid">
           
-          <!-- Left Column: Copy & Actions -->
-          <div class="hero-copy-column reveal-item">
+          <!-- Left: Copy & Actions -->
+          <div class="hero-copy-wrap reveal-item">
             <div class="hero-eyebrow">
               <span class="badge-pulse"></span>
-              <span>Instagram DM Automation</span>
+              <span>Instagram Comment Automation</span>
             </div>
 
             <h1 class="hero-title">
@@ -135,7 +106,7 @@
             </h1>
 
             <p class="hero-description">
-              Connect your Instagram account, create intelligent keyword triggers, and automatically send personalized DMs to people who engage with your content.
+              Connect your Instagram account, configure intelligent keyword triggers, and automatically send personalized DMs to everyone who comments on your reels and posts.
             </p>
 
             <div class="hero-ctas">
@@ -147,114 +118,113 @@
                 </svg>
               </a>
               <a href="#how-it-works" class="btn btn-secondary btn-lg">
-                <span>Explore How It Works</span>
+                <span>See How It Works</span>
               </a>
             </div>
 
             <div class="hero-trust-row">
               <span class="trust-item">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-                Secure Meta OAuth
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                Official Meta Graph API
               </span>
               <span class="trust-item">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-                No password required
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                Zero Password Sharing
               </span>
               <span class="trust-item">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
-                Free to start
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                Sub-2s Webhook Latency
               </span>
             </div>
           </div>
 
-          <!-- Right Column: Interactive Product Demonstration -->
-          <div class="hero-demo-column reveal-item">
-            <div class="hero-visual-card">
+          <!-- Right: Realistic Dark Mode Product Demonstration -->
+          <div class="hero-demo-wrap reveal-item">
+            <div class="hero-mockup-window">
               
-              <!-- Creator Profile Bar -->
-              <div class="visual-topbar">
-                <div class="creator-profile">
-                  <div class="creator-avatar-wrap">
-                    <div class="creator-avatar">CS</div>
-                  </div>
-                  <div class="creator-meta">
-                    <div class="creator-name">
-                      <span>creatorstudio</span>
-                      <svg class="verified-badge" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-                      </svg>
-                    </div>
-                    <span class="creator-sub">VI TECH Studio · 48.5K followers</span>
-                  </div>
+              <!-- Window Chrome -->
+              <div class="window-chrome">
+                <div class="window-dots">
+                  <span class="window-dot"></span>
+                  <span class="window-dot"></span>
+                  <span class="window-dot"></span>
                 </div>
-                <div class="live-status-pill">
+                <span class="window-title">comment2dm.app — live-engine</span>
+                <div class="window-status-pill">
                   <span class="status-dot-pulse"></span>
-                  <span>Active Rule</span>
+                  <span>Active</span>
                 </div>
               </div>
 
-              <!-- Simulated Reel Preview -->
-              <div class="reel-preview-box">
-                <div class="reel-header-row">
-                  <span class="reel-tag">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-                    Reel #84 · Viral Automation
-                  </span>
-                  <span class="reel-stats">14.8K plays • 284 comments</span>
+              <!-- Mockup Content -->
+              <div class="mockup-body">
+                
+                <!-- Creator Header -->
+                <div class="creator-strip">
+                  <div class="creator-profile">
+                    <div class="creator-avatar-ring">
+                      <div class="creator-avatar">CS</div>
+                    </div>
+                    <div class="creator-meta">
+                      <div class="creator-username">
+                        <span>creatorstudio</span>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="#3897f0"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                      </div>
+                      <span class="creator-sub">VI TECH Studio · 48.5K followers</span>
+                    </div>
+                  </div>
+                  <span style="font-size:0.75rem; color:var(--ink-muted); font-family:var(--font-mono);">Rule #01</span>
                 </div>
-                <p class="reel-caption-quote">
-                  "The 2026 Instagram Growth Blueprint is here. Comment <span class="target-keyword" id="simTargetKeywordLabel">GUIDE</span> below and my automation will DM it to you right away! ⚡"
-                </p>
-              </div>
 
-              <!-- Live Simulated Comment Detection Stream -->
-              <div class="comments-stream-wrap">
-                <div class="stream-label">
-                  <span>Detected Comments Feed</span>
-                  <button type="button" id="pauseDemoBtn" class="btn btn-ghost btn-sm" style="padding:2px 8px; font-size:0.72rem; color:var(--text-dim);" title="Pause auto simulation">
+                <!-- Simulated Reel Snippet -->
+                <div class="sim-reel-box">
+                  <div class="reel-meta-row">
+                    <span>Reel #84 · Viral Automation</span>
+                    <span>14.2K plays · 340 comments</span>
+                  </div>
+                  <p class="reel-caption-text">
+                    "The 2026 Instagram Growth Blueprint is live. Comment <span class="keyword-highlight">GUIDE</span> below and my automation will DM it to you right away! 🚀"
+                  </p>
+                </div>
+
+                <!-- Simulated Incoming Comments -->
+                <div class="sim-comments-list" id="simCommentsList">
+                  <!-- Rendered via landing.js -->
+                </div>
+
+                <!-- Webhook Bridge -->
+                <div class="webhook-flow-bar">
+                  <span class="flow-pulse-line"></span>
+                  <span>COMMENT2DM WEBHOOK (0.4s)</span>
+                  <span class="flow-pulse-line"></span>
+                </div>
+
+                <!-- Simulated DM Delivery Card -->
+                <div class="sim-dm-card">
+                  <div class="dm-recipient-label">
+                    <span class="dm-recipient-name" id="simDmRecipient">@priya_growth</span>
+                    <span>Direct Message</span>
+                  </div>
+                  <div id="simDmBubble">
+                    <!-- Rendered via landing.js -->
+                  </div>
+                  <div class="dm-delivery-status" id="simDeliveryBadge">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                    <span>Delivered in 1.1s via Comment2DM</span>
+                  </div>
+                </div>
+
+                <!-- Interactive User Tester -->
+                <div class="sim-tester-bar">
+                  <input type="text" id="demoKeywordInput" class="sim-tester-input" placeholder="Test any custom keyword: e.g. LINK or SCALE" maxlength="20" aria-label="Test keyword" />
+                  <button type="button" id="demoTriggerBtn" class="btn btn-primary btn-sm" style="padding:4px 10px; font-size:0.75rem;">
+                    <span>Test Trigger ⚡</span>
+                  </button>
+                  <button type="button" id="pauseDemoBtn" class="btn btn-ghost btn-sm" style="padding:4px 8px; font-size:0.72rem; color:var(--ink-muted);" title="Pause auto simulation">
                     ⏸ Pause
                   </button>
                 </div>
-                <div id="simCommentsList">
-                  <!-- Injected via landing.js -->
-                </div>
-              </div>
 
-              <!-- Animated Automation Bridge -->
-              <div class="automation-flow-bridge">
-                <div class="flow-pulse-line"></div>
-                <span style="font-size:0.75rem; letter-spacing:0.04em;">COMMENT2DM WEBHOOK PROCESSING</span>
-                <div class="flow-pulse-line"></div>
-              </div>
-
-              <!-- Simulated DM Message Bubble -->
-              <div class="dm-preview-card">
-                <div class="dm-card-header">
-                  <div class="dm-recipient">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-                    <span id="simDmRecipient">@priya_ux</span>
-                  </div>
-                  <span>Direct Message · Automated</span>
-                </div>
-
-                <div class="dm-speech-bubble" id="simDmBubble">
-                  <!-- Injected via landing.js -->
-                </div>
-
-                <div class="dm-delivery-receipt" id="simDeliveryBadge">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="20 6 9 17 4 12"></polyline>
-                  </svg>
-                  <span>Delivered in 1.1s via Comment2DM</span>
-                </div>
-              </div>
-
-              <!-- Interactive Simulator Input Box (User can try any word) -->
-              <div class="demo-control-bar">
-                <input type="text" id="demoKeywordInput" class="demo-input" placeholder="Try your own keyword: e.g. LINK or VIP" maxlength="20" aria-label="Simulate keyword" />
-                <button type="button" id="demoTriggerBtn" class="btn btn-primary demo-btn">
-                  <span>Simulate ⚡</span>
-                </button>
               </div>
 
             </div>
@@ -265,49 +235,49 @@
     </section>
 
     <!-- ==========================================
-         3. TRUST INDICATORS (VERIFIED FACTS ONLY)
+         TRUST & TELEMETRY STRIP
     ========================================== -->
-    <section class="trust-section">
+    <section class="trust-strip">
       <div class="container">
-        <div class="trust-grid">
+        <div class="trust-metrics-grid">
           
-          <div class="trust-card reveal-item">
-            <div class="trust-icon-box">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+          <div class="trust-metric-item reveal-item">
+            <div class="metric-icon-box">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
             </div>
-            <div class="trust-info">
-              <h3>Meta Graph API</h3>
-              <p>Direct integration with standard Instagram Messaging permissions.</p>
-            </div>
-          </div>
-
-          <div class="trust-card reveal-item">
-            <div class="trust-icon-box">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-            </div>
-            <div class="trust-info">
-              <h3>OAuth 2.0 Security</h3>
-              <p>Authenticate safely without ever sharing your Instagram password.</p>
+            <div class="metric-text">
+              <h4>Meta Graph API</h4>
+              <p>Official Instagram Messaging endpoints</p>
             </div>
           </div>
 
-          <div class="trust-card reveal-item">
-            <div class="trust-icon-box">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+          <div class="trust-metric-item reveal-item">
+            <div class="metric-icon-box">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
             </div>
-            <div class="trust-info">
-              <h3>Sub-2s Webhooks</h3>
-              <p>Real-time comment detection and instant automated private replies.</p>
+            <div class="metric-text">
+              <h4>OAuth 2.0 Security</h4>
+              <p>Direct token exchange without passwords</p>
             </div>
           </div>
 
-          <div class="trust-card reveal-item">
-            <div class="trust-icon-box">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+          <div class="trust-metric-item reveal-item">
+            <div class="metric-icon-box">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
             </div>
-            <div class="trust-info">
-              <h3>Live Telemetry</h3>
-              <p>Full delivery tracking, idempotency deduplication, and engagement logs.</p>
+            <div class="metric-text">
+              <h4>Sub-2s Webhooks</h4>
+              <p>Instant comment detection & response</p>
+            </div>
+          </div>
+
+          <div class="trust-metric-item reveal-item">
+            <div class="metric-icon-box">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+            </div>
+            <div class="metric-text">
+              <h4>Real-Time Telemetry</h4>
+              <p>Deduplicated idempotency locking</p>
             </div>
           </div>
 
@@ -316,178 +286,188 @@
     </section>
 
     <!-- ==========================================
-         4. FEATURES SECTION (6 PREMIUM CARDS)
+         FEATURES — BENTO GRID COMPOSITION
     ========================================== -->
     <section class="features-section" id="features">
       <div class="container">
         
         <div class="section-header reveal-item">
-          <span class="section-eyebrow">Platform Capabilities</span>
+          <span class="section-eyebrow">Capabilities</span>
           <h2 class="section-title">
-            Everything You Need to Turn <span class="gradient-text">Engagement Into Growth</span>
+            Engineered for <span class="gradient-text">Precision & Conversion</span>
           </h2>
           <p class="section-subtitle">
-            Powerful tools that help creators and businesses manage Instagram conversations more efficiently.
+            A comprehensive suite of Instagram conversation automation tools built on official Meta infrastructure.
           </p>
         </div>
 
-        <div class="features-grid">
+        <div class="bento-grid">
           
-          <!-- Card 1 -->
-          <div class="feature-card reveal-item">
-            <div class="feature-icon-wrap">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+          <!-- Bento 1: Wide Showcase (2 cols) -->
+          <div class="bento-card bento-col-span-2 reveal-item">
+            <div class="bento-icon-box">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
             </div>
-            <h3 class="feature-card-title">Instant DM Automation</h3>
-            <p class="feature-card-desc">
-              Automatically respond to eligible Instagram comments using configured automation rules without delay.
+            <h3 class="bento-title">Instant Comment-to-DM Webhooks</h3>
+            <p class="bento-desc">
+              Meta fires an official webhook the moment a follower leaves a comment on your reel. Comment2DM catches the event in memory, verifies the keyword rule, and delivers your personalized private message in under 2 seconds.
+            </p>
+            <div class="bento-visual-timeline">
+              <div class="timeline-step">
+                <strong>Comment Posted</strong>
+                <span>@follower comments "LINK"</span>
+              </div>
+              <span class="timeline-arrow">→</span>
+              <div class="timeline-step">
+                <strong>Rule Evaluated</strong>
+                <span>In-memory lock & check (0.3s)</span>
+              </div>
+              <span class="timeline-arrow">→</span>
+              <div class="timeline-step">
+                <strong>DM Dispatched</strong>
+                <span>Private reply delivered (1.1s)</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bento 2: Standard Card -->
+          <div class="bento-card reveal-item">
+            <div class="bento-icon-box">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            </div>
+            <h3 class="bento-title">Smart Keyword Triggers</h3>
+            <p class="bento-desc">
+              Match specific phrases, target multiple keywords, or respond to all comments with custom keyword filters.
+            </p>
+            <div class="bento-tags-row">
+              <span class="bento-tag">#GUIDE</span>
+              <span class="bento-tag">#LINK</span>
+              <span class="bento-tag">#SCALE</span>
+              <span class="bento-tag">#PROMO</span>
+            </div>
+          </div>
+
+          <!-- Bento 3: Standard Card -->
+          <div class="bento-card reveal-item">
+            <div class="bento-icon-box">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+            </div>
+            <h3 class="bento-title">Public Comment Replies</h3>
+            <p class="bento-desc">
+              Automatically post a friendly public reply under the comment ("Sent to your DM! 📩") to trigger Instagram's algorithm and encourage other viewers to engage.
             </p>
           </div>
 
-          <!-- Card 2 -->
-          <div class="feature-card reveal-item">
-            <div class="feature-icon-wrap">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <!-- Bento 4: Standard Card -->
+          <div class="bento-card reveal-item">
+            <div class="bento-icon-box">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
             </div>
-            <h3 class="feature-card-title">Smart Keyword Triggers</h3>
-            <p class="feature-card-desc">
-              Match specific words and phrases or respond to all comments to trigger the exact relevant automated response.
+            <h3 class="bento-title">Multi-Account Hub</h3>
+            <p class="bento-desc">
+              Seamlessly connect and manage up to 10 Instagram Professional and Creator accounts from one centralized command center.
             </p>
           </div>
 
-          <!-- Card 3 -->
-          <div class="feature-card reveal-item">
-            <div class="feature-icon-wrap">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+          <!-- Bento 5: Wide Showcase (2 cols) -->
+          <div class="bento-card bento-col-span-2 reveal-item">
+            <div class="bento-icon-box">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
             </div>
-            <h3 class="feature-card-title">Multi-Account Management</h3>
-            <p class="feature-card-desc">
-              Manage supported connected Instagram accounts from one unified dashboard with individual rule settings.
+            <h3 class="bento-title">Real-Time Telemetry & Conversion Logs</h3>
+            <p class="bento-desc">
+              Inspect every incoming comment, matched automation rule, and DM delivery receipt. MongoDB-backed idempotency prevents duplicate replies while logging complete performance statistics.
             </p>
-          </div>
-
-          <!-- Card 4 -->
-          <div class="feature-card reveal-item">
-            <div class="feature-icon-wrap">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+            <div class="bento-telemetry-box">
+              <div class="telemetry-item">
+                <strong style="color:var(--emerald);">100%</strong>
+                <span>Delivery Success Rate</span>
+              </div>
+              <div class="telemetry-item">
+                <strong style="color:var(--accent-light);">&lt; 1.5s</strong>
+                <span>Average Response Time</span>
+              </div>
+              <div class="telemetry-item">
+                <strong style="color:var(--amber-bright);">0 Duplicates</strong>
+                <span>Idempotency Protected</span>
+              </div>
             </div>
-            <h3 class="feature-card-title">Personalized DM Messages</h3>
-            <p class="feature-card-desc">
-              Create relevant, customizable automated message templates with links, guides, and dynamic tokens.
-            </p>
-          </div>
-
-          <!-- Card 5 -->
-          <div class="feature-card reveal-item">
-            <div class="feature-icon-wrap">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
-            </div>
-            <h3 class="feature-card-title">Automation Analytics</h3>
-            <p class="feature-card-desc">
-              Track supported metrics, comments, automated messages, and engagement activity in real-time.
-            </p>
-          </div>
-
-          <!-- Card 6 -->
-          <div class="feature-card reveal-item">
-            <div class="feature-icon-wrap">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-            </div>
-            <h3 class="feature-card-title">Secure Instagram Integration</h3>
-            <p class="feature-card-desc">
-              Connect accounts through supported official Meta authentication and API permissions with zero risks.
-            </p>
           </div>
 
         </div>
+
       </div>
     </section>
 
     <!-- ==========================================
-         5. HOW IT WORKS SECTION (3 CONNECTED STEPS)
+         HOW IT WORKS
     ========================================== -->
     <section class="hiw-section" id="how-it-works">
       <div class="container">
         
         <div class="section-header reveal-item">
-          <span class="section-eyebrow">Simple Workflow</span>
+          <span class="section-eyebrow">Three Simple Steps</span>
           <h2 class="section-title">
-            Start Automating in <span class="gradient-text">Three Simple Steps</span>
+            Up and Running in <span class="gradient-text">Five Minutes</span>
           </h2>
           <p class="section-subtitle">
-            Connect your account and launch high-converting comment workflows in under 5 minutes.
+            Zero complex coding or webhook setups. Connect your account and launch your first automation rule.
           </p>
         </div>
 
-        <div class="hiw-steps-wrap">
-          <!-- Animated connecting line on desktop -->
-          <div class="hiw-connecting-line" aria-hidden="true">
-            <div class="hiw-line-progress" id="hiwLineProgress"></div>
+        <div class="hiw-grid">
+          
+          <div class="hiw-step-card reveal-item">
+            <div class="hiw-step-top">
+              <span class="hiw-step-badge">STEP 01</span>
+              <svg class="hiw-step-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+            </div>
+            <h3 class="hiw-step-title">Connect Instagram</h3>
+            <p class="hiw-step-desc">
+              Authorize your Instagram Business or Creator account securely using official Meta OAuth. No password sharing required.
+            </p>
           </div>
 
-          <div class="hiw-grid">
-            
-            <!-- Step 1 -->
-            <div class="hiw-card reveal-item">
-              <div class="hiw-step-top">
-                <span class="hiw-step-badge">STEP 01</span>
-                <div class="hiw-step-icon">
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
-                </div>
-              </div>
-              <h3 class="hiw-step-title">Connect Instagram</h3>
-              <p class="hiw-step-desc">
-                Authorize your Instagram Professional or Creator account securely using official Meta OAuth. No passwords required.
-              </p>
+          <div class="hiw-step-card reveal-item">
+            <div class="hiw-step-top">
+              <span class="hiw-step-badge">STEP 02</span>
+              <svg class="hiw-step-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
             </div>
-
-            <!-- Step 2 -->
-            <div class="hiw-card reveal-item">
-              <div class="hiw-step-top">
-                <span class="hiw-step-badge">STEP 02</span>
-                <div class="hiw-step-icon">
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
-                </div>
-              </div>
-              <h3 class="hiw-step-title">Create Automation</h3>
-              <p class="hiw-step-desc">
-                Choose a specific reel or all posts, specify trigger keywords (e.g. "LINK" or "GUIDE"), and customize your DM response message.
-              </p>
-            </div>
-
-            <!-- Step 3 -->
-            <div class="hiw-card reveal-item">
-              <div class="hiw-step-top">
-                <span class="hiw-step-badge">STEP 03</span>
-                <div class="hiw-step-icon">
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-                </div>
-              </div>
-              <h3 class="hiw-step-title">Automate Conversations</h3>
-              <p class="hiw-step-desc">
-                Comment2DM handles every matching comment 24/7, sending instant DMs, public replies, and logging analytics live.
-              </p>
-            </div>
-
+            <h3 class="hiw-step-title">Configure Automation</h3>
+            <p class="hiw-step-desc">
+              Select specific reels or target all posts. Set your trigger keywords (e.g. "LINK" or "VIP") and draft your personalized DM response.
+            </p>
           </div>
+
+          <div class="hiw-step-card reveal-item">
+            <div class="hiw-step-top">
+              <span class="hiw-step-badge">STEP 03</span>
+              <svg class="hiw-step-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+            </div>
+            <h3 class="hiw-step-title">Convert 24/7 on Autopilot</h3>
+            <p class="hiw-step-desc">
+              Every comment automatically triggers an instant private DM with links, resources, or discount codes while you focus on creating content.
+            </p>
+          </div>
+
         </div>
 
       </div>
     </section>
 
     <!-- ==========================================
-         6. CREATOR USE CASES / SOLUTIONS
+         USE CASES / CREATOR WORKFLOWS
     ========================================== -->
     <section class="usecases-section">
       <div class="container">
         
         <div class="section-header reveal-item">
-          <span class="section-eyebrow">Real-World Impact</span>
+          <span class="section-eyebrow">Proven Applications</span>
           <h2 class="section-title">
-            Built for Creators and <span class="gradient-text">Growing Businesses</span>
+            Built for Creators and <span class="gradient-text">Growing Brands</span>
           </h2>
           <p class="section-subtitle">
-            See how modern brands convert high-intent Instagram engagement into measurable sales and subscribers.
+            See how modern creators and digital businesses turn passive engagement into sales and subscribers.
           </p>
         </div>
 
@@ -497,12 +477,12 @@
             <span class="usecase-tag">Educators & Coaches</span>
             <h3 class="usecase-title">Lead Generation & Playbooks</h3>
             <p class="usecase-desc">
-              Deliver free cheat sheets, templates, and workshop access links instantly to anyone who comments on your educational reels.
+              Deliver free templates, cheat sheets, and webinar registration links instantly to commenters without manual DM copying.
             </p>
-            <div class="usecase-pill-list">
-              <span class="usecase-pill">PDF Downloads</span>
+            <div class="usecase-pills">
+              <span class="usecase-pill">PDF Guides</span>
               <span class="usecase-pill">Webinar Links</span>
-              <span class="usecase-pill">Newsletter Signups</span>
+              <span class="usecase-pill">Email Leads</span>
             </div>
           </div>
 
@@ -510,22 +490,22 @@
             <span class="usecase-tag">E-Commerce & Retail</span>
             <h3 class="usecase-title">Flash Sales & Discount Codes</h3>
             <p class="usecase-desc">
-              Reward reel commenters with exclusive promo codes and direct checkout links the second they express interest in a product.
+              Reward followers with exclusive promo codes and direct product URLs the second they express interest on a product reel.
             </p>
-            <div class="usecase-pill-list">
-              <span class="usecase-pill">Discount Codes</span>
-              <span class="usecase-pill">Product Catalogs</span>
-              <span class="usecase-pill">Cart Recovery</span>
+            <div class="usecase-pills">
+              <span class="usecase-pill">Promo Codes</span>
+              <span class="usecase-pill">Product Drops</span>
+              <span class="usecase-pill">Direct Checkout</span>
             </div>
           </div>
 
           <div class="usecase-card reveal-item">
             <span class="usecase-tag">Agencies & Consultants</span>
-            <h3 class="usecase-title">Client Qualification & Calls</h3>
+            <h3 class="usecase-title">Client Qualification & Booking</h3>
             <p class="usecase-desc">
-              Direct high-intent business inquiries straight to calendar booking links while their engagement and attention are at their peak.
+              Send calendar booking links and project case studies directly to prospective enterprise clients while attention is at its peak.
             </p>
-            <div class="usecase-pill-list">
+            <div class="usecase-pills">
               <span class="usecase-pill">Calendar Booking</span>
               <span class="usecase-pill">Case Studies</span>
               <span class="usecase-pill">Inquiry Routing</span>
@@ -538,23 +518,23 @@
     </section>
 
     <!-- ==========================================
-         7. PRICING PREVIEW SECTION
+         PRICING PREVIEW
     ========================================== -->
     <section class="pricing-section" id="pricing">
       <div class="container">
         
         <div class="section-header reveal-item">
-          <span class="section-eyebrow">Transparent Pricing</span>
+          <span class="section-eyebrow">Simple Pricing</span>
           <h2 class="section-title">
-            Simple, <span class="gradient-text">Predictable Pricing</span>
+            Predictable, <span class="gradient-text">Transparent Plans</span>
           </h2>
           <p class="section-subtitle">
-            Start free, upgrade as your Instagram reach and conversion volume grows.
+            Start free, upgrade as your Instagram reach and conversion volume expands.
           </p>
         </div>
 
         <!-- Monthly / Annual Toggle Switch -->
-        <div class="pricing-billing-toggle reveal-item">
+        <div class="pricing-switch-bar reveal-item">
           <span class="cycle-label active" id="monthlyLabel">Monthly</span>
           <label class="toggle-switch" aria-label="Toggle annual billing">
             <input type="checkbox" id="billingCycleSwitch" />
@@ -562,7 +542,7 @@
           </label>
           <span class="cycle-label" id="annualLabel">
             Annual
-            <span class="save-pill">Save 20%</span>
+            <span class="save-badge">Save 20%</span>
           </span>
         </div>
 
@@ -578,24 +558,24 @@
             </div>
             <ul class="plan-features-list">
               <li class="plan-feature-item">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                <span><strong>1</strong> Connected Instagram Account</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span><strong>1</strong> Instagram Account</span>
               </li>
               <li class="plan-feature-item">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
                 <span><strong>3</strong> Active Automations</span>
               </li>
               <li class="plan-feature-item">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                <span><strong>300</strong> Automated DMs / month</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span><strong>300</strong> DMs / month</span>
               </li>
               <li class="plan-feature-item">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
                 <span>Keyword trigger matching</span>
               </li>
               <li class="plan-feature-item">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                <span>Community & Help Desk support</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span>Community support</span>
               </li>
             </ul>
             <a href="login.html?tab=signup&plan=free" class="btn btn-secondary btn-block" data-plan-target="free">
@@ -605,36 +585,36 @@
 
           <!-- Pro Plan (Recommended) -->
           <div class="pricing-card recommended reveal-item">
-            <div class="popular-badge">Most Popular</div>
+            <div class="popular-tag">Most Popular</div>
             <h3 class="plan-name">Pro</h3>
-            <p class="plan-desc">For serious creators and growing businesses looking to maximize reel conversions.</p>
+            <p class="plan-desc">For active creators and growing businesses looking to maximize reel conversions.</p>
             <div class="plan-price-wrap">
               <span class="plan-price" id="pricePro">₹999</span>
               <span class="plan-period" id="periodPro">/ month</span>
             </div>
             <ul class="plan-features-list">
               <li class="plan-feature-item">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                <span><strong>3</strong> Connected Instagram Accounts</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span><strong>3</strong> Instagram Accounts</span>
               </li>
               <li class="plan-feature-item">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
                 <span><strong>25</strong> Active Automations</span>
               </li>
               <li class="plan-feature-item">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                <span><strong>5,000</strong> Automated DMs / month</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span><strong>5,000</strong> DMs / month</span>
               </li>
               <li class="plan-feature-item">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
                 <span>All comments & keyword triggers</span>
               </li>
               <li class="plan-feature-item">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
                 <span>Creator AI Script Assistant</span>
               </li>
               <li class="plan-feature-item">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
                 <span>Priority email support</span>
               </li>
             </ul>
@@ -653,27 +633,27 @@
             </div>
             <ul class="plan-features-list">
               <li class="plan-feature-item">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                <span><strong>10</strong> Connected Instagram Accounts</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span><strong>10</strong> Instagram Accounts</span>
               </li>
               <li class="plan-feature-item">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
                 <span><strong>Unlimited</strong> Automations</span>
               </li>
               <li class="plan-feature-item">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                <span><strong>50,000</strong> Automated DMs / month</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span><strong>50,000</strong> DMs / month</span>
               </li>
               <li class="plan-feature-item">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                <span>Full API & Webhook infrastructure</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span>Full API & Webhook access</span>
               </li>
               <li class="plan-feature-item">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
                 <span>Advanced analytics CSV export</span>
               </li>
               <li class="plan-feature-item">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
                 <span>Dedicated account manager</span>
               </li>
             </ul>
@@ -684,10 +664,10 @@
 
         </div>
 
-        <div class="pricing-footer-link">
-          <a href="pricing.html" class="pricing-full-link">
-            <span>View complete plan breakdown and feature comparison</span>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+        <div class="pricing-bottom-link">
+          <a href="pricing.html">
+            <span>View complete plan breakdown and limits</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
           </a>
         </div>
 
@@ -695,16 +675,16 @@
     </section>
 
     <!-- ==========================================
-         8. FINAL CALL TO ACTION
+         FINAL CALL TO ACTION
     ========================================== -->
     <section class="final-cta-section">
       <div class="container">
-        <div class="final-cta-card reveal-item">
+        <div class="final-cta-box reveal-item">
           <h2 class="final-cta-title">
             Ready to Turn Your Instagram Engagement <span class="gradient-text">Into Conversations?</span>
           </h2>
           <p class="final-cta-desc">
-            Start building smarter Instagram automation workflows with Comment2DM. Setup takes less than 2 minutes.
+            Start building smarter comment automation workflows with Comment2DM. Setup takes less than 2 minutes.
           </p>
           <div class="final-cta-actions">
             <a href="login.html?tab=signup" class="btn btn-primary btn-lg">
@@ -721,56 +701,56 @@
   </main>
 
   <!-- ==========================================
-       9. SOPHISTICATED MULTI-COLUMN FOOTER
+       MULTI-COLUMN FOOTER
   ========================================== -->
   <footer class="site-footer">
     <div class="container">
       <div class="footer-grid">
         
-        <!-- Column 1: Brand & Wordmark -->
+        <!-- Brand -->
         <div class="footer-brand">
           <a href="index.html" class="brand-logo" aria-label="Comment2DM">
-            <svg width="28" height="28" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-              <rect width="32" height="32" rx="9" fill="#191621" stroke="rgba(255,255,255,0.12)" stroke-width="1.2" />
-              <path d="M9 13C9 10.79 10.79 9 13 9H19C21.21 9 23 10.79 23 13V18C23 20.21 21.21 22 19 22H14.5L10.5 25V22H13C10.79 22 9 20.21 9 18V13Z" stroke="url(#footer-logo-grad)" stroke-width="1.8" stroke-linejoin="round" />
-              <path d="M16 11L13 16H18L15 21" stroke="#FF9B45" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+            <svg width="26" height="26" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+              <rect width="32" height="32" rx="8" fill="#13131a" stroke="rgba(255,255,255,0.1)" stroke-width="1.2" />
+              <path d="M9 13C9 10.79 10.79 9 13 9H19C21.21 9 23 10.79 23 13V18C23 20.21 21.21 22 19 22H14.5L10.5 25V22H13C10.79 22 9 20.21 9 18V13Z" stroke="url(#c2d-footer-g)" stroke-width="1.8" stroke-linejoin="round" />
+              <path d="M16 11L13 16H18L15 21" stroke="#ff9b45" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
               <defs>
-                <linearGradient id="footer-logo-grad" x1="9" y1="9" x2="23" y2="25" gradientUnits="userSpaceOnUse">
-                  <stop stop-color="#7655D9" />
-                  <stop offset="0.5" stop-color="#936BFF" />
-                  <stop offset="1" stop-color="#D946A8" />
+                <linearGradient id="c2d-footer-g" x1="9" y1="9" x2="23" y2="25" gradientUnits="userSpaceOnUse">
+                  <stop stop-color="#6366f1" />
+                  <stop offset="0.5" stop-color="#8b5cf6" />
+                  <stop offset="1" stop-color="#ec4899" />
                 </linearGradient>
               </defs>
             </svg>
             <span>Comment<span class="logo-num">2</span>DM</span>
           </a>
           <p>
-            Empowering creators and brands to turn Instagram comments into automated, high-converting direct message conversations.
+            Automating Instagram comment-to-DM conversations for modern creators and growing brands worldwide.
           </p>
         </div>
 
-        <!-- Column 2: Product -->
+        <!-- Product -->
         <div>
           <h4 class="footer-col-title">Product</h4>
           <ul class="footer-links">
             <li><a href="#features">Features</a></li>
             <li><a href="#how-it-works">How It Works</a></li>
             <li><a href="pricing.html">Pricing</a></li>
-            <li><a href="blog.html">Blog & Insights</a></li>
+            <li><a href="blog.html">Blog & Guides</a></li>
           </ul>
         </div>
 
-        <!-- Column 3: Support -->
+        <!-- Support -->
         <div>
           <h4 class="footer-col-title">Support</h4>
           <ul class="footer-links">
-            <li><a href="help.html">Help Center</a></li>
+            <li><a href="help.html">Help Desk</a></li>
             <li><a href="contact.html">Contact Us</a></li>
             <li><a href="dashboard.html">Live Dashboard</a></li>
           </ul>
         </div>
 
-        <!-- Column 4: Legal -->
+        <!-- Legal -->
         <div>
           <h4 class="footer-col-title">Legal</h4>
           <ul class="footer-links">
@@ -782,10 +762,10 @@
 
       </div>
 
-      <!-- Footer Bottom Bar -->
+      <!-- Bottom Bar -->
       <div class="footer-bottom-bar">
         <span>© <span id="currentYear">2026</span> Comment2DM by VI TECH Limited. All rights reserved.</span>
-        <div class="footer-meta-pill">
+        <div class="footer-status-pill">
           <span class="status-dot-pulse"></span>
           <span>Official Meta Graph API Integration · Cloud Webhooks Active</span>
         </div>
@@ -793,7 +773,7 @@
     </div>
   </footer>
 
-  <!-- Scripts -->
+  <!-- Client Script -->
   <script src="landing.js"></script>
 </body>
 </html>
