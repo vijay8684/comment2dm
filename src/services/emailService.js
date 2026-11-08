@@ -52,7 +52,13 @@ async function sendEmail({ to, subject, html, text }) {
     if (!response.ok) {
       const errMsg = data?.message || data?.error || `Resend HTTP error ${response.status}`;
       console.warn(`[EmailService] Resend delivery notice for ${to}: ${errMsg}`);
-      return { success: false, error: errMsg };
+      const isDomainRestriction = response.status === 403 && String(errMsg).includes('testing emails to your own email address');
+      return {
+        success: false,
+        error: errMsg,
+        statusCode: response.status,
+        isDomainRestriction
+      };
     }
 
     return { success: true, id: data?.id };

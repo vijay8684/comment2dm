@@ -150,6 +150,7 @@ async function runTestSuite() {
 
   // 4. Duplicate Unverified Signup (Updates credentials without 409)
   console.log('Test 4: Re-submitting signup while unverified refreshes credentials & sends fresh OTP');
+  await mockOtps.deleteMany({ email: testEmail });
   const reSignup = await authService.register({ name: 'Alex Updated', email: testEmail, password: 'NewPassword999!' });
   assert.strictEqual(reSignup.requireVerification, true);
   console.log('  ✓ PASSED');
@@ -176,9 +177,9 @@ async function runTestSuite() {
     console.log('  ✓ PASSED');
   }
 
-  // 7. Development OTP Bypass Verification (0000 / 000000)
-  console.log('Test 7: Development OTP verification');
-  const verifyRes = await authService.verifySignupOtp({ email: testEmail, otp: '000000' });
+  // 7. Development OTP Bypass Verification (agreed 4-digit code: 0000)
+  console.log('Test 7: Development OTP verification with 0000');
+  const verifyRes = await authService.verifySignupOtp({ email: testEmail, otp: '0000' });
   assert.strictEqual(verifyRes.emailVerified, true);
   const verifiedRecord = await db.getUserByEmail(testEmail);
   assert.strictEqual(verifiedRecord.email_verified, true);
@@ -240,7 +241,7 @@ async function runTestSuite() {
 
   // 14. Reset OTP Verification & Single-Use JWT Token
   console.log('Test 14: Reset OTP verification issues signed single-use reset token');
-  const resetVerify = await authService.verifyPasswordResetOtp({ email: testEmail, otp: '000000' });
+  const resetVerify = await authService.verifyPasswordResetOtp({ email: testEmail, otp: '0000' });
   assert(resetVerify.resetToken);
   const decoded = jwt.verify(resetVerify.resetToken, process.env.JWT_SECRET);
   assert.strictEqual(decoded.purpose, 'pwd_reset');
@@ -287,10 +288,10 @@ async function runTestSuite() {
   process.env.NODE_ENV = 'production';
   process.env.ALLOW_DEV_OTP = 'false';
   try {
-    await otpService.verifyOtp('random_user@domain.com', '000000', 'signup');
+    await otpService.verifyOtp('random_user@domain.com', '0000', 'signup');
     assert.fail('Dev bypass should not work in production');
   } catch (err) {
-    assert(err.message.includes('Invalid') || err.message.includes('expired') || err.message.includes('code'));
+    assert(err.message.includes('disabled') || err.message.includes('Invalid') || err.message.includes('code'));
     console.log('  ✓ PASSED');
   }
 

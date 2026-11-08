@@ -15,16 +15,11 @@ const MAX_VERIFY_ATTEMPTS = 5;
 
 /**
  * Checks whether the development-only OTP bypass (0000 / 000000) is permitted.
- * Fails closed: Never permitted in production unless an explicit ALLOW_DEV_OTP=true flag is set.
+ * Fails closed: Only permitted through an explicit backend development-only configuration (ALLOW_DEV_OTP=true).
+ * Never activates in production unless explicitly configured by the developer.
  */
 function isDevBypassEnabled() {
-  if (process.env.ALLOW_DEV_OTP === 'true') {
-    return true;
-  }
-  if (process.env.NODE_ENV === 'production') {
-    return false;
-  }
-  return process.env.ALLOW_DEV_OTP !== 'false';
+  return process.env.ALLOW_DEV_OTP === 'true';
 }
 
 /**
@@ -93,10 +88,25 @@ async function generateAndSendOtp(email, type = 'signup', name = '') {
   const emailService = require('./emailService');
   const { otp, expiresAt } = await generateOtp(email, type);
 
+  let sendResult;
   if (type === 'reset_password') {
-    await emailService.sendPasswordResetOtp(email, otp, name);
+    sendResult = await emailService.sendPasswordResetOtp(email, otp, name);
   } else {
-    await emailService.sendSignupOtp(email, otp, name);
+    sendResult = await emailService.sendSignupOtp(email, otp, name);
+  }
+
+  if (sendResult && !sendResult.success) {
+    if (isDevBypassEnabled()) {
+      return { success: true, devMode: true, expiresAt, warning: sendResult.error };
+    }
+
+    let userMessage = sendResult.error;
+    if (sendResult.isDomainRestriction) {
+      userMessage = 'Email delivery notice: Resend free test mode can only send emails to the account owner (vijayakrishnareddy910@gmail.com). To send to other emails, a custom domain must be verified in Resend.';
+    }
+    const err = new Error(userMessage || 'Failed to dispatch verification email.');
+    err.statusCode = 400;
+    throw err;
   }
 
   return { success: true, expiresAt };
@@ -127,14 +137,20 @@ async function verifyOtp(email, arg2, arg3) {
     throw error;
   }
 
-  // 1. Development Bypass Check (0000 / 000000)
+  // 1. Development Bypass Check (agreed code: 0000 / 000000)
   const isDevCode = inputOtp === '0000' || inputOtp === '000000';
-  if (isDevCode && isDevBypassEnabled()) {
-    const otps = db.collections ? db.collections().otps : null;
-    if (otps) {
-      await otps.deleteMany({ email: normalizedEmail, type });
+  if (isDevCode) {
+    if (isDevBypassEnabled()) {
+      const otps = db.collections ? db.collections().otps : null;
+      if (otps) {
+        await otps.deleteMany({ email: normalizedEmail, type });
+      }
+      return { valid: true };
+    } else {
+      const error = new Error('Development OTP bypass is disabled. Please enter the 6-digit verification code sent to your email.');
+      error.statusCode = 400;
+      throw error;
     }
-    return { valid: true };
   }
 
   const otps = db.collections ? db.collections().otps : null;

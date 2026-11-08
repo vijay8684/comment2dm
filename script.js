@@ -53,6 +53,26 @@
     } catch (e) {}
   }
 
+  // Shared Theme Switcher & Persistence
+  function initTheme() {
+    const saved = localStorage.getItem('comment2dm_theme');
+    const currentTheme = saved === 'dark' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', currentTheme);
+
+    const toggleBtn = document.getElementById('themeToggleBtn');
+    if (toggleBtn) {
+      toggleBtn.setAttribute('aria-label', `Switch to ${currentTheme === 'dark' ? 'light' : 'dark'} mode`);
+      toggleBtn.addEventListener('click', function () {
+        const cur = document.documentElement.getAttribute('data-theme') || 'light';
+        const next = cur === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        localStorage.setItem('comment2dm_theme', next);
+        toggleBtn.setAttribute('aria-label', `Switch to ${next === 'dark' ? 'light' : 'dark'} mode`);
+      });
+    }
+  }
+
+  initTheme();
   checkSession();
 
   // Mobile navigation drawer toggle for public landing pages
@@ -256,7 +276,7 @@
         }
 
         const fullCode = inputs.map(i => i.value).join('');
-        if (fullCode.length === 6 && onComplete) {
+        if ((fullCode.length === 6 || fullCode === '0000') && onComplete) {
           onComplete(fullCode);
         }
       });
@@ -284,6 +304,8 @@
         const digits = text.replace(/[^0-9]/g, '').slice(0, 6);
         if (!digits) return;
 
+        inputs.forEach(i => { i.value = ''; i.classList.remove('filled'); });
+
         digits.split('').forEach((d, i) => {
           if (inputs[i]) {
             inputs[i].value = d;
@@ -295,7 +317,7 @@
         inputs[focusTarget].focus();
 
         const fullCode = inputs.map(i => i.value).join('');
-        if (fullCode.length === 6 && onComplete) {
+        if ((fullCode.length === 6 || fullCode === '0000') && onComplete) {
           onComplete(fullCode);
         }
       });
@@ -535,7 +557,7 @@
       const otp = inputs.map(i => i.value).join('');
       const submitBtn = document.getElementById('otpSubmitBtn');
 
-      if (otp.length < 6) {
+      if (otp.length < 6 && otp !== '0000') {
         showAuthError('Please enter all 6 digits of your verification code.');
         return;
       }
@@ -657,7 +679,7 @@
       const otp = inputs.map(i => i.value).join('');
       const submitBtn = document.getElementById('forgotOtpSubmitBtn');
 
-      if (otp.length < 6) {
+      if (otp.length < 6 && otp !== '0000') {
         showAuthError('Please enter all 6 digits of your reset code.');
         return;
       }

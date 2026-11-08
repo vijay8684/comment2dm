@@ -75,16 +75,14 @@ async function register({ name, email, password }) {
   }
 
   // Generate and send 6-digit verification OTP
-  try {
-    await otpService.generateAndSendOtp(normalizedEmail, 'signup', trimmedName);
-  } catch (err) {
-    console.error('Failed to dispatch signup OTP email:', err.message);
-  }
+  const otpResult = await otpService.generateAndSendOtp(normalizedEmail, 'signup', trimmedName);
 
   return {
     requireVerification: true,
     email: normalizedEmail,
-    message: 'A 6-digit verification code has been sent to your email.'
+    message: otpResult && otpResult.devMode
+      ? 'A 6-digit verification code was generated (Development mode active: 0000 permitted).'
+      : 'A 6-digit verification code has been sent to your email.'
   };
 }
 
