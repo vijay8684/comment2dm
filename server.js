@@ -419,8 +419,6 @@ app.delete('/api/account/delete', requireAuth, async (request, response, next) =
 // Instagram Connection & Accounts
 // ==========================================
 
-const metaApiVersion = process.env.META_API_VERSION || 'v21.0';
-
 app.get('/api/instagram/authorize', requireAuth, (request, response, next) => {
   try {
     instagramService.ensureConfiguration();
@@ -429,30 +427,15 @@ app.get('/api/instagram/authorize', requireAuth, (request, response, next) => {
       process.env.JWT_SECRET,
       { expiresIn: '15m' }
     );
-
-    // Support both Facebook Dialog OAuth (for Meta Business Apps / Facebook Login for Business)
-    // and Instagram OAuth (for standalone Instagram Basic Display / Instagram Login)
-    const flow = (request.query.flow || process.env.META_AUTH_FLOW || 'facebook').toLowerCase();
-
-    let authorizeUrl;
-    if (flow === 'instagram') {
-      authorizeUrl = new URL('https://www.instagram.com/oauth/authorize');
-      authorizeUrl.searchParams.set('enable_fb_login', '0');
-      authorizeUrl.searchParams.set('force_authentication', '1');
-      authorizeUrl.searchParams.set('client_id', process.env.META_APP_ID);
-      authorizeUrl.searchParams.set('redirect_uri', process.env.META_REDIRECT_URI);
-      authorizeUrl.searchParams.set('response_type', 'code');
-      authorizeUrl.searchParams.set('scope', 'instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments');
-      authorizeUrl.searchParams.set('state', state);
-    } else {
-      authorizeUrl = new URL(`https://www.facebook.com/${metaApiVersion}/dialog/oauth`);
-      authorizeUrl.searchParams.set('client_id', process.env.META_APP_ID);
-      authorizeUrl.searchParams.set('redirect_uri', process.env.META_REDIRECT_URI);
-      authorizeUrl.searchParams.set('response_type', 'code');
-      authorizeUrl.searchParams.set('scope', 'instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,pages_show_list,pages_read_engagement');
-      authorizeUrl.searchParams.set('state', state);
-    }
-
+    // Direct Instagram Login (Exact SendDM flow - clean Instagram dialog, no Facebook portfolios)
+    const authorizeUrl = new URL('https://www.instagram.com/oauth/authorize');
+    authorizeUrl.searchParams.set('enable_fb_login', '0');
+    authorizeUrl.searchParams.set('force_authentication', '1');
+    authorizeUrl.searchParams.set('client_id', process.env.META_APP_ID);
+    authorizeUrl.searchParams.set('redirect_uri', process.env.META_REDIRECT_URI);
+    authorizeUrl.searchParams.set('response_type', 'code');
+    authorizeUrl.searchParams.set('scope', 'instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments');
+    authorizeUrl.searchParams.set('state', state);
     return response.redirect(authorizeUrl.toString());
   } catch (error) {
     if (error.statusCode === 503) {

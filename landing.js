@@ -1,31 +1,48 @@
 /**
- * Comment2DM — Client Interaction Engine
- * Brand: Comment2DM | Company: VI TECH Limited
- * Theme: Light Mode (Default) with Dark Mode Support
- * Handles: Theme Toggling, Interactive Product Simulator, Pricing Switcher, Mobile Navigation, Scroll Reveals & Session Check
+ * Comment2DM — Premium Landing Page Interactive Engine
+ * Brand: Comment2DM | Operating Company: VI TECH Limited
+ * Handles: Theme Toggle, Interactive Product Demo, Pricing Switcher, Mobile Navigation & Smooth Scroll
  */
 
 (function () {
   'use strict';
 
   // ==========================================
-  // 1. THEME INITIALIZATION & TOGGLE
+  // 1. THEME TOGGLE & PERSISTENCE
   // ==========================================
-  function initTheme() {
-    const savedTheme = localStorage.getItem('comment2dm_theme') || 'light';
-    document.documentElement.setAttribute('data-theme', savedTheme);
+  const themeToggleBtn = document.getElementById('themeToggleBtn');
 
-    const toggleButtons = document.querySelectorAll('#themeToggleBtn, #mobileThemeToggleBtn');
-    toggleButtons.forEach(btn => {
-      btn.addEventListener('click', () => {
-        const current = document.documentElement.getAttribute('data-theme') || 'light';
-        const next = current === 'dark' ? 'light' : 'dark';
-        document.documentElement.setAttribute('data-theme', next);
-        localStorage.setItem('comment2dm_theme', next);
-      });
+  function getPreferredTheme() {
+    const saved = localStorage.getItem('comment2dm_theme');
+    if (saved) return saved;
+    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
+
+  function setTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('comment2dm_theme', theme);
+    if (themeToggleBtn) {
+      themeToggleBtn.setAttribute('aria-label', `Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`);
+    }
+  }
+
+  // Initial theme sync
+  setTheme(getPreferredTheme());
+
+  if (themeToggleBtn) {
+    themeToggleBtn.addEventListener('click', () => {
+      const current = document.documentElement.getAttribute('data-theme') || 'dark';
+      const nextTheme = current === 'dark' ? 'light' : 'dark';
+      setTheme(nextTheme);
     });
   }
-  initTheme();
+
+  // Listen for system theme changes if user hasn't explicitly set one
+  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', e => {
+    if (!localStorage.getItem('comment2dm_theme')) {
+      setTheme(e.matches ? 'light' : 'dark');
+    }
+  });
 
   // ==========================================
   // 2. HEADER SCROLL & MOBILE MENU
@@ -49,6 +66,7 @@
       hamburgerBtn.setAttribute('aria-expanded', String(isOpen));
     });
 
+    // Close on mobile link click
     document.querySelectorAll('.mobile-nav-link, .mobile-menu-drawer .btn').forEach(link => {
       link.addEventListener('click', () => {
         hamburgerBtn.classList.remove('open');
@@ -57,6 +75,7 @@
       });
     });
 
+    // Close on Escape key
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape' && mobileMenuDrawer.classList.contains('open')) {
         hamburgerBtn.classList.remove('open');
@@ -73,25 +92,27 @@
   async function checkActiveSession() {
     try {
       const token = localStorage.getItem('comment2dm_token') || localStorage.getItem('nudge_token');
-      if (!token) return;
-
-      const res = await fetch('/api/me', {
-        headers: { 'Authorization': 'Bearer ' + token },
-        credentials: 'same-origin'
-      });
-
+      const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+      const res = await fetch('/api/me', { headers, credentials: 'same-origin' });
       if (res.ok) {
         const data = await res.json().catch(() => ({}));
         if (data.user) {
-          const loginBtn = document.querySelector('.nav-actions a[href*="tab=login"]');
-          const signupBtn = document.querySelector('.nav-actions a[href*="tab=signup"]');
-          if (loginBtn) {
-            loginBtn.href = 'dashboard.html';
-            loginBtn.textContent = 'Dashboard';
-          }
-          if (signupBtn) {
-            signupBtn.href = 'settings.html';
-            signupBtn.textContent = 'Account';
+          const navActions = document.querySelector('.nav-actions');
+          if (navActions) {
+            const themeBtnHtml = themeToggleBtn ? themeToggleBtn.outerHTML : '';
+            navActions.innerHTML = `
+              ${themeBtnHtml}
+              <a href="dashboard.html" class="btn btn-secondary btn-sm">Dashboard</a>
+              <a href="settings.html" class="btn btn-primary btn-sm">Account</a>
+            `;
+            // Re-attach theme toggle listener
+            const newThemeBtn = document.getElementById('themeToggleBtn');
+            if (newThemeBtn) {
+              newThemeBtn.addEventListener('click', () => {
+                const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+                setTheme(cur === 'dark' ? 'light' : 'dark');
+              });
+            }
           }
         }
       }
@@ -100,52 +121,29 @@
   checkActiveSession();
 
   // ==========================================
-  // 4. INTERACTIVE HERO PRODUCT SIMULATOR
+  // 4. INTERACTIVE PRODUCT VISUALIZATION
   // ==========================================
   const demoScenarios = [
     {
       keyword: 'GUIDE',
-      user: 'priya_growth',
-      avatar: 'P',
-      commentText: 'Send the breakdown please! GUIDE 🔥',
-      dmMessage: "Hey Priya! 👋 Thanks for commenting on our Reel. Here is your direct link to the 2026 Growth Playbook + Notion swipe file:",
-      resourceTitle: "2026 Growth Playbook (PDF)",
-      resourceDomain: "comment2dm.app/playbook",
-      resourceBadge: "Instant Download · Free PDF",
-      latency: "0.8s"
+      user: 'priya_ux',
+      commentText: 'Need this resource for our team! GUIDE 🔥',
+      dmMessage: "Hey Priya! 👋 Thanks for commenting. Here is your direct link to download the 2026 Instagram Growth Playbook:",
+      actionButton: "📥 Download Playbook PDF (Free)"
     },
     {
       keyword: 'SCALE',
       user: 'alex.ventures',
-      avatar: 'A',
       commentText: 'Mind sending over the templates? SCALE 🚀',
-      dmMessage: "Hey Alex! ⚡ Here are the viral automation templates you requested. Instant access is ready below:",
-      resourceTitle: "Viral Reel Automation Templates",
-      resourceDomain: "comment2dm.app/templates",
-      resourceBadge: "Copy to Notion / Drive",
-      latency: "0.7s"
+      dmMessage: "Hey Alex! ⚡ Here are the viral automation templates you requested. Instant access below:",
+      actionButton: "🚀 Get Viral Automation Templates"
     },
     {
       keyword: 'PROMO',
       user: 'sarah.creatives',
-      avatar: 'S',
       commentText: 'Love the new collection! PROMO plz 💕',
-      dmMessage: "Hey Sarah! 🎉 Here is your exclusive 20% discount code for today: VIP20. Tap below to apply it automatically:",
-      resourceTitle: "Exclusive VIP 20% Discount",
-      resourceDomain: "comment2dm.app/vip20",
-      resourceBadge: "Claim 20% Off Code",
-      latency: "0.9s"
-    },
-    {
-      keyword: 'LINK',
-      user: 'david_media',
-      avatar: 'D',
-      commentText: 'Where can I find the podcast link? LINK 🙏',
-      dmMessage: "Hey David! 🎙️ Here is the direct link to the full podcast episode with timestamps and show notes:",
-      resourceTitle: "Episode #84: 0 to 100K Followers",
-      resourceDomain: "comment2dm.app/ep84",
-      resourceBadge: "Listen on Spotify / Apple",
-      latency: "0.6s"
+      dmMessage: "Hey Sarah! 🎉 Here is your exclusive 20% discount code for today: VIP20. Shop direct below:",
+      actionButton: "🛍️ Apply 20% Off At Checkout"
     }
   ];
 
@@ -156,112 +154,68 @@
   const simCommentsContainer = document.getElementById('simCommentsList');
   const simDmBubble = document.getElementById('simDmBubble');
   const simDmRecipient = document.getElementById('simDmRecipient');
-  const dmRecipientAvatar = document.getElementById('dmRecipientAvatar');
+  const simDmActionBtn = document.getElementById('simDmActionBtn');
   const simDeliveryBadge = document.getElementById('simDeliveryBadge');
-  const telemetryActiveKey = document.getElementById('telemetryActiveKey');
-  const telemetryLatency = document.getElementById('telemetryLatency');
-  const captionKeywordDisplay = document.getElementById('captionKeywordDisplay');
+  const simFlowPulse = document.getElementById('simFlowPulse');
   const demoKeywordInput = document.getElementById('demoKeywordInput');
   const demoTriggerBtn = document.getElementById('demoTriggerBtn');
   const pauseDemoBtn = document.getElementById('pauseDemoBtn');
-  const quickChipsList = document.getElementById('quickChipsList');
 
-  function renderScenario(scenario) {
+  function renderScenario(scenario, isCustom = false) {
     if (!simCommentsContainer || !simDmBubble) return;
 
-    // Update Telemetry & Caption
-    if (telemetryActiveKey) telemetryActiveKey.textContent = scenario.keyword;
-    if (telemetryLatency) telemetryLatency.textContent = scenario.latency;
-    if (captionKeywordDisplay) captionKeywordDisplay.textContent = scenario.keyword;
-    if (simDmRecipient) simDmRecipient.textContent = `@${scenario.user}`;
-    if (dmRecipientAvatar) dmRecipientAvatar.textContent = scenario.avatar;
-
-    // Update Chips active state
-    if (quickChipsList) {
-      quickChipsList.querySelectorAll('.chip-btn').forEach(chip => {
-        chip.classList.toggle('active', chip.getAttribute('data-chip') === scenario.keyword);
-      });
+    // Pulse flow bridge
+    if (simFlowPulse) {
+      simFlowPulse.style.opacity = '1';
     }
 
-    // Render Comments Feed
-    const highlightedComment = scenario.commentText.replace(
-      new RegExp(`(${scenario.keyword})`, 'gi'),
-      '<span class="keyword-highlight-pill">$1</span>'
-    );
-
+    // Update Comment Stream
+    const avatarLetter = (scenario.user.charAt(0) || 'U').toUpperCase();
     simCommentsContainer.innerHTML = `
       <div class="sim-comment-item active-trigger">
-        <div class="sim-comment-avatar">${scenario.avatar}</div>
+        <div class="sim-comment-avatar">${avatarLetter}</div>
         <div class="sim-comment-content">
-          <div class="comment-author-row">
-            <span class="sim-comment-user">@${scenario.user}</span>
-            <span class="comment-time">Just now</span>
-          </div>
-          <div class="comment-text-body">${highlightedComment}</div>
-          <div class="comment-trigger-badge">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
-            <span>Trigger Keyword Matched: "${scenario.keyword}"</span>
-          </div>
+          <span class="sim-comment-user">@${scenario.user}</span>
+          ${scenario.commentText.replace(new RegExp(`(${scenario.keyword})`, 'gi'), '<span class="keyword-badge">$1</span>')}
         </div>
       </div>
-      <div class="sim-comment-item muted-comment">
-        <div class="sim-comment-avatar avatar-muted">M</div>
+      <div class="sim-comment-item" style="opacity: 0.6;">
+        <div class="sim-comment-avatar" style="background:#553C9A;">M</div>
         <div class="sim-comment-content">
-          <div class="comment-author-row">
-            <span class="sim-comment-user">@marco_dev</span>
-            <span class="comment-time">4m ago</span>
-          </div>
-          <div class="comment-text-body">Super helpful reel, testing this with my team!</div>
+          <span class="sim-comment-user">@mark_creator</span>
+          <span>Great breakdown on reel conversion rules!</span>
         </div>
       </div>
     `;
 
-    // Render DM Chat with smooth transition
+    // Animate DM Appearance
     simDmBubble.style.opacity = '0';
     simDmBubble.style.transform = 'translateY(6px)';
 
+    if (simDmRecipient) {
+      simDmRecipient.textContent = `@${scenario.user}`;
+    }
+
     setTimeout(() => {
       simDmBubble.innerHTML = `
-        <div class="dm-message-bubble">
-          <p class="dm-text">${scenario.dmMessage}</p>
-          
-          <div class="dm-resource-link-card">
-            <div class="resource-card-icon">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                <polyline points="14 2 14 8 20 8"></polyline>
-                <line x1="16" y1="13" x2="8" y2="13"></line>
-                <line x1="16" y1="17" x2="8" y2="17"></line>
-                <polyline points="10 9 9 9 8 9"></polyline>
-              </svg>
-            </div>
-            <div class="resource-card-info">
-              <span class="resource-domain">${scenario.resourceDomain}</span>
-              <span class="resource-title">${scenario.resourceTitle}</span>
-              <span class="resource-tag">${scenario.resourceBadge}</span>
-            </div>
-            <div class="resource-action-icon">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                <line x1="5" y1="12" x2="19" y2="12"></line>
-                <polyline points="12 5 19 12 12 19"></polyline>
-              </svg>
-            </div>
-          </div>
+        <p>${scenario.dmMessage}</p>
+        <div class="dm-action-button" id="simDmActionBtn">
+          <span>${scenario.actionButton}</span>
         </div>
       `;
       simDmBubble.style.opacity = '1';
       simDmBubble.style.transform = 'translateY(0)';
-      simDmBubble.style.transition = 'opacity 0.24s cubic-bezier(0.16, 1, 0.3, 1), transform 0.24s cubic-bezier(0.16, 1, 0.3, 1)';
+      simDmBubble.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
 
       if (simDeliveryBadge) {
         simDeliveryBadge.innerHTML = `
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="20 6 9 17 4 12"></polyline>
           </svg>
-          <span>Delivered in ${scenario.latency} via Official Meta Graph API</span>
+          <span>Delivered in 1.1s via Comment2DM</span>
         `;
       }
-    }, 200);
+    }, 280);
   }
 
   function startDemoAutoCycle() {
@@ -274,67 +228,66 @@
     }, 4500);
   }
 
+  // Initial render
   if (simCommentsContainer) {
     renderScenario(demoScenarios[0]);
     startDemoAutoCycle();
   }
 
-  // Quick Chip Click Handlers
-  if (quickChipsList) {
-    quickChipsList.querySelectorAll('.chip-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const key = btn.getAttribute('data-chip');
-        const match = demoScenarios.find(s => s.keyword === key);
-        if (match) {
-          renderScenario(match);
-        }
-      });
-    });
-  }
-
-  // Custom Keyword Input Simulator
+  // Custom Keyword Trigger Handler
   if (demoTriggerBtn && demoKeywordInput) {
-    const handleCustomTrigger = () => {
-      const raw = (demoKeywordInput.value || '').trim();
-      if (!raw) return;
-      const word = raw.toUpperCase().slice(0, 16);
+    demoTriggerBtn.addEventListener('click', () => {
+      const word = (demoKeywordInput.value || '').trim().toUpperCase();
+      if (!word) return;
 
       const customScenario = {
         keyword: word,
         user: 'you_on_instagram',
-        avatar: 'Y',
         commentText: `Can I get the details? ${word} please! 🔥`,
-        dmMessage: `Hey there! ⚡ Comment2DM instantly caught your keyword "${word}". Here is your direct automated access link:`,
-        resourceTitle: `Exclusive [${word}] Resource Bundle`,
-        resourceDomain: `comment2dm.app/r/${word.toLowerCase()}`,
-        resourceBadge: `Instant Download · Direct Link`,
-        latency: '0.6s'
+        dmMessage: `Hey there! ⚡ Comment2DM caught your keyword "${word}". Here is your instant automated access link:`,
+        actionButton: `👉 Claim Access For [${word}]`
       };
 
-      renderScenario(customScenario);
-      demoKeywordInput.value = '';
-    };
+      renderScenario(customScenario, true);
+    });
 
-    demoTriggerBtn.addEventListener('click', handleCustomTrigger);
     demoKeywordInput.addEventListener('keydown', e => {
       if (e.key === 'Enter') {
         e.preventDefault();
-        handleCustomTrigger();
+        demoTriggerBtn.click();
       }
     });
   }
 
-  // Pause / Resume Auto Cycle
+  // Pause / Resume Toggle
   if (pauseDemoBtn) {
     pauseDemoBtn.addEventListener('click', () => {
       isDemoPaused = !isDemoPaused;
-      pauseDemoBtn.textContent = isDemoPaused ? '▶' : '⏸';
-      pauseDemoBtn.title = isDemoPaused ? 'Resume auto simulation' : 'Pause auto simulation';
+      pauseDemoBtn.textContent = isDemoPaused ? '▶ Resume Demo' : '⏸ Pause';
+      pauseDemoBtn.setAttribute('title', isDemoPaused ? 'Resume auto simulation' : 'Pause auto simulation');
     });
   }
 
   // ==========================================
-  // 5. PRICING MONTHLY / ANNUAL SWITCH
+  // 5. HOW IT WORKS PROGRESS LINE OBSERVER
+  // ==========================================
+  const hiwSection = document.getElementById('how-it-works');
+  const lineProgress = document.getElementById('hiwLineProgress');
+
+  if (hiwSection && lineProgress) {
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          lineProgress.style.width = '100%';
+        }
+      });
+    }, { threshold: 0.35 });
+
+    observer.observe(hiwSection);
+  }
+
+  // ==========================================
+  // 6. PRICING MONTHLY / ANNUAL TOGGLE
   // ==========================================
   const billingCycleSwitch = document.getElementById('billingCycleSwitch');
   const monthlyLabel = document.getElementById('monthlyLabel');
@@ -362,6 +315,7 @@
       if (elitePriceEl) elitePriceEl.textContent = isAnnual ? pricingData.elite.annual : pricingData.elite.monthly;
       if (elitePeriodEl) elitePeriodEl.textContent = isAnnual ? pricingData.elite.period : '/ month';
 
+      // Update CTA query params
       const cycle = isAnnual ? 'annual' : 'monthly';
       document.querySelectorAll('[data-plan-target]').forEach(link => {
         const plan = link.getAttribute('data-plan-target');
@@ -371,7 +325,7 @@
   }
 
   // ==========================================
-  // 6. PURPOSEFUL SCROLL REVEAL
+  // 7. SCROLL REVEAL OBSERVER
   // ==========================================
   const revealElements = document.querySelectorAll('.reveal-item');
   if ('IntersectionObserver' in window && revealElements.length > 0) {
@@ -382,7 +336,7 @@
           revealObserver.unobserve(entry.target);
         }
       });
-    }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+    }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
 
     revealElements.forEach(el => revealObserver.observe(el));
   } else {
@@ -390,7 +344,7 @@
   }
 
   // ==========================================
-  // 7. DYNAMIC COPYRIGHT YEAR
+  // 8. DYNAMIC COPYRIGHT YEAR
   // ==========================================
   const currentYearEl = document.getElementById('currentYear');
   if (currentYearEl) {
