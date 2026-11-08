@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Blog & Insights — Comment2DM | Instagram DM Automation Guide</title>
+  <meta name="description" content="Actionable guides, conversion blueprints, and compliance best practices for Instagram comment-to-DM automation by Comment2DM and VI TECH Limited." />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  
+  <!-- Open Graph -->
+  <meta property="og:title" content="Comment2DM Blog — Instagram DM Automation & Growth Strategies" />
+  <meta property="og:description" content="Discover actionable tips, compliance guides, and conversion blueprints for Instagram creators and businesses." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://comment2dm-roq7.onrender.com/blog.html" />
+  <meta property="og:image" content="/og-image.svg" />
+
+  <!-- Google Fonts: Plus Jakarta Sans & Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="landing.css" />
+
+  <!-- Instant Theme Sync Script (Prevents Theme Flash) -->
+  <script>
+    (function () {
+      const saved = localStorage.getItem('comment2dm_theme');
+      if (saved === 'light' || (!saved && window.matchMedia('(prefers-color-scheme: light)').matches)) {
+        document.documentElement.setAttribute('data-theme', 'light');
+      } else {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+    })();
+  </script>
+</head>
+<body>
+
+  <!-- STICKY SITE HEADER -->
+  <header class="site-header" id="siteHeader">
+    <div class="container nav-container">
+      <!-- Brand Logo -->
+      <a href="index.html" class="brand-logo" aria-label="Comment2DM Homepage">
+        <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <rect width="32" height="32" rx="9" fill="#191621" stroke="rgba(255,255,255,0.12)" stroke-width="1.2" />
+          <path d="M9 13C9 10.79 10.79 9 13 9H19C21.21 9 23 10.79 23 13V18C23 20.21 21.21 22 19 22H14.5L10.5 25V22H13C10.79 22 9 20.21 9 18V13Z" stroke="url(#logo-grad-b)" stroke-width="1.8" stroke-linejoin="round" />
+          <path d="M16 11L13 16H18L15 21" stroke="#FF9B45" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+          <defs>
+            <linearGradient id="logo-grad-b" x1="9" y1="9" x2="23" y2="25" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#7655D9" />
+              <stop offset="0.5" stop-color="#936BFF" />
+              <stop offset="1" stop-color="#D946A8" />
+            </linearGradient>
+          </defs>
+        </svg>
+        <span>Comment<span class="logo-num">2</span>DM</span>
+      </a>
+
+      <!-- Center Navigation Links -->
+      <nav aria-label="Main Navigation">
+        <ul class="nav-menu">
+          <li><a href="index.html#features" class="nav-link">Features</a></li>
+          <li><a href="index.html#how-it-works" class="nav-link">How It Works</a></li>
+          <li><a href="pricing.html" class="nav-link">Pricing</a></li>
+          <li><a href="blog.html" class="nav-link active">Blog</a></li>
+        </ul>
+      </nav>
+
+      <!-- Right Action Items -->
+      <div class="nav-actions">
+        <!-- Theme Toggle -->
+        <button class="theme-toggle-btn" id="themeToggleBtn" type="button" aria-label="Toggle theme">
+          <svg class="moon-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+          </svg>
+          <svg class="sun-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+          </svg>
+        </button>
+
+        <a href="login.html?tab=login" class="btn btn-ghost">Login</a>
+        <a href="login.html?tab=signup" class="btn btn-primary">Get Started Free</a>
+
+        <button class="hamburger-btn" id="hamburgerBtn" type="button" aria-label="Open mobile menu" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- MOBILE NAVIGATION DRAWER -->
+  <div class="mobile-menu-drawer" id="mobileMenuDrawer" aria-label="Mobile Navigation">
+    <a href="index.html#features" class="mobile-nav-link">Features</a>
+    <a href="index.html#how-it-works" class="mobile-nav-link">How It Works</a>
+    <a href="pricing.html" class="mobile-nav-link">Pricing</a>
+    <a href="blog.html" class="mobile-nav-link">Blog</a>
+    <div style="height:1px; background:var(--border-subtle); margin:8px 0;"></div>
+    <a href="login.html?tab=login" class="btn btn-secondary btn-block">Login</a>
+    <a href="login.html?tab=signup" class="btn btn-primary btn-block">Get Started Free</a>
+  </div>
+
+  <!-- BLOG HERO -->
+  <main>
+    <section style="padding: 72px 0 48px; border-bottom: 1px solid var(--border-subtle);">
+      <div class="container" style="text-align: center; max-width: 760px;">
+        <span class="hero-eyebrow">
+          <span class="badge-pulse"></span>
+          Growth & Engineering Insights
+        </span>
+        <h1 class="hero-title" style="font-size: clamp(2.2rem, 3.8vw, 3.2rem);">
+          Turn Attention Into <span class="gradient-text">Conversations.</span>
+        </h1>
+        <p class="hero-description" style="margin: 0 auto;">
+          In-depth guides, official Meta API best practices, and proven comment-to-DM strategies to scale your creator and business workflows.
+        </p>
+      </div>
+    </section>
+
+    <!-- FEATURED ARTICLE -->
+    <section style="padding: 64px 0;">
+      <div class="container">
+        <article class="hero-visual-card" style="padding: 36px; margin-bottom: 56px; border-color: var(--border-highlight);">
+          <div style="display: flex; gap: 36px; align-items: center; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 280px;">
+              <span class="usecase-tag" style="color: var(--accent-amber);">Featured Blueprint · 2026 Edition</span>
+              <h2 style="font-size: clamp(1.6rem, 2.6vw, 2.2rem); font-weight: 800; line-height: 1.25; margin-bottom: 16px; color: var(--text-primary);">
+                How to Convert 40%+ of Reel Commenters into Email Leads and Customers
+              </h2>
+              <p style="color: var(--text-secondary); font-size: 1rem; line-height: 1.6; margin-bottom: 24px;">
+                Manual DM responses take hours, and prospective customers lose interest in minutes. Discover how top creators use instant keyword automations to capture high-intent leads while attention is at its peak.
+              </p>
+              <div style="display: flex; align-items: center; gap: 16px; font-size: 0.86rem; color: var(--text-dim); margin-bottom: 24px;">
+                <span>By VI TECH Engineering Team</span>
+                <span>•</span>
+                <span>6 min read</span>
+                <span>•</span>
+                <span>Official Meta Compliance</span>
+              </div>
+              <a href="login.html?tab=signup" class="btn btn-primary">
+                Deploy This Automation Flow →
+              </a>
+            </div>
+            <div style="flex: 0.9; min-width: 280px; background: var(--bg-secondary); border-radius: var(--radius-md); padding: 24px; border: 1px solid var(--border-subtle);">
+              <div style="font-size: 0.82rem; font-weight: 700; color: var(--accent-violet-bright); text-transform: uppercase; margin-bottom: 12px;">
+                The 3-Step High-Conversion Loop
+              </div>
+              <ul style="list-style: none; display: flex; flex-direction: column; gap: 14px; font-size: 0.92rem; color: var(--text-secondary);">
+                <li style="display: flex; gap: 10px; align-items: flex-start;">
+                  <span style="color: var(--accent-emerald); font-weight: 700;">01</span>
+                  <span><strong>Clear Call-to-Action:</strong> Include a single, distinct trigger word (e.g. "GUIDE") in your reel cover and caption.</span>
+                </li>
+                <li style="display: flex; gap: 10px; align-items: flex-start;">
+                  <span style="color: var(--accent-emerald); font-weight: 700;">02</span>
+                  <span><strong>Instant DM Delivery:</strong> Comment2DM delivers the direct resource link in under 2 seconds.</span>
+                </li>
+                <li style="display: flex; gap: 10px; align-items: flex-start;">
+                  <span style="color: var(--accent-emerald); font-weight: 700;">03</span>
+                  <span><strong>Public Reply Confirmation:</strong> Post an automated polite reply letting the commenter know to check their inbox.</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <!-- ARTICLES GRID -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 32px;">
+          
+          <!-- Article 1 -->
+          <article class="feature-card">
+            <span class="usecase-tag">Compliance & Safety</span>
+            <h3 class="feature-card-title" style="font-size: 1.25rem;">
+              The Complete 2026 Guide to Instagram Graph API Compliance & Webhooks
+            </h3>
+            <p class="feature-card-desc" style="margin-bottom: 24px;">
+              Learn why official Meta OAuth permissions are essential to protect your Instagram account from shadowbans, credential theft, and spam detection flags.
+            </p>
+            <div style="margin-top: auto; display: flex; align-items: center; justify-content: space-between; font-size: 0.84rem; color: var(--text-dim);">
+              <span>5 min read</span>
+              <a href="login.html?tab=signup" style="color: var(--accent-violet-bright); font-weight: 600; text-decoration: none;">Learn more →</a>
+            </div>
+          </article>
+
+          <!-- Article 2 -->
+          <article class="feature-card">
+            <span class="usecase-tag">Growth Playbook</span>
+            <h3 class="feature-card-title" style="font-size: 1.25rem;">
+              Top 10 High-Converting Keyword Automation Triggers for Creators & E-Commerce
+            </h3>
+            <p class="feature-card-desc" style="margin-bottom: 24px;">
+              A curated breakdown of the highest-performing trigger keywords across coaching, SaaS, fashion, and digital products that maximize comment engagement.
+            </p>
+            <div style="margin-top: auto; display: flex; align-items: center; justify-content: space-between; font-size: 0.84rem; color: var(--text-dim);">
+              <span>4 min read</span>
+              <a href="login.html?tab=signup" style="color: var(--accent-violet-bright); font-weight: 600; text-decoration: none;">Learn more →</a>
+            </div>
+          </article>
+
+          <!-- Article 3 -->
+          <article class="feature-card">
+            <span class="usecase-tag">Speed & Infrastructure</span>
+            <h3 class="feature-card-title" style="font-size: 1.25rem;">
+              Why Sub-2-Second DM Latency Multiplies Lead Conversion by 5x
+            </h3>
+            <p class="feature-card-desc" style="margin-bottom: 24px;">
+              An engineering analysis into customer intent decay curves on social platforms, and how real-time Webhook pipelines beat legacy scheduled pollers.
+            </p>
+            <div style="margin-top: auto; display: flex; align-items: center; justify-content: space-between; font-size: 0.84rem; color: var(--text-dim);">
+              <span>7 min read</span>
+              <a href="login.html?tab=signup" style="color: var(--accent-violet-bright); font-weight: 600; text-decoration: none;">Learn more →</a>
+            </div>
+          </article>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA BANNER -->
+    <section class="final-cta-section">
+      <div class="container">
+        <div class="final-cta-card">
+          <h2 class="final-cta-title">
+            Start Automating Your Instagram <span class="gradient-text">Conversations Today</span>
+          </h2>
+          <p class="final-cta-desc">
+            Connect your account in seconds via official Meta OAuth. No credit card required.
+          </p>
+          <div class="final-cta-actions">
+            <a href="login.html?tab=signup" class="btn btn-primary btn-lg">
+              Get Started Free
+            </a>
+            <a href="pricing.html" class="btn btn-secondary btn-lg">
+              View Pricing
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- SOPHISTICATED MULTI-COLUMN FOOTER -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <!-- Col 1: Brand -->
+        <div class="footer-brand">
+          <a href="index.html" class="brand-logo" aria-label="Comment2DM">
+            <svg width="28" height="28" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+              <rect width="32" height="32" rx="9" fill="#191621" stroke="rgba(255,255,255,0.12)" stroke-width="1.2" />
+              <path d="M9 13C9 10.79 10.79 9 13 9H19C21.21 9 23 10.79 23 13V18C23 20.21 21.21 22 19 22H14.5L10.5 25V22H13C10.79 22 9 20.21 9 18V13Z" stroke="url(#logo-footer-b)" stroke-width="1.8" stroke-linejoin="round" />
+              <path d="M16 11L13 16H18L15 21" stroke="#FF9B45" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+              <defs>
+                <linearGradient id="logo-footer-b" x1="9" y1="9" x2="23" y2="25" gradientUnits="userSpaceOnUse">
+                  <stop stop-color="#7655D9" />
+                  <stop offset="0.5" stop-color="#936BFF" />
+                  <stop offset="1" stop-color="#D946A8" />
+                </linearGradient>
+              </defs>
+            </svg>
+            <span>Comment<span class="logo-num">2</span>DM</span>
+          </a>
+          <p>
+            Empowering creators and brands to turn Instagram comments into automated, high-converting direct message conversations.
+          </p>
+        </div>
+
+        <!-- Col 2: Product -->
+        <div>
+          <h4 class="footer-col-title">Product</h4>
+          <ul class="footer-links">
+            <li><a href="index.html#features">Features</a></li>
+            <li><a href="index.html#how-it-works">How It Works</a></li>
+            <li><a href="pricing.html">Pricing</a></li>
+            <li><a href="blog.html">Blog</a></li>
+          </ul>
+        </div>
+
+        <!-- Col 3: Support -->
+        <div>
+          <h4 class="footer-col-title">Support</h4>
+          <ul class="footer-links">
+            <li><a href="help.html">Help Center</a></li>
+            <li><a href="contact.html">Contact Us</a></li>
+            <li><a href="dashboard.html">Live Dashboard</a></li>
+          </ul>
+        </div>
+
+        <!-- Col 4: Legal -->
+        <div>
+          <h4 class="footer-col-title">Legal</h4>
+          <ul class="footer-links">
+            <li><a href="privacy.html">Privacy Policy</a></li>
+            <li><a href="terms.html">Terms of Service</a></li>
+            <li><a href="refund.html">Refund Policy</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Bottom Bar -->
+      <div class="footer-bottom-bar">
+        <span>© <span id="currentYear">2026</span> Comment2DM by VI TECH Limited. All rights reserved.</span>
+        <div class="footer-meta-pill">
+          <span class="status-dot-pulse"></span>
+          <span>Official Meta Graph API Integration</span>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Scripts -->
+  <script src="landing.js"></script>
+</body>
+</html>

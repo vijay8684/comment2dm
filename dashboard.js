@@ -272,9 +272,11 @@
   const refreshBtn = document.getElementById('refreshActivityBtn');
   if (refreshBtn) refreshBtn.addEventListener('click', loadDashboardOverview);
 
-  // Initialize all data
-  loadUser();
-  loadBillingQuota();
-  loadInstagramAccounts();
-  loadDashboardOverview();
+  // Initialize all data concurrently for maximum speed
+  Promise.allSettled([
+    loadUser(),
+    loadBillingQuota(),
+    loadInstagramAccounts(),
+    loadDashboardOverview()
+  ]);
 })();

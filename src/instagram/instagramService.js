@@ -362,17 +362,26 @@ async function resolveReelUrl(ownerUserId, instagramUserId, reelUrl) {
 
 async function disconnect(userId, instagramUserId) {
   if (db.collections) {
-    const { instagramAccounts } = db.collections();
+    const { instagramAccounts, automations } = db.collections();
     const ids = [String(instagramUserId)];
     if (!isNaN(Number(instagramUserId))) ids.push(Number(instagramUserId));
-    await instagramAccounts.deleteMany({
-      $or: [
-        { instagram_user_id: { $in: ids }, owner_user_id: String(userId) },
-        { instagram_user_id: { $in: ids } }
-      ]
-    });
+    await Promise.allSettled([
+      instagramAccounts.deleteMany({
+        $or: [
+          { instagram_user_id: { $in: ids }, owner_user_id: String(userId) },
+          { instagram_user_id: { $in: ids } }
+        ]
+      }),
+      automations.deleteMany({
+        $or: [
+          { instagram_user_id: { $in: ids }, owner_user_id: String(userId) },
+          { instagram_user_id: { $in: ids } }
+        ]
+      })
+    ]);
   } else {
     await db.run('DELETE FROM instagram_accounts WHERE owner_user_id = ? AND instagram_user_id = ?', [userId, instagramUserId]);
+    await db.run('DELETE FROM automations WHERE owner_user_id = ? AND instagram_user_id = ?', [userId, instagramUserId]);
   }
   reelsCache.delete(`${userId}:${instagramUserId}`);
 }

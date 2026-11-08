@@ -542,8 +542,9 @@
             throw new Error(errData.error || 'Failed to delete');
           }
 
-          // Immediately remove from memory array
+          // Immediately remove from memory array and update cache
           userAutomations = userAutomations.filter(a => String(a.id) !== String(auto.id));
+          try { sessionStorage.setItem('comment2dm_cached_automations', JSON.stringify(userAutomations)); } catch (_) {}
 
           // If currently editing this automation, close builder immediately
           if (automationIdInput.value === String(auto.id)) {
@@ -568,40 +569,65 @@
     return div.innerHTML;
   }
 
-  // Initial Data Load
-  async function init() {
-    try {
-      // 1. Fetch Instagram Accounts
-      const acctRes = await fetch('/api/instagram/accounts', {
-        headers: window.getAuthHeaders(),
-        credentials: 'same-origin'
+  function updateAccountSelectUi() {
+    if (userAccounts.length === 0) {
+      if (noAccountWarning) noAccountWarning.hidden = false;
+      if (openCreateBtn) openCreateBtn.disabled = true;
+    } else {
+      if (noAccountWarning) noAccountWarning.hidden = true;
+      if (openCreateBtn) openCreateBtn.disabled = false;
+      accountSelect.innerHTML = '';
+      userAccounts.forEach(acct => {
+        const opt = document.createElement('option');
+        opt.value = acct.id;
+        opt.textContent = `@${acct.username} (ID: ${acct.id})`;
+        accountSelect.appendChild(opt);
       });
-      const acctData = await acctRes.json().catch(() => ({}));
-      userAccounts = acctData.accounts || [];
+    }
+  }
 
-      if (userAccounts.length === 0) {
-        if (noAccountWarning) noAccountWarning.hidden = false;
-        if (openCreateBtn) openCreateBtn.disabled = true;
-      } else {
-        if (noAccountWarning) noAccountWarning.hidden = true;
-        if (openCreateBtn) openCreateBtn.disabled = false;
-        accountSelect.innerHTML = '';
-        userAccounts.forEach(acct => {
-          const opt = document.createElement('option');
-          opt.value = acct.id;
-          opt.textContent = `@${acct.username} (ID: ${acct.id})`;
-          accountSelect.appendChild(opt);
-        });
+  // Initial Data Load (Instant paint from cache + fast concurrent background refresh)
+  async function init() {
+    // 0. Paint cached state immediately (0ms latency on page switch)
+    try {
+      const cachedAccounts = sessionStorage.getItem('comment2dm_cached_accounts');
+      if (cachedAccounts) {
+        userAccounts = JSON.parse(cachedAccounts) || [];
+        updateAccountSelectUi();
+      }
+      const cachedAutos = sessionStorage.getItem('comment2dm_cached_automations');
+      if (cachedAutos) {
+        userAutomations = JSON.parse(cachedAutos) || [];
+        renderAutomations();
+      }
+    } catch (_) {}
+
+    try {
+      // Fast concurrent fetch (1 round trip instead of 2 sequential)
+      const [acctRes, autoRes] = await Promise.all([
+        fetch('/api/instagram/accounts', {
+          headers: window.getAuthHeaders(),
+          credentials: 'same-origin'
+        }),
+        fetch('/api/automations', {
+          headers: window.getAuthHeaders(),
+          credentials: 'same-origin'
+        })
+      ]);
+
+      if (acctRes.ok) {
+        const acctData = await acctRes.json().catch(() => ({}));
+        userAccounts = acctData.accounts || [];
+        sessionStorage.setItem('comment2dm_cached_accounts', JSON.stringify(userAccounts));
+        updateAccountSelectUi();
       }
 
-      // 2. Fetch Automations
-      const autoRes = await fetch('/api/automations', {
-        headers: window.getAuthHeaders(),
-        credentials: 'same-origin'
-      });
-      const autoData = await autoRes.json().catch(() => ({}));
-      userAutomations = autoData.automations || [];
-      renderAutomations();
+      if (autoRes.ok) {
+        const autoData = await autoRes.json().catch(() => ({}));
+        userAutomations = autoData.automations || [];
+        sessionStorage.setItem('comment2dm_cached_automations', JSON.stringify(userAutomations));
+        renderAutomations();
+      }
 
       // Check URL query param e.g. ?action=new
       const params = new URLSearchParams(window.location.search);
@@ -609,7 +635,9 @@
         openBuilder(null);
       }
     } catch (e) {
-      showError('Unable to load automations data.');
+      if (userAutomations.length === 0) {
+        showError('Unable to load automations data.');
+      }
     }
   }
 

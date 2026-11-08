@@ -662,11 +662,26 @@ app.delete('/api/automations/:id', requireAuth, async (request, response, next) 
     const automationId = request.params.id;
     if (db.collections) {
       const { ObjectId } = require('mongodb');
-      const clauses = [{ id: String(automationId) }];
+      const clauses = [
+        { id: String(automationId) },
+        { id: automationId }
+      ];
+      if (!isNaN(Number(automationId))) {
+        clauses.push({ id: Number(automationId) });
+      }
       if (/^[a-f0-9]{24}$/i.test(String(automationId))) {
         try { clauses.push({ _id: new ObjectId(String(automationId)) }); } catch (_) {}
       }
-      await db.collections().automations.deleteMany({ $or: clauses });
+      const ownerClauses = [
+        { owner_user_id: String(request.user.id) },
+        { owner_user_id: request.user.id }
+      ];
+      await db.collections().automations.deleteMany({
+        $and: [
+          { $or: clauses },
+          { $or: ownerClauses }
+        ]
+      });
     } else {
       await db.run('DELETE FROM automations WHERE id = ? AND owner_user_id = ?', [automationId, request.user.id]);
     }
