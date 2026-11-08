@@ -5,9 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Home Dashboard — Comment2DM</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
+
+  <!-- Instant Theme Sync (Default: Light Mode, Zero Flash) -->
+  <script>
+    (function () {
+      const saved = localStorage.getItem('comment2dm_theme');
+      const theme = saved === 'dark' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+  </script>
 </head>
 <body class="app-body" data-page="dashboard">
 
@@ -15,23 +25,23 @@
     <!-- Sidebar -->
     <aside class="app-sidebar" id="appSidebar">
       <div class="sidebar-top">
-        <a href="dashboard.html" class="logo">
+        <a href="dashboard.html" class="logo" aria-label="Comment2DM Dashboard">
           <span class="logo-mark">⚡</span>
           <span>Comment<span style="color:var(--accent-light);">2</span>DM</span>
         </a>
-        <button class="sidebar-toggle-btn" id="sidebarToggleBtn" title="Toggle Sidebar (<<)">
+        <button class="sidebar-toggle-btn" id="sidebarToggleBtn" title="Toggle Sidebar">
           <span id="collapseIcon">«</span>
         </button>
       </div>
 
       <!-- Connected Instagram Account Switcher -->
       <div class="sidebar-account" id="sidebarAccountArea">
-        <button class="account-selector" id="accountSwitcherBtn">
+        <button class="account-selector" id="accountSwitcherBtn" title="Manage Instagram Accounts">
           <div class="account-pill">
-            <div class="account-avatar-img" id="sidebarIgAvatar" style="display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:0.75rem;">IG</div>
+            <div class="account-avatar-img" id="sidebarIgAvatar" style="display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--ink);font-size:0.75rem;">IG</div>
             <div class="account-meta">
-              <span class="account-username" id="sidebarIgUsername">No Account</span>
-              <span class="account-status" id="sidebarIgStatus">Connect now</span>
+              <span class="account-username" id="sidebarIgUsername">Checking...</span>
+              <span class="account-status" id="sidebarIgStatus" style="font-size:0.74rem; color:var(--ink-muted);">Syncing</span>
             </div>
           </div>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
@@ -39,16 +49,16 @@
       </div>
 
       <!-- App Navigation -->
-          <nav class="app-nav" aria-label="Main Navigation">
-    <a href="dashboard.html" data-nav="dashboard"><span class="nav-icon">🏠</span><span>Home</span></a>
-    <a href="instagram-accounts.html" data-nav="instagram"><span class="nav-icon">📸</span><span>Instagram Accounts</span></a>
-    <a href="automations.html" data-nav="automations"><span class="nav-icon">⚙️</span><span>Automations</span></a>
-    <a href="creator-tools.html" data-nav="creator-tools"><span class="nav-icon">✨</span><span>Creator Studio AI</span></a>
-    <a href="analytics.html" data-nav="analytics"><span class="nav-icon">📊</span><span>Analytics</span></a>
-    <a href="messages.html" data-nav="messages"><span class="nav-icon">💌</span><span>DM Log</span></a>
-    <a href="settings.html" data-nav="settings"><span class="nav-icon">👤</span><span>Settings</span></a>
-    <a href="help.html" data-nav="help"><span class="nav-icon">💬</span><span>Help Desk</span></a>
-  </nav>
+      <nav class="app-nav" aria-label="Main Navigation">
+        <a href="dashboard.html" data-nav="dashboard" title="Home Dashboard"><span class="nav-icon">🏠</span><span>Home</span></a>
+        <a href="instagram-accounts.html" data-nav="instagram" title="Instagram Accounts"><span class="nav-icon">📸</span><span>Instagram Accounts</span></a>
+        <a href="automations.html" data-nav="automations" title="Automations"><span class="nav-icon">⚙️</span><span>Automations</span></a>
+        <a href="creator-tools.html" data-nav="creator-tools" title="Creator Studio AI"><span class="nav-icon">✨</span><span>Creator Studio AI</span></a>
+        <a href="analytics.html" data-nav="analytics" title="Analytics"><span class="nav-icon">📊</span><span>Analytics</span></a>
+        <a href="messages.html" data-nav="messages" title="DM Log & History"><span class="nav-icon">💌</span><span>DM Log</span></a>
+        <a href="settings.html" data-nav="settings" title="Account Settings"><span class="nav-icon">👤</span><span>Settings</span></a>
+        <a href="help.html" data-nav="help" title="Help Desk & Support"><span class="nav-icon">💬</span><span>Help Desk</span></a>
+      </nav>
 
       <!-- Sidebar Footer: DM Limit Bar & Mini-Pie Gauge -->
       <div class="sidebar-foot">
@@ -60,17 +70,17 @@
           <div class="dm-progress-track">
             <div class="dm-progress-fill" id="dmProgressFill" style="width: 5%;"></div>
           </div>
-          <a href="billing.html" class="btn btn-ghost btn-sm btn-block" style="font-size:0.78rem; padding:5px;">
+          <a href="billing.html" class="btn btn-ghost btn-sm btn-block" style="font-size:0.78rem; padding:6px;">
             Upgrade Plan ↗
           </a>
         </div>
 
         <!-- Collapsed Mode Mini-Pie Gauge -->
-        <div class="pie-gauge-collapsed" id="pieGaugeCollapsed" title="View DM Limit & Upgrade">
+        <a href="billing.html" class="pie-gauge-collapsed" id="pieGaugeCollapsed" title="Monthly DM Usage — Click to Upgrade">
           <div class="pie-gauge" id="pieGaugeCircle">
             <div class="pie-gauge-inner" id="pieGaugeInner">0%</div>
           </div>
-        </div>
+        </a>
       </div>
     </aside>
 
@@ -82,21 +92,39 @@
           <button class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="Open navigation menu">☰</button>
           <div>
             <span class="eyebrow" style="margin-bottom:0;">Workspace</span>
-            <h2 style="font-size:1.15rem; font-weight:700;">Home Dashboard</h2>
+            <h2 style="font-size:1.15rem; font-weight:700; color:var(--ink);">Home Dashboard</h2>
           </div>
         </div>
 
-        <!-- User Profile Menu -->
+        <!-- User Profile & Actions -->
         <div class="header-user-menu">
-          <a href="help.html" class="notification-bell" title="Support Help Desk">
+          <!-- Shared Theme Toggle Button -->
+          <button class="theme-toggle-btn" id="themeToggleBtn" type="button" aria-label="Toggle theme" title="Toggle theme">
+            <svg class="moon-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+            <svg class="sun-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="5"></circle>
+              <line x1="12" y1="1" x2="12" y2="3"></line>
+              <line x1="12" y1="21" x2="12" y2="23"></line>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+              <line x1="1" y1="12" x2="3" y2="12"></line>
+              <line x1="21" y1="12" x2="23" y2="12"></line>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+            </svg>
+          </button>
+
+          <a href="help.html" class="notification-bell" title="Support & Help Desk">
             <span>💬</span>
           </a>
 
           <div style="position:relative;">
-            <button class="user-profile-trigger" id="userProfileBtn">
+            <button class="user-profile-trigger" id="userProfileBtn" aria-label="User profile menu">
               <div class="user-avatar-circle" id="userAvatarInitial">U</div>
               <div style="text-align:left; display:flex; flex-direction:column;">
-                <span style="font-size:0.86rem; font-weight:600; color:#fff;" id="topbarUserName">Loading...</span>
+                <span style="font-size:0.86rem; font-weight:600; color:var(--ink);" id="topbarUserName">Loading...</span>
                 <span class="plan-badge" id="topbarPlanBadge">Free</span>
               </div>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
@@ -104,16 +132,16 @@
 
             <!-- Dropdown Menu -->
             <div class="user-dropdown-menu" id="userDropdownMenu">
-              <div style="padding:8px 12px;">
-                <strong style="display:block; font-size:0.88rem; color:#fff;" id="dropdownName">User</strong>
+              <div style="padding:10px 14px;">
+                <strong style="display:block; font-size:0.88rem; color:var(--ink);" id="dropdownName">User</strong>
                 <small style="color:var(--ink-muted);" id="dropdownEmail">user@domain.com</small>
               </div>
               <div class="dropdown-divider"></div>
               <a href="settings.html" class="user-dropdown-item">👤 Account Settings</a>
               <a href="billing.html" class="user-dropdown-item">💎 Billing & Plans</a>
-              <a href="help.html" class="user-dropdown-item">💬 Support</a>
+              <a href="help.html" class="user-dropdown-item">💬 Support Desk</a>
               <div class="dropdown-divider"></div>
-              <button type="button" class="user-dropdown-item" id="logoutBtn" style="color:var(--rose); width:100%; text-align:left;">
+              <button type="button" class="user-dropdown-item" id="logoutBtn" style="color:var(--rose); width:100%; text-align:left; border:none; background:none; cursor:pointer;">
                 🚪 Sign out
               </button>
             </div>
@@ -128,88 +156,189 @@
         <!-- Greeting Section -->
         <div style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:16px; margin-bottom:28px;">
           <div>
-            <h1 style="font-size:1.9rem; margin-bottom:4px;" id="welcomeGreeting">Hello, Creator 👋</h1>
+            <h1 style="font-size:1.85rem; margin-bottom:4px; font-weight:800; color:var(--ink);" id="welcomeGreeting">Hello, Creator 👋</h1>
             <p style="color:var(--ink-secondary); font-size:0.95rem;">
               Monitor your Instagram connections, automations, and messaging activity from one place.
             </p>
           </div>
-          <div style="display:flex; gap:12px;">
-            <a href="create-automation.html" class="btn btn-accent">
+          <div style="display:flex; gap:12px; flex-wrap:wrap;">
+            <a href="automations.html?action=new" class="btn btn-accent" id="createAutomationHeaderBtn">
               <span>+ Create Automation</span>
             </a>
-            <a href="instagram-accounts.html" class="btn btn-ghost">
-              <span>Connect Account</span>
+            <a href="instagram-accounts.html" class="btn btn-secondary" id="connectAccountHeaderBtn">
+              <span>Manage Accounts</span>
             </a>
           </div>
         </div>
 
-        <!-- Metric Overview Cards -->
+        <!-- ==============================================
+             1. Instagram Connection State Section
+             ============================================== -->
+        <div id="instagramConnectionSection" style="margin-bottom: 28px;">
+
+          <!-- Loading State -->
+          <div id="igLoadingState" class="apple-card" style="padding: 18px 24px; display: flex; align-items: center; gap: 14px;">
+            <div style="width: 18px; height: 18px; border: 2px solid var(--glass-border); border-top-color: var(--accent); border-radius: 50%; animation: igSpin 0.75s linear infinite; flex-shrink: 0;"></div>
+            <span style="color: var(--ink-secondary); font-size: 0.9rem;">Checking Instagram connection status...</span>
+          </div>
+
+          <!-- Connected & Active Account State (Shown when active account exists) -->
+          <div id="igConnectedCard" class="apple-card" style="display: none; padding: 20px 24px; border-color: rgba(118, 85, 217, 0.25); background: linear-gradient(135deg, rgba(118, 85, 217, 0.05) 0%, rgba(217, 70, 168, 0.03) 100%);">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 18px;">
+              <div style="display: flex; align-items: center; gap: 16px;">
+                <div style="position: relative; width: 48px; height: 48px; border-radius: 50%; padding: 2px; background: linear-gradient(45deg, #f09433, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%); flex-shrink: 0;">
+                  <div id="igConnectedAvatar" style="width: 100%; height: 100%; border-radius: 50%; background: var(--surface); color: var(--ink); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1.05rem; border: 2px solid var(--surface);">
+                    IG
+                  </div>
+                </div>
+                <div>
+                  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                    <h3 style="font-size: 1.12rem; font-weight: 700; color: var(--ink); margin: 0;" id="igConnectedUsername">@instagram_user</h3>
+                    <span style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: var(--radius-pill); font-size: 0.74rem; font-weight: 600; background: var(--emerald-tint); color: var(--emerald); border: 1px solid rgba(16, 185, 129, 0.25);">
+                      <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--emerald); display: inline-block;"></span> Active Connection
+                    </span>
+                  </div>
+                  <p style="color: var(--ink-secondary); font-size: 0.85rem; margin: 0;">
+                    <span>Official Instagram Graph API · Webhooks listening</span>
+                    <span id="igConnectedMeta" style="color: var(--ink-muted); margin-left: 8px;"></span>
+                  </p>
+                </div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                <a href="instagram-accounts.html" class="btn btn-secondary btn-sm" title="View connected reels and account details">
+                  Manage Account ↗
+                </a>
+                <a href="automations.html?action=new" class="btn btn-accent btn-sm" title="Create a new comment trigger">
+                  <span>+ New Automation</span>
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <!-- Expired Token State (Shown when account token needs re-authentication) -->
+          <div id="igExpiredCard" class="apple-card" style="display: none; padding: 20px 24px; border-color: rgba(245, 158, 11, 0.4); background: linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(217, 70, 168, 0.04) 100%);">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
+              <div style="display: flex; align-items: center; gap: 14px;">
+                <div style="width: 44px; height: 44px; border-radius: 12px; background: var(--amber-tint); color: var(--amber); display: flex; align-items: center; justify-content: center; font-size: 1.35rem; flex-shrink: 0;">
+                  ⚠️
+                </div>
+                <div>
+                  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 3px;">
+                    <strong style="font-size: 1rem; color: var(--ink);" id="igExpiredUsername">@instagram_user</strong>
+                    <span style="padding: 2px 8px; border-radius: var(--radius-pill); font-size: 0.72rem; font-weight: 700; background: var(--amber-tint); color: var(--amber); border: 1px solid rgba(245, 158, 11, 0.3);">
+                      Authorization Expired
+                    </span>
+                  </div>
+                  <p style="color: var(--ink-secondary); font-size: 0.85rem; margin: 0;">
+                    Meta requires periodic token refresh. Reconnect your account to resume automatic comment replies and DMs.
+                  </p>
+                </div>
+              </div>
+              <a href="/api/instagram/authorize" class="btn btn-accent btn-sm">
+                Reconnect Account ⚡
+              </a>
+            </div>
+          </div>
+
+          <!-- Disconnected / No Account State (Shown ONLY when 0 accounts connected) -->
+          <div id="igDisconnectedCard" class="apple-card" style="display: none; padding: 24px; background: linear-gradient(135deg, rgba(118, 85, 217, 0.08) 0%, rgba(217, 70, 168, 0.04) 100%); border-color: rgba(118, 85, 217, 0.28);">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 18px;">
+              <div style="display: flex; align-items: center; gap: 16px;">
+                <div style="width: 50px; height: 50px; border-radius: 14px; background: var(--accent-gradient); display: flex; align-items: center; justify-content: center; font-size: 1.5rem; color: #fff; box-shadow: 0 4px 16px var(--accent-glow); flex-shrink: 0;">
+                  📸
+                </div>
+                <div>
+                  <h3 style="font-size: 1.15rem; font-weight: 700; color: var(--ink); margin-bottom: 4px;">Connect your Instagram Account</h3>
+                  <p style="color: var(--ink-secondary); font-size: 0.88rem; max-width: 580px; margin-bottom: 6px;">
+                    Connect your professional Instagram account securely through Meta's official authorization process to enable comment-to-DM automation.
+                  </p>
+                  <div style="display: flex; align-items: center; gap: 14px; font-size: 0.78rem; color: var(--ink-muted); flex-wrap: wrap;">
+                    <span>🔒 Official Instagram API integration</span>
+                    <span>• Password is never shared with Comment2DM</span>
+                    <span>• Takes 30 seconds</span>
+                  </div>
+                </div>
+              </div>
+              <a href="/api/instagram/authorize" class="btn btn-accent" id="bannerConnectBtn">
+                Connect Instagram Now ⚡
+              </a>
+            </div>
+          </div>
+
+          <!-- Connection Error State -->
+          <div id="igErrorCard" class="apple-card" style="display: none; padding: 18px 24px; border-color: rgba(244, 63, 94, 0.3);">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+              <span style="color: var(--rose); font-size: 0.88rem;" id="igErrorMessage">Unable to reach Instagram status API.</span>
+              <button type="button" class="btn btn-ghost btn-sm" id="igRetryBtn">Retry ↻</button>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ==============================================
+             2. Metric Overview Cards (Clickable)
+             ============================================== -->
         <section class="overview-grid">
-          <div class="metric-card">
+          <a href="messages.html" class="metric-card" style="text-decoration:none;" title="View DM Messages Log">
             <div class="metric-top">
               <span>Messages / DMs Sent</span>
               <span>📩</span>
             </div>
             <div class="metric-value" id="cardDmsSent">0</div>
             <div class="metric-trend" id="cardDmsNote">Live webhook tracking</div>
-          </div>
+          </a>
 
-          <div class="metric-card">
+          <a href="automations.html" class="metric-card" style="text-decoration:none;" title="View Active Automations">
             <div class="metric-top">
               <span>Active Automations</span>
               <span>⚡</span>
             </div>
             <div class="metric-value" id="cardActiveAutos">0</div>
             <div class="metric-trend" id="cardAutosNote" style="color:var(--accent-light);">Ready to respond</div>
-          </div>
+          </a>
 
-          <div class="metric-card">
+          <a href="messages.html" class="metric-card" style="text-decoration:none;" title="View Processed Comments">
             <div class="metric-top">
               <span>Comments Processed</span>
               <span>💬</span>
             </div>
             <div class="metric-value" id="cardComments">0</div>
             <div class="metric-trend" id="cardCommentsNote">Official Meta Webhook</div>
-          </div>
+          </a>
 
-          <div class="metric-card">
+          <a href="analytics.html" class="metric-card" style="text-decoration:none;" title="View Detailed Analytics">
             <div class="metric-top">
               <span>Delivery Success Rate</span>
               <span>📈</span>
             </div>
             <div class="metric-value" id="cardDeliveryRate">100%</div>
-            <div class="metric-trend" style="color:var(--emerald);" id="cardDeliveryNote">0 failed replies</div>
-          </div>
+            <div class="metric-trend" style="color:var(--emerald);" id="cardDeliveryNote">100% Delivery Success</div>
+          </a>
         </section>
 
-        <!-- Instagram Connection Banner (Visible when no accounts connected) -->
-        <div id="connectAccountBanner" class="apple-card" style="margin-bottom:28px; background:linear-gradient(135deg, rgba(99,102,241,0.1) 0%, rgba(236,72,153,0.06) 100%); border-color:rgba(99,102,241,0.3); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:18px;" hidden>
-          <div style="display:flex; align-items:center; gap:16px;">
-            <div style="width:48px; height:48px; border-radius:14px; background:var(--accent-gradient); display:flex; align-items:center; justify-content:center; font-size:1.4rem; color:#fff;">📸</div>
+        <!-- ==============================================
+             3. Live Activity Stream
+             ============================================== -->
+        <section class="apple-card" style="position:relative; overflow:hidden;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
             <div>
-              <h3 style="font-size:1.15rem; margin-bottom:3px;">Connect your Instagram Account</h3>
-              <p style="color:var(--ink-secondary); font-size:0.88rem;">To start sending automated DMs when viewers comment on your Reels, link your Instagram account.</p>
-            </div>
-          </div>
-          <a href="/api/instagram/authorize" class="btn btn-accent">Connect Instagram Now</a>
-        </div>
-
-        <!-- Live Activity Stream -->
-        <section class="apple-card">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-            <div>
-              <h2 style="font-size:1.18rem; margin-bottom:4px;">Automated Activity Feed</h2>
+              <h2 style="font-size:1.18rem; font-weight:700; color:var(--ink); margin-bottom:4px;">Automated Activity Feed</h2>
               <p style="color:var(--ink-secondary); font-size:0.86rem;">Recent comment triggers and direct message outcomes.</p>
             </div>
-            <button class="btn btn-ghost btn-sm" id="refreshActivityBtn">Refresh ↻</button>
+            <button class="btn btn-ghost btn-sm" id="refreshActivityBtn" title="Refresh recent activity">
+              <span id="refreshIcon" style="display:inline-block; transition:transform 0.4s ease;">↻</span> <span>Refresh</span>
+            </button>
           </div>
 
           <div id="activityFeedContainer">
-            <!-- Populated dynamically -->
+            <!-- Populated dynamically via dashboard.js -->
             <div style="text-align:center; padding:48px 16px; color:var(--ink-muted);" id="activityEmptyState">
               <div style="font-size:2.2rem; margin-bottom:12px;">⚡</div>
-              <h3 style="font-size:1rem; color:var(--ink-secondary); margin-bottom:4px;">No automation events yet</h3>
-              <p style="font-size:0.85rem;">When viewers comment on your Reels, your triggered private DMs and public replies will appear here in real-time.</p>
+              <h3 style="font-size:1rem; color:var(--ink); margin-bottom:6px;">No automation events yet</h3>
+              <p style="font-size:0.85rem; max-width:440px; margin:0 auto 18px; color:var(--ink-secondary);">
+                When viewers comment on your Reels, your triggered private DMs and public replies will appear here in real time.
+              </p>
+              <a href="automations.html?action=new" class="btn btn-accent btn-sm">Create an Automation</a>
             </div>
           </div>
         </section>
@@ -217,24 +346,58 @@
     </div>
   </div>
 
-  <!-- Connect Instagram Modal (Opens with blur backdrop if 0 accounts connected) -->
-  <div class="modal-overlay" id="connectInstagramModal">
+  <!-- ==============================================
+       Connect Instagram Modal (Opens with blur backdrop if 0 accounts connected)
+       ============================================== -->
+  <div class="modal-overlay" id="connectInstagramModal" role="dialog" aria-modal="true" aria-labelledby="connectModalTitle">
     <div class="modal-card">
       <div class="modal-icon-badge">📸</div>
-      <h2 style="font-size:1.4rem; margin-bottom:8px;">Connect Instagram Account</h2>
-      <p style="color:var(--ink-secondary); font-size:0.92rem; line-height:1.5; margin-bottom:24px;">
-        To automate comment-to-DM triggers on your Reels, link your professional Instagram account via official Meta Login.
+      <h2 style="font-size:1.35rem; font-weight:700; margin-bottom:8px; color:var(--ink);" id="connectModalTitle">Connect Instagram Account</h2>
+      <p style="color:var(--ink-secondary); font-size:0.9rem; line-height:1.55; margin-bottom:20px;">
+        Connect your professional Instagram account securely through Meta's official authorization process to enable comment-to-DM automation.
       </p>
-      <div style="display:flex; flex-direction:column; gap:12px;">
-        <a href="/api/instagram/authorize" class="btn btn-accent btn-block">
-          <span>Authorize via Meta</span>
+
+      <!-- Permissions Transparency -->
+      <div style="text-align:left; background:var(--surface-hover); border:1px solid var(--glass-border); border-radius:var(--radius-m); padding:14px 16px; margin-bottom:22px;">
+        <div style="display:flex; align-items:flex-start; gap:10px; margin-bottom:10px;">
+          <span style="font-size:1rem; line-height:1.2;">💬</span>
+          <div>
+            <strong style="font-size:0.84rem; color:var(--ink); display:block;">Detect Comments</strong>
+            <small style="color:var(--ink-secondary); font-size:0.78rem;">Listens for your designated trigger keywords on Reels & posts.</small>
+          </div>
+        </div>
+        <div style="display:flex; align-items:flex-start; gap:10px; margin-bottom:10px;">
+          <span style="font-size:1rem; line-height:1.2;">📩</span>
+          <div>
+            <strong style="font-size:0.84rem; color:var(--ink); display:block;">Send Direct Messages</strong>
+            <small style="color:var(--ink-secondary); font-size:0.78rem;">Delivers links, guides, and coupons directly to commenters' private DMs.</small>
+          </div>
+        </div>
+        <div style="display:flex; align-items:flex-start; gap:10px;">
+          <span style="font-size:1rem; line-height:1.2;">🔒</span>
+          <div>
+            <strong style="font-size:0.84rem; color:var(--ink); display:block;">Secure Meta Authorization</strong>
+            <small style="color:var(--ink-secondary); font-size:0.78rem;">Official Instagram API. Your password is never shared with Comment2DM.</small>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <a href="/api/instagram/authorize" class="btn btn-accent btn-block" style="padding:12px 20px; font-size:0.95rem;" id="modalContinueBtn">
+          <span>Continue with Instagram</span>
         </a>
-        <button type="button" class="btn btn-ghost btn-block" id="dismissConnectModal">
-          <span>Explore Workspace First</span>
+        <button type="button" class="btn btn-ghost btn-block" id="dismissConnectModal" style="padding:10px 20px;">
+          <span>Not now</span>
         </button>
       </div>
     </div>
   </div>
+
+  <style>
+    @keyframes igSpin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
 
   <script src="dashboard.js"></script>
 </body>
