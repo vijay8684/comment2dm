@@ -465,8 +465,11 @@ async function getDecryptedTokenByInstagramUserId(instagramUserId, ownerUserId) 
 }
 
 // 1. Send Private DM Reply to Commenter
-async function sendPrivateReply(instagramUserId, commentId, messageText, accessToken) {
-  const bodyData = { recipient: { comment_id: commentId }, message: { text: messageText } };
+async function sendPrivateReply(instagramUserId, commentId, messageContent, accessToken) {
+  const messageObj = typeof messageContent === 'object' && messageContent !== null
+    ? messageContent
+    : { text: String(messageContent) };
+  const bodyData = { recipient: { comment_id: commentId }, message: messageObj };
   
   // Attempt 1: graph.instagram.com with user ID
   const url1 = `https://graph.instagram.com/${apiVersion}/${instagramUserId}/messages`;
@@ -516,7 +519,60 @@ async function sendPrivateReply(instagramUserId, commentId, messageText, accessT
   throw error;
 }
 
-// 2. Send Public Reply in the Comment Thread ("Sent to your DM! Check inbox 📩")
+// 2. Send Direct Message to Recipient IGSID (Active 24-hr messaging window)
+async function sendDirectMessage(instagramUserId, recipientIgsid, messageContent, accessToken) {
+  const messageObj = typeof messageContent === 'object' && messageContent !== null
+    ? messageContent
+    : { text: String(messageContent) };
+  const bodyData = { recipient: { id: recipientIgsid }, message: messageObj };
+
+  // Attempt 1: graph.facebook.com with user ID
+  const url1 = `https://graph.facebook.com/${apiVersion}/${instagramUserId}/messages`;
+  let response = await fetch(url1, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(bodyData)
+  });
+  let data = await response.json().catch(() => ({}));
+  if (response.ok && (data.message_id || data.id)) {
+    console.log(`Direct DM sent successfully via graph.facebook.com to recipient ${recipientIgsid}`);
+    return data;
+  }
+
+  // Attempt 2: graph.instagram.com fallback
+  const url2 = `https://graph.instagram.com/${apiVersion}/${instagramUserId}/messages`;
+  const response2 = await fetch(url2, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(bodyData)
+  });
+  const data2 = await response2.json().catch(() => ({}));
+  if (response2.ok && (data2.message_id || data2.id)) {
+    console.log(`Direct DM sent successfully via graph.instagram.com to recipient ${recipientIgsid}`);
+    return data2;
+  }
+
+  // Attempt 3: /me/messages fallback
+  const url3 = `https://graph.instagram.com/${apiVersion}/me/messages`;
+  const response3 = await fetch(url3, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(bodyData)
+  });
+  const data3 = await response3.json().catch(() => ({}));
+  if (response3.ok && (data3.message_id || data3.id)) {
+    console.log(`Direct DM sent successfully via /me/messages to recipient ${recipientIgsid}`);
+    return data3;
+  }
+
+  const finalError = data3.error || data2.error || data.error;
+  const error = new Error(`Instagram Direct DM Error: ${metaErrorMessage({ error: finalError }, 'Failed to deliver direct message.')}`);
+  error.statusCode = response3.status || response2.status || response.status || 502;
+  error.metaError = finalError;
+  throw error;
+}
+
+// 3. Send Public Reply in the Comment Thread ("Sent to your DM! Check inbox 📩")
 async function replyToComment(commentId, messageText, accessToken) {
   if (!commentId || !messageText || !accessToken) return null;
   const url = `https://graph.instagram.com/${apiVersion}/${commentId}/replies`;
@@ -548,7 +604,7 @@ async function replyToComment(commentId, messageText, accessToken) {
   return data;
 }
 
-// 3. Follow-to-Unlock Meta Graph API Verification
+// 4. Follow-to-Unlock Meta Graph API Verification
 async function checkFollowStatus(instagramUserId, userIgsid, accessToken) {
   if (!userIgsid || !accessToken) {
     return {
@@ -560,8 +616,8 @@ async function checkFollowStatus(instagramUserId, userIgsid, accessToken) {
   }
 
   try {
-    // Attempt 1: graph.instagram.com query for is_user_follow_business
-    const url1 = `https://graph.instagram.com/${apiVersion}/${userIgsid}?fields=is_user_follow_business&access_token=${accessToken}`;
+    // Attempt 1: graph.facebook.com query for is_user_follow_business & username
+    const url1 = `https://graph.facebook.com/${apiVersion}/${userIgsid}?fields=name,username,is_user_follow_business&access_token=${accessToken}`;
     let response = await fetch(url1);
     let data = await response.json().catch(() => ({}));
 
@@ -570,12 +626,14 @@ async function checkFollowStatus(instagramUserId, userIgsid, accessToken) {
         supported: true,
         isFollowing: data.is_user_follow_business,
         verified: true,
+        username: data.username || null,
+        name: data.name || null,
         note: data.is_user_follow_business ? 'Verified via official Meta Graph API' : 'Not currently following'
       };
     }
 
-    // Attempt 2: graph.facebook.com query
-    const url2 = `https://graph.facebook.com/${apiVersion}/${userIgsid}?fields=is_user_follow_business&access_token=${accessToken}`;
+    // Attempt 2: graph.instagram.com query
+    const url2 = `https://graph.instagram.com/${apiVersion}/${userIgsid}?fields=username,is_user_follow_business&access_token=${accessToken}`;
     const response2 = await fetch(url2);
     const data2 = await response2.json().catch(() => ({}));
 
@@ -584,22 +642,26 @@ async function checkFollowStatus(instagramUserId, userIgsid, accessToken) {
         supported: true,
         isFollowing: data2.is_user_follow_business,
         verified: true,
+        username: data2.username || null,
         note: data2.is_user_follow_business ? 'Verified via official Meta Graph API' : 'Not currently following'
       };
     }
 
-    // Meta API restricts this query in standard comment context without an active 24h thread
+    // Meta API restricts this query or user has not initiated messaging thread
+    const metaErr = data.error || data2.error;
     return {
       supported: false,
       isFollowing: false,
-      verified: null,
-      note: 'Meta Graph API restricts automated follower checking in this context. Manual confirmation is available.'
+      verified: false,
+      error: metaErrorMessage({ error: metaErr }, 'Follow verification requires active conversation or Advanced Access.'),
+      note: 'Meta Graph API follower status unavailable for this recipient.'
     };
   } catch (err) {
     return {
       supported: false,
       isFollowing: false,
-      verified: null,
+      verified: false,
+      error: err.message,
       note: 'Meta API follow verification unavailable.'
     };
   }
@@ -621,6 +683,7 @@ module.exports = {
   getDecryptedTokenForAccount,
   getDecryptedTokenByInstagramUserId,
   sendPrivateReply,
+  sendDirectMessage,
   replyToComment,
   checkFollowStatus
 };

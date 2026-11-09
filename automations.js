@@ -64,10 +64,12 @@
   const openingMessageInput = document.getElementById('openingMessageInput');
   const openingButtonInput = document.getElementById('openingButtonInput');
   const followGateToggle = document.getElementById('followGateToggle');
-  const followGateFields = document.getElementById('followGateFields');
+  const followGateDisabledView = document.getElementById('followGateDisabledView');
+  const followGateEnabledView = document.getElementById('followGateEnabledView');
   const followGateMessageInput = document.getElementById('followGateMessageInput');
   const followGateProfileBtnInput = document.getElementById('followGateProfileBtnInput');
   const followGateConfirmBtnInput = document.getElementById('followGateConfirmBtnInput');
+  const followGateRetryMsgInput = document.getElementById('followGateRetryMsgInput');
   const deliveryMessageInput = document.getElementById('deliveryMessageInput');
   const deliveryUrlInput = document.getElementById('deliveryUrlInput');
   const deliveryButtonInput = document.getElementById('deliveryButtonInput');
@@ -89,17 +91,25 @@
   const automationEnabledCheckbox = document.getElementById('automationEnabledCheckbox');
 
   // Simulator Elements
+  let currentSimScenario = 'following'; // 'following' | 'not_following'
+  const simScenarioSwitcher = document.getElementById('simScenarioSwitcher');
+  const simScenarioFollowingBtn = document.getElementById('simScenarioFollowingBtn');
+  const simScenarioNotFollowingBtn = document.getElementById('simScenarioNotFollowingBtn');
+  const simActiveScenarioBadge = document.getElementById('simActiveScenarioBadge');
   const simReelThumb = document.getElementById('simReelThumb');
   const simReelTitle = document.getElementById('simReelTitle');
   const simAccountHandle = document.getElementById('simAccountHandle');
   const simComment = document.getElementById('simCommentDisplay');
   const simPublicReply = document.getElementById('simPublicReplyDisplay');
   const simOpeningDm = document.getElementById('simOpeningDmDisplay');
+  const simOpeningDmText = document.getElementById('simOpeningDmText');
   const simOpeningBtn = document.getElementById('simOpeningBtnDisplay');
+  const simUserTapDisplay = document.getElementById('simUserTapDisplay');
   const simGateDisplay = document.getElementById('simGateDisplay');
   const simGateMsgDisplay = document.getElementById('simGateMsgDisplay');
   const simGateProfileBtn = document.getElementById('simGateProfileBtn');
   const simGateConfirmBtn = document.getElementById('simGateConfirmBtn');
+  const simUserConfirmTapDisplay = document.getElementById('simUserConfirmTapDisplay');
   const simDeliveryDisplay = document.getElementById('simDeliveryDisplay');
   const simDeliveryMsgText = document.getElementById('simDeliveryMsgText');
   const simDeliveryBtn = document.getElementById('simDeliveryBtnDisplay');
@@ -232,17 +242,31 @@
     });
   });
 
-  // Follow Gate Toggle
+  // Follow Gate Toggle (DM Conversation Flow)
   if (followGateToggle) {
     followGateToggle.addEventListener('change', () => {
       if (followGateToggle.checked && userPlan === 'free') {
         showError('Follow-to-unlock is a premium feature exclusive to Pro and Elite plans. Upgrade to enable follower gates.');
         followGateToggle.checked = false;
-        followGateFields.style.display = 'none';
-        updateSimulator();
-        return;
       }
-      followGateFields.style.display = followGateToggle.checked ? 'block' : 'none';
+      if (followGateEnabledView) followGateEnabledView.style.display = followGateToggle.checked ? 'block' : 'none';
+      if (followGateDisabledView) followGateDisabledView.style.display = followGateToggle.checked ? 'none' : 'block';
+      updateSimulator();
+    });
+  }
+
+  // Simulator Scenario Switcher Buttons
+  if (simScenarioFollowingBtn && simScenarioNotFollowingBtn) {
+    simScenarioFollowingBtn.addEventListener('click', () => {
+      currentSimScenario = 'following';
+      simScenarioFollowingBtn.classList.add('active');
+      simScenarioNotFollowingBtn.classList.remove('active');
+      updateSimulator();
+    });
+    simScenarioNotFollowingBtn.addEventListener('click', () => {
+      currentSimScenario = 'not_following';
+      simScenarioNotFollowingBtn.classList.add('active');
+      simScenarioFollowingBtn.classList.remove('active');
       updateSimulator();
     });
   }
@@ -435,41 +459,80 @@
 
     // Opening DM Bubble
     const openingMsg = openingMessageInput ? openingMessageInput.value.trim() : '';
-    const openingBtnText = openingButtonInput ? openingButtonInput.value.trim() : '';
-    if (simOpeningDm) {
-      simOpeningDm.childNodes[0].textContent = (openingMsg || "Hey Creator! Thanks for checking out our Reel. Here's what you requested:") + ' ';
+    const openingBtnText = openingButtonInput ? openingButtonInput.value.trim() : 'Send me the link';
+    if (simOpeningDmText) {
+      simOpeningDmText.innerHTML = escapeHtml(openingMsg || "Hey! I'm so glad you're here — thanks for your interest 😊\n\nTap below and I'll send you the link in just a moment ✨").replace(/\n/g, '<br>');
+    } else if (simOpeningDm) {
+      simOpeningDm.childNodes[0].textContent = (openingMsg || "Hey! I'm so glad you're here — thanks for your interest 😊\n\nTap below and I'll send you the link in just a moment ✨") + ' ';
     }
+
     if (simOpeningBtn) {
-      if (openingBtnText) {
-        simOpeningBtn.style.display = 'inline-flex';
-        simOpeningBtn.textContent = openingBtnText;
-      } else {
-        simOpeningBtn.style.display = 'none';
-      }
+      simOpeningBtn.style.display = 'inline-flex';
+      simOpeningBtn.textContent = openingBtnText || 'Send me the link';
     }
 
-    // Follow Gate Card
-    const isFollowGate = followGateToggle && followGateToggle.checked;
-    if (simGateDisplay) {
-      if (isFollowGate) {
-        simGateDisplay.style.display = 'flex';
-        const gateMsg = followGateMessageInput ? followGateMessageInput.value.trim() : '';
-        const profileBtn = followGateProfileBtnInput ? followGateProfileBtnInput.value.trim() : '';
-        const confirmBtn = followGateConfirmBtnInput ? followGateConfirmBtnInput.value.trim() : '';
+    // Recipient Tap of "Send me the link"
+    if (simUserTapDisplay) {
+      simUserTapDisplay.style.display = 'block';
+      simUserTapDisplay.textContent = openingBtnText || 'Send me the link';
+    }
 
-        if (simGateMsgDisplay) simGateMsgDisplay.textContent = gateMsg || `Follow @${username} to unlock:`;
-        if (simGateProfileBtn) simGateProfileBtn.textContent = profileBtn || 'Follow Profile 👤';
-        if (simGateConfirmBtn) simGateConfirmBtn.textContent = confirmBtn || "I've Followed ✓";
+    // Follow Gate & Scenario Branches
+    const isFollowGate = Boolean(followGateToggle && followGateToggle.checked);
+
+    if (isFollowGate) {
+      if (simScenarioSwitcher) simScenarioSwitcher.style.display = 'inline-flex';
+
+      const gateMsg = followGateMessageInput ? followGateMessageInput.value.trim() : '';
+      const profileBtn = followGateProfileBtnInput ? followGateProfileBtnInput.value.trim() : 'Visit Profile';
+      const confirmBtn = followGateConfirmBtnInput ? followGateConfirmBtnInput.value.trim() : "I've followed ✓";
+
+      if (currentSimScenario === 'following') {
+        // PATH A: Already Following (Delivers immediately, no follow gate shown)
+        if (simActiveScenarioBadge) {
+          simActiveScenarioBadge.textContent = 'PATH A: Already Following (Direct Delivery)';
+          simActiveScenarioBadge.style.color = '#10b981';
+        }
+        if (simGateDisplay) simGateDisplay.style.display = 'none';
+        if (simUserConfirmTapDisplay) simUserConfirmTapDisplay.style.display = 'none';
+        if (simDeliveryDisplay) simDeliveryDisplay.style.display = 'block';
       } else {
-        simGateDisplay.style.display = 'none';
+        // PATH B: Not Following (Prompts to follow, taps confirm, delivers)
+        if (simActiveScenarioBadge) {
+          simActiveScenarioBadge.textContent = 'PATH B: Not Following (Follow Prompt Flow)';
+          simActiveScenarioBadge.style.color = '#f59e0b';
+        }
+        if (simGateDisplay) {
+          simGateDisplay.style.display = 'flex';
+          if (simGateMsgDisplay) {
+            simGateMsgDisplay.innerHTML = escapeHtml(gateMsg || "Oops! Looks like you haven't followed me yet 👀\n\nIt would mean a lot if you could visit my profile and hit that follow button 😊").replace(/\n/g, '<br>');
+          }
+          if (simGateProfileBtn) simGateProfileBtn.textContent = profileBtn || 'Visit Profile';
+          if (simGateConfirmBtn) simGateConfirmBtn.textContent = confirmBtn || "I've followed ✓";
+        }
+        if (simUserConfirmTapDisplay) {
+          simUserConfirmTapDisplay.style.display = 'block';
+          simUserConfirmTapDisplay.textContent = confirmBtn || "I've followed ✓";
+        }
+        if (simDeliveryDisplay) simDeliveryDisplay.style.display = 'block';
       }
+    } else {
+      // Direct Delivery (Follow Gate Disabled)
+      if (simScenarioSwitcher) simScenarioSwitcher.style.display = 'none';
+      if (simActiveScenarioBadge) {
+        simActiveScenarioBadge.textContent = 'Direct Delivery (Follow Gate Disabled)';
+        simActiveScenarioBadge.style.color = 'var(--ink-secondary)';
+      }
+      if (simGateDisplay) simGateDisplay.style.display = 'none';
+      if (simUserConfirmTapDisplay) simUserConfirmTapDisplay.style.display = 'none';
+      if (simDeliveryDisplay) simDeliveryDisplay.style.display = 'block';
     }
 
     // Final Delivery Bubble
     const deliveryMsg = deliveryMessageInput ? deliveryMessageInput.value.trim() : '';
     const deliveryBtnText = deliveryButtonInput ? deliveryButtonInput.value.trim() : '';
     if (simDeliveryMsgText) {
-      simDeliveryMsgText.textContent = deliveryMsg || 'Here is your link! Click below to access:';
+      simDeliveryMsgText.textContent = deliveryMsg || 'Here is your link! Click below to access the full guide:';
     }
     if (simDeliveryBtn) {
       if (currentResourceType === 'image' && uploadedResourceData) {
@@ -494,6 +557,7 @@
     followGateMessageInput,
     followGateProfileBtnInput,
     followGateConfirmBtnInput,
+    followGateRetryMsgInput,
     deliveryMessageInput,
     deliveryUrlInput,
     deliveryButtonInput,
@@ -707,13 +771,16 @@
       // Follow gate
       if (flow.followGate && flow.followGate.enabled) {
         followGateToggle.checked = true;
-        followGateFields.style.display = 'block';
-        followGateMessageInput.value = flow.followGate.message || '';
-        followGateProfileBtnInput.value = flow.followGate.buttonText || '';
-        followGateConfirmBtnInput.value = flow.followGate.checkButtonText || '';
+        if (followGateEnabledView) followGateEnabledView.style.display = 'block';
+        if (followGateDisabledView) followGateDisabledView.style.display = 'none';
+        followGateMessageInput.value = flow.followGate.message || "Oops! Looks like you haven't followed me yet 👀\n\nIt would mean a lot if you could visit my profile and hit that follow button 😊";
+        followGateProfileBtnInput.value = flow.followGate.profileBtnText || flow.followGate.buttonText || 'Visit Profile';
+        followGateConfirmBtnInput.value = flow.followGate.confirmBtnText || flow.followGate.checkButtonText || "I've followed ✓";
+        if (followGateRetryMsgInput) followGateRetryMsgInput.value = flow.followGate.retryMessage || "Still not seeing that follow yet! 👀 If you just hit follow, wait a few seconds and tap below to retry.";
       } else {
         followGateToggle.checked = false;
-        followGateFields.style.display = 'none';
+        if (followGateEnabledView) followGateEnabledView.style.display = 'none';
+        if (followGateDisabledView) followGateDisabledView.style.display = 'block';
       }
 
       // Delivery
@@ -754,13 +821,18 @@
       triggerKeywordRadio.checked = true;
       keywordInputGroup.style.display = 'block';
 
-      openingMessageInput.value = "Hey {first_name}! Thanks for checking out our Reel. Here's the link you asked for:";
-      openingButtonInput.value = 'Send me the link 🚀';
+      openingMessageInput.value = "Hey! I'm so glad you're here — thanks for your interest 😊\n\nTap below and I'll send you the link in just a moment ✨";
+      openingButtonInput.value = 'Send me the link';
 
       followGateToggle.checked = false;
-      followGateFields.style.display = 'none';
+      if (followGateEnabledView) followGateEnabledView.style.display = 'none';
+      if (followGateDisabledView) followGateDisabledView.style.display = 'block';
+      if (followGateMessageInput) followGateMessageInput.value = "Oops! Looks like you haven't followed me yet 👀\n\nIt would mean a lot if you could visit my profile and hit that follow button 😊";
+      if (followGateProfileBtnInput) followGateProfileBtnInput.value = 'Visit Profile';
+      if (followGateConfirmBtnInput) followGateConfirmBtnInput.value = "I've followed ✓";
+      if (followGateRetryMsgInput) followGateRetryMsgInput.value = "Still not seeing that follow yet! 👀 If you just hit follow, wait a few seconds and tap below to retry.";
 
-      deliveryMessageInput.value = 'Here is your direct access:';
+      deliveryMessageInput.value = 'Here is your link! Click below to access the full guide:';
       deliveryUrlInput.value = '';
       deliveryButtonInput.value = 'Open Free Guide ↗';
 
@@ -832,20 +904,23 @@
       // Build structured conversation flow object
       const flow = {
         openingMessage: openingMsg,
-        openingButtonText: openingButtonInput.value.trim() || null,
+        openingButtonText: openingButtonInput.value.trim() || 'Send me the link',
         followGate: {
           enabled: followGateToggle ? followGateToggle.checked : false,
-          message: followGateMessageInput.value.trim() || null,
-          buttonText: followGateProfileBtnInput.value.trim() || null,
-          checkButtonText: followGateConfirmBtnInput.value.trim() || null,
+          message: followGateMessageInput ? followGateMessageInput.value.trim() : null,
+          profileBtnText: followGateProfileBtnInput ? followGateProfileBtnInput.value.trim() : 'Visit Profile',
+          confirmBtnText: followGateConfirmBtnInput ? followGateConfirmBtnInput.value.trim() : "I've followed ✓",
+          retryMessage: followGateRetryMsgInput ? followGateRetryMsgInput.value.trim() : null,
+          buttonText: followGateProfileBtnInput ? followGateProfileBtnInput.value.trim() : 'Visit Profile',
+          checkButtonText: followGateConfirmBtnInput ? followGateConfirmBtnInput.value.trim() : "I've followed ✓",
           profileUrl: `https://instagram.com/${(userAccounts.find(a => a.id === igUserId) || {}).username || ''}`
         },
         delivery: {
-          message: deliveryMessageInput.value.trim() || 'Here is your resource:',
+          message: deliveryMessageInput.value.trim() || 'Here is your link! Click below to access the full guide:',
           resourceType: currentResourceType,
           resourceUrl: uploadedResourceData ? uploadedResourceData.url : (deliveryUrlInput.value.trim() || null),
           resourceName: uploadedResourceData ? uploadedResourceData.fileName : null,
-          buttonText: deliveryButtonInput.value.trim() || 'Open Resource ↗'
+          buttonText: deliveryButtonInput.value.trim() || 'Open Free Guide ↗'
         }
       };
 

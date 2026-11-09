@@ -329,164 +329,248 @@
                 </div>
               </div>
 
-              <!-- Step 4: Multi-Step DM Conversation Flow Composer -->
-              <div class="form-group">
-                <label class="form-label">
-                  4. Automated Direct Message Flow
-                </label>
-                <p style="color:var(--ink-secondary); font-size:0.84rem; margin:-4px 0 14px;">
-                  Configure what your audience receives in their Instagram DM inbox.
-                </p>
-
-                <!-- Flow Step A: Opening DM -->
-                <div class="flow-step-card">
-                  <div class="flow-step-header">
-                    <div class="flow-step-title">
-                      <span class="flow-step-num">A</span>
-                      <span>Opening Greeting Message</span>
-                    </div>
-                    <span class="plan-badge" style="font-size:0.7rem;">Step 1</span>
-                  </div>
-
-                  <textarea id="openingMessageInput" class="form-textarea" rows="3" placeholder="Hey {first_name}! Thanks for checking out our Reel. Here's what you requested:" required></textarea>
-
-                  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-top:6px;">
-                    <div class="variable-chips-row">
-                      <span style="font-size:0.74rem; color:var(--ink-muted);">Insert tag:</span>
-                      <button type="button" class="variable-chip" data-var="{first_name}">+ {first_name}</button>
-                      <button type="button" class="variable-chip" data-var="{username}">+ {username}</button>
-                    </div>
-                  </div>
-
-                  <div style="margin-top:12px;">
-                    <label class="form-label" style="font-size:0.8rem; margin-bottom:4px;">
-                      Opening Button Text (Optional)
+              <!-- Step 4: Unified DM Conversation Flow Composer -->
+              <div class="form-group dm-flow-composer">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; margin-bottom:14px;">
+                  <div>
+                    <label class="form-label" style="margin-bottom:2px;">
+                      4. DM Conversation Flow
                     </label>
-                    <input type="text" id="openingButtonInput" class="form-input" placeholder="e.g. Send me the link 🚀" style="font-size:0.84rem; padding:8px 12px;" />
+                    <p style="color:var(--ink-secondary); font-size:0.84rem; margin:0;">
+                      A unified conversation path from initial comment trigger to final resource delivery.
+                    </p>
+                  </div>
+
+                  <!-- Master Follow-to-Unlock Toggle -->
+                  <div class="follow-gate-master-switch">
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin:0;">
+                      <span class="plan-badge pro" style="font-size:0.68rem; font-weight:700;">Pro</span>
+                      <span style="font-size:0.84rem; font-weight:700; color:var(--ink);">Require users to follow before receiving the resource</span>
+                      <input type="checkbox" id="followGateToggle" style="width:17px; height:17px; accent-color:var(--accent); cursor:pointer;" />
+                    </label>
                   </div>
                 </div>
 
-                <!-- Flow Step B: Follow-to-Unlock Gate (Optional Premium Feature) -->
-                <div class="flow-step-card" id="followGateCard">
-                  <div class="flow-step-header">
-                    <div class="flow-step-title">
-                      <span class="flow-step-num" style="background:linear-gradient(135deg, #f59e0b, #d97706);">B</span>
-                      <span>Follow-to-Unlock Gate (Optional)</span>
-                    </div>
-                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                      <span class="plan-badge pro" style="font-size:0.68rem;">Pro</span>
-                      <input type="checkbox" id="followGateToggle" style="width:16px; height:16px;" />
-                    </label>
-                  </div>
+                <!-- Vertical Visual Flow Track -->
+                <div class="conversation-flow-track">
 
-                  <div id="followGateFields" style="display:none; margin-top:10px;">
-                    <p style="color:var(--ink-secondary); font-size:0.82rem; margin-bottom:10px;">
-                      Ask viewers to follow your Instagram account before releasing the final resource.
+                  <!-- FLOW STEP 1: Opening DM -->
+                  <div class="flow-card flow-card-opening">
+                    <div class="flow-card-header">
+                      <div class="flow-card-badge">
+                        <span class="flow-step-num">1</span>
+                        <span>Opening DM</span>
+                      </div>
+                      <span class="flow-step-tag">Initial Trigger Reply</span>
+                    </div>
+
+                    <p class="flow-step-desc">
+                      Sent privately to the commenter's inbox immediately when they comment on your Reel.
                     </p>
 
                     <div style="margin-bottom:10px;">
-                      <label class="form-label" style="font-size:0.8rem;">Follow Request Message</label>
-                      <input type="text" id="followGateMessageInput" class="form-input" placeholder="Please follow our page to unlock this exclusive resource! ✨" />
-                    </div>
+                      <label class="form-label" style="font-size:0.8rem;">Opening Message</label>
+                      <textarea id="openingMessageInput" class="form-textarea" rows="3" placeholder="Hey! I'm so glad you're here — thanks for your interest 😊&#10;&#10;Tap below and I'll send you the link in just a moment ✨" required>Hey! I'm so glad you're here — thanks for your interest 😊
 
-                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:10px;">
-                      <div>
-                        <label class="form-label" style="font-size:0.8rem;">Profile Button Label</label>
-                        <input type="text" id="followGateProfileBtnInput" class="form-input" placeholder="Follow Profile 👤" />
-                      </div>
-                      <div>
-                        <label class="form-label" style="font-size:0.8rem;">Confirm Button Label</label>
-                        <input type="text" id="followGateConfirmBtnInput" class="form-input" placeholder="I've Followed — Continue ✓" />
+Tap below and I'll send you the link in just a moment ✨</textarea>
+                      <div class="variable-chips-row" style="margin-top:6px;">
+                        <span style="font-size:0.74rem; color:var(--ink-muted);">Insert tag:</span>
+                        <button type="button" class="variable-chip" data-var="{first_name}">+ {first_name}</button>
+                        <button type="button" class="variable-chip" data-var="{username}">+ {username}</button>
                       </div>
                     </div>
 
-                    <div style="background:var(--surface-hover); border:1px solid var(--glass-border); border-radius:var(--radius-s); padding:10px 12px; font-size:0.78rem; color:var(--ink-secondary); line-height:1.5;">
-                      🛡️ <strong>Follower Verification Policy:</strong> Our engine checks follower status via Meta Graph API. If Meta follower queries are restricted in your region, a clearly labeled manual confirmation button ensures your fans receive their resource without interruption.
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Flow Step C: Final Resource Delivery -->
-                <div class="flow-step-card">
-                  <div class="flow-step-header">
-                    <div class="flow-step-title">
-                      <span class="flow-step-num" style="background:linear-gradient(135deg, #10b981, #059669);">C</span>
-                      <span>Resource Delivery & Link</span>
-                    </div>
-                    <span class="plan-badge" style="font-size:0.7rem;">Delivery</span>
-                  </div>
-
-                  <div style="margin-bottom:12px;">
-                    <label class="form-label" style="font-size:0.8rem;">Delivery Message Text</label>
-                    <textarea id="deliveryMessageInput" class="form-textarea" rows="2" placeholder="Here is your link! Click below to access the full guide:"></textarea>
-                  </div>
-
-                  <!-- Resource Type Selector Tabs -->
-                  <div style="margin-bottom:12px;">
-                    <label class="form-label" style="font-size:0.8rem; margin-bottom:6px;">Attachment / Resource Type</label>
-                    <div class="resource-tabs">
-                      <button type="button" class="resource-tab-btn active" data-res-type="url">🔗 Website URL</button>
-                      <button type="button" class="resource-tab-btn" data-res-type="drive">📁 Google Drive</button>
-                      <button type="button" class="resource-tab-btn" data-res-type="image">🖼️ Image Upload</button>
-                      <button type="button" class="resource-tab-btn" data-res-type="document">📄 PDF / Document</button>
+                    <div>
+                      <label class="form-label" style="font-size:0.8rem;">Action Button Text</label>
+                      <input type="text" id="openingButtonInput" class="form-input" placeholder="Send me the link" value="Send me the link" style="font-size:0.84rem;" />
                     </div>
                   </div>
 
-                  <!-- Resource Input Panels -->
-                  <div id="resourceInputArea">
-                    <!-- URL / Drive Panel -->
-                    <div id="resUrlPanel">
-                      <label class="form-label" style="font-size:0.8rem;" id="resUrlLabel">Destination Website Link</label>
-                      <input type="url" id="deliveryUrlInput" class="form-input" placeholder="https://yourbrand.com/special-deal" />
-                      <small id="resDriveNotice" style="display:none; color:var(--ink-muted); margin-top:4px; font-size:0.76rem;">
-                        ℹ️ <strong>Google Drive Note:</strong> Ensure the link is set to "Anyone with the link can view" in Google Drive so your audience can open it.
-                      </small>
-                    </div>
+                  <!-- CONNECTOR 1 -->
+                  <div class="flow-connector">
+                    <div class="flow-connector-line"></div>
+                    <div class="flow-connector-arrow">▼</div>
+                  </div>
 
-                    <!-- File Upload Panel -->
-                    <div id="resUploadPanel" style="display:none;">
-                      <input type="file" id="resourceFileInput" style="display:none;" />
-                      <div class="upload-dropzone" id="uploadDropzone">
-                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--accent); margin-bottom:8px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-                        <div style="font-size:0.88rem; font-weight:600; color:var(--ink); margin-bottom:4px;" id="dropzonePrompt">
-                          Click to upload file or drag & drop
-                        </div>
-                        <div style="font-size:0.76rem; color:var(--ink-muted);" id="dropzoneTypes">
-                          JPG, PNG, WEBP, GIF, or PDF (Up to 10MB)
-                        </div>
+                  <!-- FLOW STEP 2: Check Follower Status (Conditional Branch) -->
+                  <div class="flow-card flow-card-conditional" id="conditionalStepContainer">
+                    <div class="flow-card-header">
+                      <div class="flow-card-badge">
+                        <span class="flow-step-num" id="conditionalStepNum" style="background:linear-gradient(135deg, #f59e0b, #d97706);">2</span>
+                        <span>Check Follower Status</span>
                       </div>
+                      <span class="flow-step-tag" id="conditionalStepTag">Conditional Step</span>
+                    </div>
 
-                      <div id="uploadProgressContainer" style="display:none; margin-top:10px;">
-                        <div style="display:flex; justify-content:space-between; font-size:0.78rem; margin-bottom:4px;">
-                          <span>Uploading resource…</span>
-                          <span id="uploadPercent">0%</span>
-                        </div>
-                        <div class="dm-progress-track">
-                          <div class="dm-progress-fill" id="uploadProgressBar" style="width:0%;"></div>
-                        </div>
-                      </div>
+                    <!-- Flow Gate DISABLED State -->
+                    <div id="followGateDisabledView" style="display:block; padding:12px 14px; background:var(--surface-hover); border-radius:var(--radius-s); font-size:0.82rem; color:var(--ink-secondary); line-height:1.5;">
+                      ⚡ <strong>Direct Delivery Mode:</strong> Follower verification is disabled. Every commenter receives the resource immediately upon tapping "Send me the link".
+                    </div>
 
-                      <!-- Uploaded File Card -->
-                      <div class="uploaded-file-card" id="uploadedFileCard" style="display:none;">
-                        <div style="display:flex; align-items:center; gap:10px;">
-                          <div style="width:34px; height:34px; border-radius:8px; background:var(--accent-glow); display:flex; align-items:center; justify-content:center; color:var(--accent); font-weight:700;" id="uploadedFileIcon">
-                            📄
+                    <!-- Flow Gate ENABLED State (Visual Branch Tree) -->
+                    <div id="followGateEnabledView" style="display:none;">
+                      <p class="flow-step-desc" style="margin-bottom:12px;">
+                        When the user taps "Send me the link", our engine checks follower status via the official Meta Graph API:
+                      </p>
+
+                      <!-- Visual Branches Grid -->
+                      <div class="flow-branches-grid">
+                        <!-- PATH A: Already Following -->
+                        <div class="flow-branch-card path-a">
+                          <div class="flow-branch-header">
+                            <span class="branch-pill path-a-pill">PATH A</span>
+                            <span>Already Following</span>
                           </div>
+                          <p class="branch-desc">
+                            ✓ Follow verified via Meta API. Sends final resource delivery immediately. No follow request, no extra click.
+                          </p>
+                          <div class="branch-action-pill" style="color:#10b981;">
+                            ➜ Immediate Resource Delivery
+                          </div>
+                        </div>
+
+                        <!-- PATH B: Not Following Yet -->
+                        <div class="flow-branch-card path-b">
+                          <div class="flow-branch-header">
+                            <span class="branch-pill path-b-pill">PATH B</span>
+                            <span>Not Following</span>
+                          </div>
+                          <p class="branch-desc">
+                            Sends follow request prompt with your profile link, then rechecks when they tap "I've followed ✓".
+                          </p>
+                          <div class="branch-action-pill" style="color:#f59e0b;">
+                            ➜ Follow Prompt & Recheck
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- Expandable Customization Settings for Path B -->
+                      <details class="flow-branch-settings" id="branchBSettings" style="margin-top:12px;">
+                        <summary class="flow-settings-summary">
+                          <span>⚙️ Customize Follow Request & Recheck Messages</span>
+                          <span class="summary-arrow">›</span>
+                        </summary>
+                        <div class="flow-settings-content">
+                          <div style="margin-bottom:10px;">
+                            <label class="form-label" style="font-size:0.8rem;">Follow Request Message</label>
+                            <textarea id="followGateMessageInput" class="form-textarea" rows="2" placeholder="Oops! Looks like you haven't followed me yet 👀&#10;&#10;It would mean a lot if you could visit my profile and hit that follow button 😊">Oops! Looks like you haven't followed me yet 👀
+
+It would mean a lot if you could visit my profile and hit that follow button 😊</textarea>
+                          </div>
+
+                          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:10px;">
+                            <div>
+                              <label class="form-label" style="font-size:0.8rem;">Profile Button Label</label>
+                              <input type="text" id="followGateProfileBtnInput" class="form-input" placeholder="Visit Profile" value="Visit Profile" />
+                            </div>
+                            <div>
+                              <label class="form-label" style="font-size:0.8rem;">Recheck Button Label</label>
+                              <input type="text" id="followGateConfirmBtnInput" class="form-input" placeholder="I've followed ✓" value="I've followed ✓" />
+                            </div>
+                          </div>
+
                           <div>
-                            <strong style="font-size:0.84rem; color:var(--ink); display:block;" id="uploadedFileName">file.pdf</strong>
-                            <small style="color:var(--ink-muted); font-size:0.75rem;" id="uploadedFileSize">1.2 MB</small>
+                            <label class="form-label" style="font-size:0.8rem;">Not Detected / Retry Message</label>
+                            <input type="text" id="followGateRetryMsgInput" class="form-input" placeholder="Still not seeing that follow yet! 👀 If you just hit follow, wait a few seconds and tap below to retry." value="Still not seeing that follow yet! 👀 If you just hit follow, wait a few seconds and tap below to retry." />
                           </div>
                         </div>
-                        <button type="button" class="btn btn-ghost btn-xs" id="removeUploadedFileBtn" style="color:var(--rose);">✕ Remove</button>
+                      </details>
+                    </div>
+                  </div>
+
+                  <!-- CONNECTOR 2 -->
+                  <div class="flow-connector">
+                    <div class="flow-connector-line"></div>
+                    <div class="flow-connector-arrow">▼</div>
+                  </div>
+
+                  <!-- FLOW STEP 3: Resource Delivery -->
+                  <div class="flow-card flow-card-delivery">
+                    <div class="flow-card-header">
+                      <div class="flow-card-badge">
+                        <span class="flow-step-num" style="background:linear-gradient(135deg, #10b981, #059669);">3</span>
+                        <span>Resource Delivery</span>
+                      </div>
+                      <span class="flow-step-tag">Final Reward</span>
+                    </div>
+
+                    <p class="flow-step-desc">
+                      Sent only once condition is satisfied. Guaranteed idempotent (never sent twice on repeated button taps).
+                    </p>
+
+                    <div style="margin-bottom:12px;">
+                      <label class="form-label" style="font-size:0.8rem;">Delivery Message Text</label>
+                      <textarea id="deliveryMessageInput" class="form-textarea" rows="2" placeholder="Here is your link! Click below to access the full guide:">Here is your link! Click below to access the full guide:</textarea>
+                    </div>
+
+                    <!-- Resource Type Selector Tabs -->
+                    <div style="margin-bottom:12px;">
+                      <label class="form-label" style="font-size:0.8rem; margin-bottom:6px;">Attachment / Resource Type</label>
+                      <div class="resource-tabs">
+                        <button type="button" class="resource-tab-btn active" data-res-type="url">🔗 Website URL</button>
+                        <button type="button" class="resource-tab-btn" data-res-type="drive">📁 Google Drive</button>
+                        <button type="button" class="resource-tab-btn" data-res-type="image">🖼️ Image Upload</button>
+                        <button type="button" class="resource-tab-btn" data-res-type="document">📄 PDF / Document</button>
                       </div>
                     </div>
 
-                    <!-- Button Label Input -->
-                    <div style="margin-top:12px;">
-                      <label class="form-label" style="font-size:0.8rem;">Delivery Button Text</label>
-                      <input type="text" id="deliveryButtonInput" class="form-input" placeholder="e.g. Open Free Guide ↗" style="font-size:0.84rem;" />
+                    <!-- Resource Input Panels -->
+                    <div id="resourceInputArea">
+                      <!-- URL / Drive Panel -->
+                      <div id="resUrlPanel">
+                        <label class="form-label" style="font-size:0.8rem;" id="resUrlLabel">Destination Website Link</label>
+                        <input type="url" id="deliveryUrlInput" class="form-input" placeholder="https://yourbrand.com/special-deal" />
+                        <small id="resDriveNotice" style="display:none; color:var(--ink-muted); margin-top:4px; font-size:0.76rem;">
+                          ℹ️ <strong>Google Drive Note:</strong> Ensure the link is set to "Anyone with the link can view" in Google Drive so your audience can open it.
+                        </small>
+                      </div>
+
+                      <!-- File Upload Panel -->
+                      <div id="resUploadPanel" style="display:none;">
+                        <input type="file" id="resourceFileInput" style="display:none;" />
+                        <div class="upload-dropzone" id="uploadDropzone">
+                          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--accent); margin-bottom:8px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                          <div style="font-size:0.88rem; font-weight:600; color:var(--ink); margin-bottom:4px;" id="dropzonePrompt">
+                            Click to upload file or drag & drop
+                          </div>
+                          <div style="font-size:0.76rem; color:var(--ink-muted);" id="dropzoneTypes">
+                            JPG, PNG, WEBP, GIF, or PDF (Up to 10MB)
+                          </div>
+                        </div>
+
+                        <div id="uploadProgressContainer" style="display:none; margin-top:10px;">
+                          <div style="display:flex; justify-content:space-between; font-size:0.78rem; margin-bottom:4px;">
+                            <span>Uploading resource…</span>
+                            <span id="uploadPercent">0%</span>
+                          </div>
+                          <div class="dm-progress-track">
+                            <div class="dm-progress-fill" id="uploadProgressBar" style="width:0%;"></div>
+                          </div>
+                        </div>
+
+                        <!-- Uploaded File Card -->
+                        <div class="uploaded-file-card" id="uploadedFileCard" style="display:none;">
+                          <div style="display:flex; align-items:center; gap:10px;">
+                            <div style="width:34px; height:34px; border-radius:8px; background:var(--accent-glow); display:flex; align-items:center; justify-content:center; color:var(--accent); font-weight:700;" id="uploadedFileIcon">
+                              📄
+                            </div>
+                            <div>
+                              <strong style="font-size:0.84rem; color:var(--ink); display:block;" id="uploadedFileName">file.pdf</strong>
+                              <small style="color:var(--ink-muted); font-size:0.75rem;" id="uploadedFileSize">1.2 MB</small>
+                            </div>
+                          </div>
+                          <button type="button" class="btn btn-ghost btn-xs" id="removeUploadedFileBtn" style="color:var(--rose);">✕ Remove</button>
+                        </div>
+                      </div>
+
+                      <!-- Button Label Input -->
+                      <div style="margin-top:12px;">
+                        <label class="form-label" style="font-size:0.8rem;">Delivery Button Text</label>
+                        <input type="text" id="deliveryButtonInput" class="form-input" placeholder="Open Free Guide ↗" value="Open Free Guide ↗" style="font-size:0.84rem;" />
+                      </div>
                     </div>
                   </div>
+
                 </div>
               </div>
 
@@ -500,7 +584,7 @@
                   </label>
                 </div>
                 <div id="publicReplyInputWrap">
-                  <input type="text" id="automationPublicReplyInput" class="form-input" placeholder="Sent to your DM! Check inbox 📩" />
+                  <input type="text" id="automationPublicReplyInput" class="form-input" placeholder="Sent to your DM! Check inbox 📩" value="Sent to your DM! Check inbox 📩" />
                   <small style="color:var(--ink-muted); display:block; margin-top:4px;">
                     Leaves a public confirmation reply in the post's comment thread so the user knows to check their inbox.
                   </small>
@@ -526,11 +610,22 @@
 
             <!-- Right Column: Interactive Live iPhone Simulator -->
             <div style="text-align:center;">
-              <span class="eyebrow" style="margin-bottom:12px;">Live Interaction Simulator</span>
+              <span class="eyebrow" style="margin-bottom:8px;">Live Interaction Simulator</span>
+
+              <!-- Scenario Switcher -->
+              <div class="sim-scenario-switcher" id="simScenarioSwitcher">
+                <button type="button" class="sim-scenario-btn active" id="simScenarioFollowingBtn" data-scenario="following">
+                  ✓ Already Following
+                </button>
+                <button type="button" class="sim-scenario-btn" id="simScenarioNotFollowingBtn" data-scenario="not_following">
+                  👀 Not Following
+                </button>
+              </div>
+
               <div class="phone-simulator-frame">
                 <div class="iphone-notch"></div>
                 <div class="simulator-screen">
-                  <div class="sim-preview-badge">Interactive Preview · Not an actual Instagram screen</div>
+                  <div class="sim-preview-badge" id="simActiveScenarioBadge">PATH A: Already Following (Direct Delivery)</div>
 
                   <!-- Linked Reel Header -->
                   <div class="sim-reel-header-card">
@@ -557,29 +652,38 @@
                     — Direct Message Inbox —
                   </div>
 
-                  <!-- Simulated Opening DM Bubble -->
+                  <!-- 1. Simulated Opening DM Bubble -->
                   <div class="sim-dm-bubble" id="simOpeningDmDisplay">
-                    Hey Creator! Thanks for commenting on our Reel. Here's what you requested:
-                    <div class="sim-dm-button" id="simOpeningBtnDisplay" style="display:none;">
-                      Send me the link 🚀
+                    <span id="simOpeningDmText">Hey! I'm so glad you're here — thanks for your interest 😊<br><br>Tap below and I'll send you the link in just a moment ✨</span>
+                    <div class="sim-dm-button" id="simOpeningBtnDisplay">
+                      Send me the link
                     </div>
                   </div>
 
-                  <!-- Simulated Follow Gate Card -->
+                  <!-- Simulated Recipient Button Tap -->
+                  <div class="sim-user-reply-bubble" id="simUserTapDisplay" style="display:none;">
+                    Send me the link
+                  </div>
+
+                  <!-- 2. Path B: Simulated Follow Gate Card -->
                   <div class="sim-gate-card" id="simGateDisplay" style="display:none;">
-                    <div style="display:flex; align-items:center; gap:6px;">
-                      <span>🔒</span>
-                      <strong id="simGateMsgDisplay">Follow @creator to unlock:</strong>
+                    <div style="font-size:0.78rem; line-height:1.4;" id="simGateMsgDisplay">
+                      Oops! Looks like you haven't followed me yet 👀<br><br>It would mean a lot if you could visit my profile and hit that follow button 😊
                     </div>
                     <div style="display:flex; gap:6px; margin-top:4px;">
-                      <span class="sim-dm-button" style="background:rgba(255,255,255,0.15);" id="simGateProfileBtn">Follow Profile</span>
-                      <span class="sim-dm-button" style="background:var(--accent-gradient);" id="simGateConfirmBtn">I've Followed ✓</span>
+                      <span class="sim-dm-button" style="background:rgba(255,255,255,0.15);" id="simGateProfileBtn">Visit Profile</span>
+                      <span class="sim-dm-button" style="background:var(--accent-gradient);" id="simGateConfirmBtn">I've followed ✓</span>
                     </div>
                   </div>
 
-                  <!-- Simulated Resource Delivery Bubble -->
+                  <!-- Simulated User Recheck Tap -->
+                  <div class="sim-user-reply-bubble" id="simUserConfirmTapDisplay" style="display:none;">
+                    I've followed ✓
+                  </div>
+
+                  <!-- 3. Simulated Resource Delivery Bubble -->
                   <div class="sim-dm-bubble" id="simDeliveryDisplay">
-                    <div id="simDeliveryMsgText">Here is your link! Click below to access:</div>
+                    <div id="simDeliveryMsgText">Here is your link! Click below to access the full guide:</div>
                     <div class="sim-dm-button" id="simDeliveryBtnDisplay" style="margin-top:8px;">
                       Open Free Guide ↗
                     </div>

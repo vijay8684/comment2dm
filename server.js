@@ -1050,6 +1050,71 @@ function keywordMatches(commentText, keyword, triggerType) {
 // In-memory set to deduplicate concurrent webhook comment deliveries
 const processingCommentIds = new Set();
 
+// Deliver final resource helper (guaranteed idempotent)
+async function deliverFinalResource({ recipientIgUserId, senderIgsid, automation, tokenData, flow, commentId }) {
+  let deliveryText = flow.delivery?.message || automation.dm_message || "Here's what you requested! Enjoy ✨";
+  const resourceUrl = flow.delivery?.resourceUrl;
+  const buttonText = flow.delivery?.buttonText || "Open Link ↗";
+
+  if (resourceUrl) {
+    deliveryText += `\n\n🔗 ${buttonText}: ${resourceUrl}`;
+  }
+
+  // Free branding attribution if not white-label
+  try {
+    const userEntitlement = await billing.entitlement(automation.owner_user_id);
+    if (!userEntitlement?.limits?.whiteLabel) {
+      if (!deliveryText.includes('Powered by Comment2DM')) {
+        deliveryText += '\n\n⚡ Powered by Comment2DM';
+      }
+    }
+  } catch (_) {}
+
+  await instagramService.sendDirectMessage(
+    recipientIgUserId,
+    senderIgsid,
+    { text: deliveryText },
+    tokenData.accessToken
+  );
+
+  // Persist conversation state for idempotency
+  const key = `${recipientIgUserId}:${senderIgsid}:${automation.id}`;
+  if (db.collections && db.collections().conversationStates) {
+    await db.collections().conversationStates.updateOne(
+      { key },
+      {
+        $set: {
+          key,
+          automation_id: automation.id,
+          owner_user_id: automation.owner_user_id,
+          instagram_user_id: recipientIgUserId,
+          sender_igsid: senderIgsid,
+          state: 'RESOURCE_DELIVERED',
+          resource_delivered: true,
+          delivered_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }
+      },
+      { upsert: true }
+    );
+  }
+
+  // Log in automation_events
+  if (db.collections && db.collections().automationEvents) {
+    await db.collections().automationEvents.insertOne({
+      event_id: crypto.randomUUID(),
+      owner_user_id: automation.owner_user_id,
+      instagram_user_id: recipientIgUserId,
+      automation_id: automation.id,
+      from_id: senderIgsid,
+      event_type: 'resource_delivered',
+      message_text: deliveryText,
+      status: 'success',
+      created_at: new Date().toISOString()
+    });
+  }
+}
+
 app.post('/api/instagram/webhook', async (request, response) => {
   response.status(200).json({ status: 'ok' });
 
@@ -1075,6 +1140,9 @@ app.post('/api/instagram/webhook', async (request, response) => {
       const recipientIgUserId = String(entry.id || '');
       const changes = Array.isArray(entry.changes) ? entry.changes : [];
 
+      // ==========================================
+      // 1. Comment Webhook Events
+      // ==========================================
       for (const change of changes) {
         if (change.field !== 'comments' || !change.value) continue;
 
@@ -1163,27 +1231,20 @@ app.post('/api/instagram/webhook', async (request, response) => {
               console.log(`Matched automation ${auto.id} for comment "${commentText}" (ID: ${commentId}). Sending replies...`);
               try {
                 const tokenData = await instagramService.getDecryptedTokenByInstagramUserId(recipientIgUserId, auto.owner_user_id);
+                const flow = auto.flow || {};
+                const isFollowGateEnabled = Boolean(flow.followGate?.enabled);
 
                 // Prepare message to send based on conversation flow and personalization
-                let messageToSend = auto.dm_message || '';
+                let messageToSend = flow.openingMessage || auto.dm_message || "Hey! I'm so glad you're here — thanks for your interest 😊\n\nTap below and I'll send you the link in just a moment ✨";
 
-                if (auto.flow && typeof auto.flow === 'object') {
-                  const flow = auto.flow;
-                  if (flow.openingMessage) {
-                    messageToSend = flow.openingMessage;
-                  }
-                  // If follow-gate is NOT enabled, append final resource delivery immediately
-                  if (!flow.followGate?.enabled && flow.delivery?.message) {
+                // If follow-gate is NOT enabled, append final resource delivery immediately (Normal DM delivery)
+                if (!isFollowGateEnabled) {
+                  if (flow.delivery?.message) {
                     messageToSend += '\n\n' + flow.delivery.message;
-                    if (flow.delivery.resourceUrl) {
-                      const btnLabel = flow.delivery.buttonText || 'Link';
-                      messageToSend += `\n🔗 ${btnLabel}: ${flow.delivery.resourceUrl}`;
-                    }
-                  } else if (flow.followGate?.enabled && flow.followGate?.message) {
-                    messageToSend += '\n\n' + flow.followGate.message;
-                    if (flow.followGate.profileUrl) {
-                      messageToSend += `\n👉 Follow: ${flow.followGate.profileUrl}`;
-                    }
+                  }
+                  if (flow.delivery?.resourceUrl) {
+                    const btnLabel = flow.delivery.buttonText || 'Link';
+                    messageToSend += `\n🔗 ${btnLabel}: ${flow.delivery.resourceUrl}`;
                   }
                 }
 
@@ -1207,12 +1268,81 @@ app.post('/api/instagram/webhook', async (request, response) => {
                 }
 
                 // 1. Send Private DM
-                await instagramService.sendPrivateReply(
-                  recipientIgUserId,
-                  commentId,
-                  messageToSend,
-                  tokenData.accessToken
-                );
+                if (isFollowGateEnabled) {
+                  const openingBtnTitle = (flow.openingButtonText || 'Send me the link').slice(0, 20);
+                  const msgPayload = {
+                    text: messageToSend,
+                    quick_replies: [
+                      {
+                        content_type: 'text',
+                        title: openingBtnTitle,
+                        payload: `SEND_LINK:${auto.id}:${commentId}`
+                      }
+                    ]
+                  };
+                  await instagramService.sendPrivateReply(
+                    recipientIgUserId,
+                    commentId,
+                    msgPayload,
+                    tokenData.accessToken
+                  );
+
+                  // Initialize conversation state
+                  const stateKey = `${recipientIgUserId}:${fromId || commentId}:${auto.id}`;
+                  if (db.collections && db.collections().conversationStates) {
+                    await db.collections().conversationStates.updateOne(
+                      { key: stateKey },
+                      {
+                        $set: {
+                          key: stateKey,
+                          automation_id: auto.id,
+                          owner_user_id: auto.owner_user_id,
+                          instagram_user_id: recipientIgUserId,
+                          comment_id: commentId,
+                          commenter_id: fromId,
+                          commenter_username: fromUsername,
+                          state: 'COMMENT_REPLIED',
+                          follow_gate_required: true,
+                          resource_delivered: false,
+                          created_at: new Date().toISOString(),
+                          updated_at: new Date().toISOString()
+                        }
+                      },
+                      { upsert: true }
+                    );
+                  }
+                } else {
+                  await instagramService.sendPrivateReply(
+                    recipientIgUserId,
+                    commentId,
+                    messageToSend,
+                    tokenData.accessToken
+                  );
+
+                  const stateKey = `${recipientIgUserId}:${fromId || commentId}:${auto.id}`;
+                  if (db.collections && db.collections().conversationStates) {
+                    await db.collections().conversationStates.updateOne(
+                      { key: stateKey },
+                      {
+                        $set: {
+                          key: stateKey,
+                          automation_id: auto.id,
+                          owner_user_id: auto.owner_user_id,
+                          instagram_user_id: recipientIgUserId,
+                          comment_id: commentId,
+                          commenter_id: fromId,
+                          commenter_username: fromUsername,
+                          state: 'RESOURCE_DELIVERED',
+                          follow_gate_required: false,
+                          resource_delivered: true,
+                          delivered_at: new Date().toISOString(),
+                          updated_at: new Date().toISOString()
+                        }
+                      },
+                      { upsert: true }
+                    );
+                  }
+                }
 
                 // 2. Send Public Comment Reply (if configured)
                 if (auto.reply_template) {
@@ -1235,14 +1365,14 @@ app.post('/api/instagram/webhook', async (request, response) => {
                     comment_text: commentText,
                     event_type: 'private_reply',
                     keyword: auto.keyword,
-                    message_text: auto.dm_message,
+                    message_text: messageToSend,
                     status: 'success',
                     created_at: new Date().toISOString()
                   });
                 } else {
                   await db.run(
                     'INSERT INTO automation_events (owner_user_id, instagram_user_id, automation_id, comment_id, event_type, keyword, message_text, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                    [auto.owner_user_id, recipientIgUserId, auto.id, commentId, 'private_reply', auto.keyword, auto.dm_message, 'success', new Date().toISOString()]
+                    [auto.owner_user_id, recipientIgUserId, auto.id, commentId, 'private_reply', auto.keyword, messageToSend, 'success', new Date().toISOString()]
                   );
                 }
                 console.log(`Successfully sent DM & reply for comment ID ${commentId}`);
@@ -1282,6 +1412,221 @@ app.post('/api/instagram/webhook', async (request, response) => {
           setTimeout(() => {
             processingCommentIds.delete(commentId);
           }, 60000);
+        }
+      }
+
+      // ==========================================
+      // 2. Interactive Messaging Events (Quick Replies, Button Taps, DMs)
+      // ==========================================
+      const messagingEvents = Array.isArray(entry.messaging) ? entry.messaging : [];
+      for (const msgEvent of messagingEvents) {
+        const senderIgsid = String(msgEvent.sender?.id || '');
+        const recipientIgUserId = String(msgEvent.recipient?.id || entry.id || '');
+        if (!senderIgsid || !recipientIgUserId || senderIgsid === recipientIgUserId) continue;
+
+        const quickReplyPayload = msgEvent.message?.quick_reply?.payload;
+        const postbackPayload = msgEvent.postback?.payload;
+        const incomingText = String(msgEvent.message?.text || msgEvent.postback?.title || '').trim();
+        const payload = String(quickReplyPayload || postbackPayload || '').trim();
+
+        let action = '';
+        let autoId = '';
+        let commentId = '';
+
+        if (payload.startsWith('SEND_LINK')) {
+          action = 'SEND_LINK';
+          const parts = payload.split(':');
+          autoId = parts[1] || '';
+          commentId = parts[2] || '';
+        } else if (payload.startsWith('CHECK_FOLLOW')) {
+          action = 'CHECK_FOLLOW';
+          const parts = payload.split(':');
+          autoId = parts[1] || '';
+          commentId = parts[2] || '';
+        } else if (/send.*link/i.test(incomingText)) {
+          action = 'SEND_LINK';
+        } else if (/follow/i.test(incomingText)) {
+          action = 'CHECK_FOLLOW';
+        }
+
+        if (!action) continue;
+
+        console.log(`[MESSAGING] Interactive event: action="${action}", sender="${senderIgsid}", payload="${payload}"`);
+
+        // Find automation
+        let targetAutomation = null;
+        if (autoId) {
+          targetAutomation = await db.get('SELECT * FROM automations WHERE id = ?', [autoId]);
+          if (!targetAutomation && db.collections) {
+            targetAutomation = await db.collections().automations.findOne({ id: autoId });
+          }
+        }
+
+        if (!targetAutomation) {
+          const active = await db.all(
+            'SELECT * FROM automations WHERE instagram_user_id = ? AND enabled = 1 ORDER BY updated_at DESC LIMIT 1',
+            [recipientIgUserId]
+          );
+          targetAutomation = active?.[0];
+          if (!targetAutomation && db.collections) {
+            targetAutomation = await db.collections().automations.findOne(
+              { instagram_user_id: recipientIgUserId, enabled: { $in: [true, 1, '1'] } },
+              { sort: { updated_at: -1 } }
+            );
+          }
+        }
+
+        if (!targetAutomation) {
+          console.log(`[MESSAGING] No matching automation for recipient ${recipientIgUserId}`);
+          continue;
+        }
+
+        const tokenData = await instagramService.getDecryptedTokenByInstagramUserId(recipientIgUserId, targetAutomation.owner_user_id);
+        const flow = targetAutomation.flow || {};
+        const creatorUsername = tokenData.username || 'creator';
+
+        // IDEMPOTENCY CHECK: Do not deliver resource twice on repeated button taps
+        const idempotencyKey = `${recipientIgUserId}:${senderIgsid}:${targetAutomation.id}`;
+        let convState = null;
+        if (db.collections && db.collections().conversationStates) {
+          convState = await db.collections().conversationStates.findOne({ key: idempotencyKey });
+        }
+
+        if (convState && convState.resource_delivered === true) {
+          console.log(`[IDEMPOTENCY] Resource already delivered to ${senderIgsid} for automation ${targetAutomation.id}. Ignoring duplicate trigger.`);
+          continue;
+        }
+
+        if (action === 'SEND_LINK') {
+          // If follow gate is disabled, deliver resource immediately
+          if (!flow.followGate?.enabled) {
+            console.log(`[MESSAGING] Follow gate disabled. Delivering resource immediately to ${senderIgsid}...`);
+            await deliverFinalResource({ recipientIgUserId, senderIgsid, automation: targetAutomation, tokenData, flow, commentId });
+            continue;
+          }
+
+          // Follow gate is ENABLED: Check follower status via official Meta API
+          console.log(`[MESSAGING] Checking follower status for ${senderIgsid} via Meta Graph API...`);
+          const followResult = await instagramService.checkFollowStatus(recipientIgUserId, senderIgsid, tokenData.accessToken);
+
+          if (followResult.isFollowing === true) {
+            // PATH A — Already Following: Deliver immediately
+            console.log(`[MESSAGING] PATH A: Recipient ${senderIgsid} already follows @${creatorUsername}. Delivering resource immediately.`);
+            await deliverFinalResource({ recipientIgUserId, senderIgsid, automation: targetAutomation, tokenData, flow, commentId });
+          } else if (followResult.supported === false || followResult.error) {
+            // Safe Retry State if Meta API error or restricted
+            console.warn(`[MESSAGING] Meta follow check unavailable or error: ${followResult.error || followResult.note}`);
+            const retryNotice = "We couldn't verify your follow status right now due to a network or API delay. Please tap below to retry!";
+            const profileUrl = flow.followGate?.profileUrl || `https://instagram.com/${creatorUsername}`;
+            await instagramService.sendDirectMessage(
+              recipientIgUserId,
+              senderIgsid,
+              {
+                text: `${retryNotice}\n\n👉 Profile: ${profileUrl}`,
+                quick_replies: [
+                  {
+                    content_type: 'text',
+                    title: 'Retry Follow Check 🔄'.slice(0, 20),
+                    payload: `CHECK_FOLLOW:${targetAutomation.id}:${commentId}`
+                  }
+                ]
+              },
+              tokenData.accessToken
+            );
+          } else {
+            // PATH B — Not Following: Send follow request prompt
+            console.log(`[MESSAGING] PATH B: Recipient ${senderIgsid} does not follow @${creatorUsername}. Sending follow prompt.`);
+            const followPrompt = flow.followGate?.message || "Oops! Looks like you haven't followed me yet 👀\n\nIt would mean a lot if you could visit my profile and hit that follow button 😊";
+            const profileBtn = flow.followGate?.profileBtnText || "Visit Profile";
+            const confirmBtn = flow.followGate?.confirmBtnText || "I've followed ✓";
+            const profileUrl = flow.followGate?.profileUrl || `https://instagram.com/${creatorUsername}`;
+
+            await instagramService.sendDirectMessage(
+              recipientIgUserId,
+              senderIgsid,
+              {
+                text: `${followPrompt}\n\n👉 ${profileBtn}: ${profileUrl}`,
+                quick_replies: [
+                  {
+                    content_type: 'text',
+                    title: confirmBtn.slice(0, 20),
+                    payload: `CHECK_FOLLOW:${targetAutomation.id}:${commentId}`
+                  }
+                ]
+              },
+              tokenData.accessToken
+            );
+
+            // Update conversation state to FOLLOW_PROMPTED
+            if (db.collections && db.collections().conversationStates) {
+              await db.collections().conversationStates.updateOne(
+                { key: idempotencyKey },
+                {
+                  $set: {
+                    key: idempotencyKey,
+                    automation_id: targetAutomation.id,
+                    owner_user_id: targetAutomation.owner_user_id,
+                    instagram_user_id: recipientIgUserId,
+                    sender_igsid: senderIgsid,
+                    state: 'FOLLOW_PROMPTED',
+                    resource_delivered: false,
+                    updated_at: new Date().toISOString()
+                  }
+                },
+                { upsert: true }
+              );
+            }
+          }
+        } else if (action === 'CHECK_FOLLOW') {
+          // Fresh query to Meta API
+          console.log(`[MESSAGING] Fresh follower check on user tap "I've followed ✓" for ${senderIgsid}...`);
+          const recheckResult = await instagramService.checkFollowStatus(recipientIgUserId, senderIgsid, tokenData.accessToken);
+
+          if (recheckResult.isFollowing === true) {
+            console.log(`[MESSAGING] Follower confirmed! Delivering resource to ${senderIgsid}.`);
+            await deliverFinalResource({ recipientIgUserId, senderIgsid, automation: targetAutomation, tokenData, flow, commentId });
+          } else if (recheckResult.supported === false || recheckResult.error) {
+            console.warn(`[MESSAGING] Meta follower recheck error: ${recheckResult.error || recheckResult.note}`);
+            const retryNotice = "We couldn't verify your follow status right now due to a network or API delay. Please tap below to retry!";
+            const profileUrl = flow.followGate?.profileUrl || `https://instagram.com/${creatorUsername}`;
+            await instagramService.sendDirectMessage(
+              recipientIgUserId,
+              senderIgsid,
+              {
+                text: `${retryNotice}\n\n👉 Profile: ${profileUrl}`,
+                quick_replies: [
+                  {
+                    content_type: 'text',
+                    title: 'Retry Follow Check 🔄'.slice(0, 20),
+                    payload: `CHECK_FOLLOW:${targetAutomation.id}:${commentId}`
+                  }
+                ]
+              },
+              tokenData.accessToken
+            );
+          } else {
+            // Still not following
+            console.log(`[MESSAGING] Follow still not detected for ${senderIgsid}. Sending polite retry prompt.`);
+            const retryMsg = flow.followGate?.retryMessage || "Still not seeing that follow yet! 👀 If you just hit follow, please wait a few seconds for Instagram to sync and tap below to retry.";
+            const profileUrl = flow.followGate?.profileUrl || `https://instagram.com/${creatorUsername}`;
+            const confirmBtn = flow.followGate?.confirmBtnText || "I've followed ✓";
+
+            await instagramService.sendDirectMessage(
+              recipientIgUserId,
+              senderIgsid,
+              {
+                text: `${retryMsg}\n\n👉 Visit Profile: ${profileUrl}`,
+                quick_replies: [
+                  {
+                    content_type: 'text',
+                    title: confirmBtn.slice(0, 20),
+                    payload: `CHECK_FOLLOW:${targetAutomation.id}:${commentId}`
+                  }
+                ]
+              },
+              tokenData.accessToken
+            );
+          }
         }
       }
     }

@@ -28,7 +28,8 @@ function collections() {
     billing_plans: database.collection('billing_plans'),
     coupons: database.collection('coupons'),
     subscriptions: database.collection('subscriptions'),
-    otps: database.collection('otps')
+    otps: database.collection('otps'),
+    conversationStates: database.collection('conversation_states')
   };
 }
 
