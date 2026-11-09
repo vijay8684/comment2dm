@@ -5,123 +5,335 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Instagram Accounts — Comment2DM</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
+
+  <!-- Instant Theme Sync (Default: Light Mode, Zero Flash) -->
+  <script>
+    (function () {
+      const saved = localStorage.getItem('comment2dm_theme');
+      const theme = saved === 'dark' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+  </script>
 </head>
 <body class="app-body" data-page="instagram">
 
   <div class="app-shell">
-    <!-- Sidebar -->
+    <!-- Sidebar Navigation -->
     <aside class="app-sidebar" id="appSidebar">
       <div class="sidebar-top">
-        <a href="dashboard.html" class="logo">
+        <a href="dashboard.html" class="logo" aria-label="Comment2DM Dashboard">
           <span class="logo-mark">⚡</span>
           <span>Comment<span style="color:var(--accent-light);">2</span>DM</span>
         </a>
-        <button class="sidebar-toggle-btn" id="sidebarToggleBtn" title="Toggle Sidebar (<<)">
+        <button class="sidebar-toggle-btn" id="sidebarToggleBtn" title="Toggle Sidebar">
           <span id="collapseIcon">«</span>
         </button>
       </div>
 
-      <div class="sidebar-account">
-        <button class="account-selector">
+      <!-- Connected Instagram Account Switcher -->
+      <div class="sidebar-account" id="sidebarAccountArea">
+        <button class="account-selector" id="accountSwitcherBtn" title="Manage Instagram Accounts">
           <div class="account-pill">
-            <div class="account-avatar-img" id="sidebarIgAvatar" style="display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:0.75rem;">IG</div>
+            <div class="account-avatar-img" id="sidebarIgAvatar" style="display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--ink);font-size:0.75rem;">IG</div>
             <div class="account-meta">
-              <span class="account-username" id="sidebarIgUsername">No Account</span>
-              <span class="account-status" id="sidebarIgStatus">Connect now</span>
+              <span class="account-username" id="sidebarIgUsername">Checking...</span>
+              <span class="account-status" id="sidebarIgStatus" style="font-size:0.74rem; color:var(--ink-muted);">Syncing</span>
             </div>
           </div>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
         </button>
       </div>
 
+      <!-- App Navigation Links with Clean SVG Icons -->
       <nav class="app-nav" aria-label="Main Navigation">
-        <a href="dashboard.html" data-nav="dashboard"><span class="nav-icon">🏠</span><span>Home</span></a>
-        <a href="instagram-accounts.html" data-nav="instagram"><span class="nav-icon">📸</span><span>Instagram Accounts</span></a>
-        <a href="automations.html" data-nav="automations"><span class="nav-icon">⚙️</span><span>Automations</span></a>
-        <a href="creator-tools.html" data-nav="creator-tools"><span class="nav-icon">✨</span><span>Creator Studio AI</span></a>
-        <a href="analytics.html" data-nav="analytics"><span class="nav-icon">📊</span><span>Analytics</span></a>
-        <a href="messages.html" data-nav="messages"><span class="nav-icon">💌</span><span>DM Log</span></a>
-        <a href="settings.html" data-nav="settings"><span class="nav-icon">👤</span><span>Settings</span></a>
-        <a href="help.html" data-nav="help"><span class="nav-icon">💬</span><span>Help Desk</span></a>
+        <a href="dashboard.html" data-nav="dashboard" title="Home Dashboard">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+          </span>
+          <span>Home</span>
+        </a>
+        <a href="instagram-accounts.html" data-nav="instagram" class="active" title="Instagram Accounts">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"></rect><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"></line></svg>
+          </span>
+          <span>Instagram Accounts</span>
+        </a>
+        <a href="automations.html" data-nav="automations" title="Automations">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+          </span>
+          <span>Automations</span>
+        </a>
+        <a href="creator-tools.html" data-nav="creator-tools" title="Creator Studio AI">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path></svg>
+          </span>
+          <span>Creator Studio AI</span>
+        </a>
+        <a href="analytics.html" data-nav="analytics" title="Analytics">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+          </span>
+          <span>Analytics</span>
+        </a>
+        <a href="messages.html" data-nav="messages" title="DM Log & History">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+          </span>
+          <span>DM Log</span>
+        </a>
+        <a href="settings.html" data-nav="settings" title="Account Settings">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          </span>
+          <span>Settings</span>
+        </a>
+        <a href="help.html" data-nav="help" title="Help Desk & Support">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          </span>
+          <span>Help Desk</span>
+        </a>
       </nav>
 
+      <!-- Sidebar Footer -->
       <div class="sidebar-foot">
-        <div class="dm-limit-card">
-          <div class="dm-limit-header"><span>Monthly DMs</span><strong id="dmLimitText">0 / 300</strong></div>
-          <div class="dm-progress-track"><div class="dm-progress-fill" id="dmProgressFill" style="width: 5%;"></div></div>
-          <a href="billing.html" class="btn btn-ghost btn-sm btn-block" style="font-size:0.78rem; padding:5px;">Upgrade Plan ↗</a>
+        <div class="dm-limit-card" id="dmLimitCard">
+          <div class="dm-limit-header">
+            <span>Monthly DMs</span>
+            <strong id="dmLimitText">0 / 300</strong>
+          </div>
+          <div class="dm-progress-track">
+            <div class="dm-progress-fill" id="dmProgressFill" style="width: 5%;"></div>
+          </div>
+          <a href="billing.html" class="btn btn-ghost btn-sm btn-block" style="font-size:0.78rem; padding:6px;">
+            Upgrade Plan ↗
+          </a>
         </div>
-        <div class="pie-gauge-collapsed" id="pieGaugeCollapsed">
-          <div class="pie-gauge" id="pieGaugeCircle"><div class="pie-gauge-inner" id="pieGaugeInner">0%</div></div>
-        </div>
+
+        <a href="billing.html" class="pie-gauge-collapsed" id="pieGaugeCollapsed" title="Monthly DM Usage — Click to Upgrade">
+          <div class="pie-gauge" id="pieGaugeCircle">
+            <div class="pie-gauge-inner" id="pieGaugeInner">0%</div>
+          </div>
+        </a>
       </div>
     </aside>
 
+    <!-- Main Workspace Area -->
     <div class="app-main">
+      <!-- Top Application Header -->
       <header class="app-header">
         <div class="app-header-left">
-          <button class="mobile-menu-toggle" id="mobileMenuToggle">☰</button>
+          <button class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="Open navigation menu">☰</button>
           <div>
-            <span class="eyebrow" style="margin-bottom:0;">Integrations</span>
-            <h2 style="font-size:1.15rem; font-weight:700;">Instagram Accounts</h2>
+            <span class="eyebrow" style="margin-bottom:0;">Meta Graph API Integration</span>
+            <h2 style="font-size:1.15rem; font-weight:700; color:var(--ink);">Instagram Accounts</h2>
           </div>
         </div>
 
         <div class="header-user-menu">
-          <a href="help.html" class="notification-bell"><span>💬</span></a>
+          <!-- Shared Theme Toggle Button -->
+          <button class="theme-toggle-btn" id="themeToggleBtn" type="button" aria-label="Toggle theme" title="Toggle theme">
+            <svg class="moon-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+            <svg class="sun-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="5"></circle>
+              <line x1="12" y1="1" x2="12" y2="3"></line>
+              <line x1="12" y1="21" x2="12" y2="23"></line>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+              <line x1="1" y1="12" x2="3" y2="12"></line>
+              <line x1="21" y1="12" x2="23" y2="12"></line>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+            </svg>
+          </button>
+
+          <a href="help.html" class="notification-bell" title="Support & Help Desk">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+          </a>
+
           <div style="position:relative;">
-            <button class="user-profile-trigger" id="userProfileBtn">
+            <button class="user-profile-trigger" id="userProfileBtn" aria-label="User profile menu">
               <div class="user-avatar-circle" id="userAvatarInitial">U</div>
               <div style="text-align:left; display:flex; flex-direction:column;">
-                <span style="font-size:0.86rem; font-weight:600; color:#fff;" id="topbarUserName">Loading...</span>
+                <span style="font-size:0.86rem; font-weight:600; color:var(--ink);" id="topbarUserName">Loading...</span>
                 <span class="plan-badge" id="topbarPlanBadge">Free</span>
               </div>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
             </button>
+
             <div class="user-dropdown-menu" id="userDropdownMenu">
-              <div style="padding:8px 12px;"><strong style="display:block; font-size:0.88rem; color:#fff;" id="dropdownName">User</strong><small style="color:var(--ink-muted);" id="dropdownEmail">user@domain.com</small></div>
+              <div style="padding:10px 14px;">
+                <strong style="display:block; font-size:0.88rem; color:var(--ink);" id="dropdownName">User</strong>
+                <small style="color:var(--ink-muted);" id="dropdownEmail">user@domain.com</small>
+              </div>
               <div class="dropdown-divider"></div>
-              <a href="settings.html" class="user-dropdown-item">👤 Account Settings</a>
-              <a href="billing.html" class="user-dropdown-item">💎 Billing & Plans</a>
-              <a href="help.html" class="user-dropdown-item">💬 Support</a>
+              <a href="settings.html" class="user-dropdown-item">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                Account Settings
+              </a>
+              <a href="billing.html" class="user-dropdown-item">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;"><rect width="20" height="14" x="2" y="5" rx="2"></rect><line x1="2" x2="22" y1="10" y2="10"></line></svg>
+                Billing & Plans
+              </a>
+              <a href="help.html" class="user-dropdown-item">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                Support Desk
+              </a>
               <div class="dropdown-divider"></div>
-              <button type="button" class="user-dropdown-item" id="logoutBtn" style="color:var(--rose); width:100%; text-align:left;">🚪 Sign out</button>
+              <button type="button" class="user-dropdown-item" id="logoutBtn" style="color:var(--rose); width:100%; text-align:left; border:none; background:none; cursor:pointer;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" x2="9" y1="12" y2="12"></line></svg>
+                Sign out
+              </button>
             </div>
           </div>
         </div>
       </header>
 
+      <!-- Main Body Content -->
       <main class="app-content">
-        <div id="dashboardError" class="form-error"></div>
-        <div id="accountNotice" class="success-notice" hidden></div>
+        <!-- Error & Success Banners -->
+        <div id="dashboardError" class="form-error" style="display:none; margin-bottom:20px;"></div>
+        <div id="accountNotice" class="success-notice" style="display:none; margin-bottom:20px;"></div>
 
-        <div style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:16px; margin-bottom:28px;">
+        <!-- Section Top Header & Dynamic CTA -->
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:16px; margin-bottom:24px;">
           <div>
-            <h1 style="font-size:1.8rem; margin-bottom:4px;">Connected Accounts</h1>
-            <p style="color:var(--ink-secondary); font-size:0.92rem;">
-              Manage your connected Instagram Business and Creator profiles authorized via Meta Graph API.
+            <h1 style="font-size:1.85rem; font-weight:800; letter-spacing:-0.03em; margin-bottom:6px; color:var(--ink);">
+              Connected Accounts
+            </h1>
+            <p style="color:var(--ink-secondary); font-size:0.92rem; max-width:640px; margin:0; line-height:1.5;">
+              Manage your connected Instagram Business and Creator profiles authorized via Meta Graph API. Automations trigger and reply automatically in real time.
             </p>
           </div>
-          <a href="/api/instagram/authorize" class="btn btn-accent">+ Connect Instagram Account</a>
+          <a href="/api/instagram/authorize" id="connectAccountBtn" class="btn btn-accent" style="box-shadow:0 4px 18px var(--accent-glow);">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            <span id="connectAccountBtnText">+ Connect Instagram Account</span>
+          </a>
         </div>
 
-        <!-- Long Account Cards Container -->
+        <!-- Meta Authorization Security & Explainer Card -->
+        <div class="meta-security-card">
+          <div class="meta-security-header">
+            <div class="meta-logo-badge" title="Official Meta Graph API v21.0">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z"/>
+              </svg>
+            </div>
+            <div>
+              <strong style="font-size:0.96rem; color:var(--ink); display:block; margin-bottom:2px;">
+                Official Meta Graph API Authorization
+              </strong>
+              <span style="font-size:0.84rem; color:var(--ink-secondary);">
+                Connect securely through Meta's official OAuth 2.0 flow. Professional Instagram accounts only (Creator or Business).
+              </span>
+            </div>
+          </div>
+          <div class="meta-security-points">
+            <div class="meta-point">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span>100% Official Meta API</span>
+            </div>
+            <div class="meta-point">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span>Password never seen or stored</span>
+            </div>
+            <div class="meta-point">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span>Instant webhook sync</span>
+            </div>
+            <div class="meta-point">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span>Disconnect anytime</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Connected Accounts Container (Instant render from cache or dynamic fetch) -->
         <div id="accountsListContainer" style="display:flex; flex-direction:column; gap:16px;">
-          <!-- Loaded instantly -->
+          <!-- Dynamically populated -->
         </div>
 
-        <!-- Empty State -->
-        <div id="accountsEmptyState" class="apple-card" style="text-align:center; padding:48px 24px;" hidden>
-          <div style="font-size:2.5rem; margin-bottom:12px;">📸</div>
-          <h2 style="font-size:1.25rem; margin-bottom:6px;">No Instagram Accounts Linked</h2>
-          <p style="color:var(--ink-secondary); font-size:0.9rem; max-width:440px; margin:0 auto 20px;">
-            Link your professional Instagram account to start setting up comment-to-DM triggers on your Reels.
+        <!-- Zero Accounts Empty State -->
+        <div id="accountsEmptyState" class="apple-card" style="text-align:center; padding:54px 28px; display:none;">
+          <div style="width:72px; height:72px; border-radius:22px; background:linear-gradient(135deg, rgba(118,85,217,0.15), rgba(217,70,168,0.15)); border:1px solid rgba(118,85,217,0.25); display:flex; align-items:center; justify-content:center; margin:0 auto 20px; color:var(--accent);">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect width="20" height="20" x="2" y="2" rx="5" ry="5"></rect>
+              <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
+              <line x1="17.5" x2="17.51" y1="6.5" y2="6.5"></line>
+            </svg>
+          </div>
+          <h2 style="font-size:1.35rem; font-weight:700; margin-bottom:8px; color:var(--ink);">
+            No Instagram Accounts Linked Yet
+          </h2>
+          <p style="color:var(--ink-secondary); font-size:0.92rem; max-width:480px; margin:0 auto 24px; line-height:1.6;">
+            Connect your Instagram Creator or Business account to start setting up automated comment-to-DM flows, instant lead delivery, and reel triggers.
           </p>
-          <a href="/api/instagram/authorize" class="btn btn-accent">Connect Your Instagram Account</a>
+          <div style="display:flex; justify-content:center; margin-bottom:32px;">
+            <a href="/api/instagram/authorize" class="btn btn-accent" style="padding:12px 28px; font-size:0.96rem;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              Connect Your Instagram Account
+            </a>
+          </div>
+
+          <!-- Requirements Checklist Box -->
+          <div style="max-width:520px; margin:0 auto; background:var(--surface-hover); border:1px solid var(--glass-border); border-radius:var(--radius-m); padding:18px 22px; text-align:left;">
+            <strong style="display:block; font-size:0.86rem; color:var(--ink); margin-bottom:10px;">
+              Requirements to connect via Meta:
+            </strong>
+            <ul style="margin:0; padding-left:18px; font-size:0.84rem; color:var(--ink-secondary); line-height:1.7;">
+              <li>Your Instagram account must be a <strong>Creator</strong> or <strong>Business</strong> profile (Personal profiles are not supported by the Meta Graph API).</li>
+              <li>Your Instagram profile must be linked to a <strong>Facebook Page</strong> you manage.</li>
+              <li>In your Instagram mobile app, <strong>Allow access to messages</strong> must be enabled under <em>Settings → Messages & story replies</em>.</li>
+            </ul>
+          </div>
         </div>
       </main>
+    </div>
+  </div>
+
+  <!-- Custom Disconnect Confirmation Modal -->
+  <div class="modal-overlay" id="disconnectModal" aria-hidden="true" role="dialog" aria-labelledby="modalTitle">
+    <div class="modal-card">
+      <div class="modal-icon-badge danger">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path>
+          <line x1="12" y1="9" x2="12" y2="13"></line>
+          <line x1="12" y1="17" x2="12.01" y2="17"></line>
+        </svg>
+      </div>
+
+      <h2 id="modalTitle" style="font-size:1.35rem; font-weight:700; margin-bottom:8px; color:var(--ink);">
+        Disconnect Account?
+      </h2>
+
+      <!-- Target Account Pill -->
+      <div class="modal-account-preview" id="modalAccountPill">
+        <div style="width:28px; height:28px; border-radius:50%; background:var(--accent-gradient); display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:0.8rem;" id="modalAccountAvatar">
+          IG
+        </div>
+        <span style="font-weight:700; font-size:0.92rem; color:var(--ink);" id="modalAccountUsername">@username</span>
+      </div>
+
+      <p style="color:var(--ink-secondary); font-size:0.9rem; line-height:1.6; margin:0 0 24px;">
+        Disconnecting will pause all active Comment-to-DM triggers, automatic replies, and keyword listeners linked to this account. You can reconnect anytime through Meta.
+      </p>
+
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="cancelDisconnectBtn">
+          Cancel
+        </button>
+        <button type="button" class="btn btn-danger" id="confirmDisconnectBtn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
+          <span id="confirmDisconnectText">Disconnect Account</span>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -132,130 +344,321 @@
       const emptyState = document.getElementById('accountsEmptyState');
       const notice = document.getElementById('accountNotice');
       const errorBox = document.getElementById('dashboardError');
+      const connectBtnText = document.getElementById('connectAccountBtnText');
 
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('instagram_connected')) {
-        notice.textContent = 'Instagram account successfully linked! ⚡';
-        notice.hidden = false;
-        setTimeout(() => { notice.hidden = true; }, 5000);
+      // Modal Elements
+      const disconnectModal = document.getElementById('disconnectModal');
+      const modalAccountAvatar = document.getElementById('modalAccountAvatar');
+      const modalAccountUsername = document.getElementById('modalAccountUsername');
+      const cancelDisconnectBtn = document.getElementById('cancelDisconnectBtn');
+      const confirmDisconnectBtn = document.getElementById('confirmDisconnectBtn');
+      const confirmDisconnectText = document.getElementById('confirmDisconnectText');
+
+      let currentDisconnectAccount = null;
+      let cachedAccountsList = [];
+
+      // Handle OAuth Redirect URL Query Parameters
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('instagram_connected')) {
+        notice.innerHTML = '🎉 <strong>Instagram connected!</strong> Your account is authorized and ready to run automations.';
+        notice.style.display = 'block';
+        window.history.replaceState({}, document.title, window.location.pathname);
+        setTimeout(() => { notice.style.display = 'none'; }, 6000);
       }
-      if (params.get('instagram_error')) {
-        errorBox.textContent = params.get('instagram_error');
-        errorBox.classList.add('show');
+      if (urlParams.get('instagram_error')) {
+        const errMsg = urlParams.get('instagram_error');
+        errorBox.innerHTML = `⚠️ <strong>Connection Issue:</strong> ${escapeHtml(errMsg)}`;
+        errorBox.style.display = 'block';
+        window.history.replaceState({}, document.title, window.location.pathname);
       }
 
-      function renderAccountList(accounts, automationsCountMap = {}) {
+      function escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
+      function formatDate(isoStr) {
+        if (!isoStr) return 'Recently connected';
+        try {
+          return new Date(isoStr).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+        } catch (_) {
+          return 'Recently connected';
+        }
+      }
+
+      function renderAccountCards(accounts, automationsCountMap = {}) {
+        cachedAccountsList = accounts || [];
+
         if (!accounts || accounts.length === 0) {
-          emptyState.hidden = false;
+          emptyState.style.display = 'block';
           container.innerHTML = '';
+          if (connectBtnText) connectBtnText.textContent = '+ Connect Instagram Account';
           return;
         }
-        emptyState.hidden = true;
+
+        emptyState.style.display = 'none';
         container.innerHTML = '';
+        if (connectBtnText) connectBtnText.textContent = '+ Connect another account';
 
         accounts.forEach(acct => {
+          const isExpired = acct.status === 'Token expired' || (acct.expiresAt && new Date(acct.expiresAt).getTime() <= Date.now());
           const autoCount = automationsCountMap[acct.id] ?? '...';
+          const username = acct.username || 'Creator';
+          const initial = username.charAt(0).toUpperCase();
+
           const card = document.createElement('div');
-          card.className = 'apple-card';
-          card.style.display = 'flex';
-          card.style.alignItems = 'center';
-          card.style.justifyContent = 'space-between';
-          card.style.flexWrap = 'wrap';
-          card.style.gap = '20px';
-          card.style.padding = '22px 28px';
+          card.className = 'ig-account-card';
+          card.id = `account_card_${acct.id}`;
 
           card.innerHTML = `
-            <div style="display:flex; align-items:center; gap:18px;">
-              <div style="width:54px; height:54px; border-radius:50%; background:var(--accent-gradient); display:flex; align-items:center; justify-content:center; color:#fff; font-size:1.4rem; font-weight:700; box-shadow:0 4px 16px var(--accent-glow);">
-                ${(acct.username || 'I').charAt(0).toUpperCase()}
+            <div class="ig-account-card-header">
+              <div class="ig-account-profile">
+                <div class="ig-avatar-ring">
+                  <div class="ig-avatar-inner">
+                    ${acct.profilePicUrl 
+                      ? `<img src="${escapeHtml(acct.profilePicUrl)}" alt="@${escapeHtml(username)}" />` 
+                      : `<span>${escapeHtml(initial)}</span>`}
+                  </div>
+                  <div class="ig-avatar-badge" title="Instagram Profile">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"></rect><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path></svg>
+                  </div>
+                </div>
+
+                <div>
+                  <div class="ig-account-title">
+                    <h3 class="ig-account-handle">@${escapeHtml(username)}</h3>
+                    <span class="ig-verified-badge" title="Meta Connected">
+                      <svg width="17" height="17" viewBox="0 0 24 24" fill="#0095f6">
+                        <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm-1.8 14.5l-4-4 1.4-1.4 2.6 2.6 6.6-6.6 1.4 1.4-8 8z" />
+                      </svg>
+                    </span>
+                    ${isExpired
+                      ? `<span class="status-pill status-expired"><span class="status-dot amber"></span> Token Expired</span>`
+                      : `<span class="status-pill status-connected"><span class="status-dot green"></span> Connected</span>`}
+                  </div>
+                  <div style="font-size:0.84rem; color:var(--ink-secondary); display:flex; align-items:center; gap:8px;">
+                    <span>Official Meta Graph API</span>
+                    <span>·</span>
+                    <span>${formatDate(acct.connectedAt)}</span>
+                  </div>
+                </div>
               </div>
-              <div>
-                <div style="display:flex; align-items:center; gap:10px; margin-bottom:4px;">
-                  <h3 style="font-size:1.15rem; color:#fff;">@${acct.username}</h3>
-                  <span class="plan-badge pro" style="color:var(--emerald);">● Connected</span>
-                </div>
-                <div style="font-size:0.84rem; color:var(--ink-secondary); display:flex; flex-wrap:wrap; gap:14px;">
-                  <span>ID: <code>${acct.id}</code></span>
-                  <span id="autoCountBadge_${acct.id}">⚡ <strong>${autoCount}</strong> Active Automations</span>
-                  <span>✅ Official Meta API</span>
-                </div>
+
+              <!-- Action Buttons -->
+              <div class="ig-account-actions">
+                ${isExpired ? `
+                  <a href="/api/instagram/authorize" class="btn btn-accent btn-sm" title="Re-authorize expired access token">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"></path></svg>
+                    <span>Reconnect via Meta</span>
+                  </a>
+                ` : ''}
+
+                <a href="https://instagram.com/${encodeURIComponent(username)}" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-sm" title="View profile on Instagram">
+                  <span>View on Instagram</span>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                </a>
+
+                <button type="button" class="btn btn-danger-ghost btn-sm disconnect-trigger-btn" data-account-id="${escapeHtml(acct.id)}" data-account-username="${escapeHtml(username)}" title="Disconnect this Instagram profile">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
+                  <span>Disconnect</span>
+                </button>
               </div>
             </div>
 
-            <div style="display:flex; align-items:center; gap:12px;">
-              <a href="https://instagram.com/${encodeURIComponent(acct.username)}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">
-                <span>View on Instagram ↗</span>
+            <!-- Metadata & Automations Row -->
+            <div class="ig-account-meta-row">
+              <span class="ig-meta-tag" title="Meta Instagram User ID">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M7 7h.01M7 12h.01M7 17h.01M12 7h5M12 12h5M12 17h5"></path></svg>
+                <span>ID: <code>${escapeHtml(acct.id)}</code></span>
+              </span>
+
+              <a href="automations.html" class="ig-meta-tag highlight" id="autoCountBadge_${acct.id}" title="Manage automations for this account">
+                <span>⚡ <strong>${autoCount}</strong> Active Automations</span>
               </a>
-              <button class="btn btn-ghost btn-sm disconnect-btn" style="color:var(--rose);">
-                <span>Disconnect</span>
-              </button>
+
+              <span class="ig-meta-tag" title="Real-time Webhook Receiver">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+                <span>Webhooks Active (Graph API v21.0)</span>
+              </span>
+
+              <span class="ig-meta-tag" title="Direct Messaging Permissions">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                <span>instagram_manage_messages</span>
+              </span>
             </div>
           `;
 
-          card.querySelector('.disconnect-btn').addEventListener('click', async () => {
-            if (!confirm(`Are you sure you want to disconnect @${acct.username}? Automations on this account will stop running.`)) return;
-            try {
-              const res = await fetch(`/api/instagram/accounts/${encodeURIComponent(acct.id)}`, {
-                method: 'DELETE',
-                headers: window.getAuthHeaders(),
-                credentials: 'same-origin'
-              });
-              if (!res.ok) {
-                const errData = await res.json().catch(() => ({}));
-                throw new Error(errData.error || 'Failed to disconnect');
-              }
-              sessionStorage.removeItem('comment2dm_cached_accounts');
-              card.remove();
-              if (container.children.length === 0) emptyState.hidden = false;
-              notice.textContent = 'Account disconnected.';
-              notice.hidden = false;
-            } catch (e) {
-              alert('Failed to disconnect account: ' + e.message);
-            }
+          // Disconnect Button Listener
+          card.querySelector('.disconnect-trigger-btn').addEventListener('click', () => {
+            openDisconnectModal(acct);
           });
 
           container.appendChild(card);
         });
       }
 
-      // 1. Instant paint from session cache if available (< 5ms)
+      // ==========================================
+      // Disconnect Modal Workflow
+      // ==========================================
+      function openDisconnectModal(acct) {
+        currentDisconnectAccount = acct;
+        modalAccountUsername.textContent = '@' + (acct.username || 'account');
+        modalAccountAvatar.textContent = (acct.username || 'I').charAt(0).toUpperCase();
+        confirmDisconnectBtn.disabled = false;
+        confirmDisconnectText.textContent = 'Disconnect Account';
+
+        disconnectModal.classList.add('show');
+        disconnectModal.setAttribute('aria-hidden', 'false');
+      }
+
+      function closeDisconnectModal() {
+        disconnectModal.classList.remove('show');
+        disconnectModal.setAttribute('aria-hidden', 'true');
+        currentDisconnectAccount = null;
+      }
+
+      if (cancelDisconnectBtn) {
+        cancelDisconnectBtn.addEventListener('click', closeDisconnectModal);
+      }
+
+      if (disconnectModal) {
+        disconnectModal.addEventListener('click', (e) => {
+          if (e.target === disconnectModal) closeDisconnectModal();
+        });
+      }
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && disconnectModal && disconnectModal.classList.contains('show')) {
+          closeDisconnectModal();
+        }
+      });
+
+      if (confirmDisconnectBtn) {
+        confirmDisconnectBtn.addEventListener('click', async () => {
+          if (!currentDisconnectAccount) return;
+
+          confirmDisconnectBtn.disabled = true;
+          confirmDisconnectText.textContent = 'Disconnecting...';
+
+          try {
+            const res = await fetch(`/api/instagram/accounts/${encodeURIComponent(currentDisconnectAccount.id)}`, {
+              method: 'DELETE',
+              headers: window.getAuthHeaders(),
+              credentials: 'same-origin'
+            });
+
+            if (!res.ok) {
+              const errData = await res.json().catch(() => ({}));
+              throw new Error(errData.error || 'Failed to disconnect account');
+            }
+
+            // Successfully disconnected
+            const disconnectedUsername = currentDisconnectAccount.username;
+            const targetId = currentDisconnectAccount.id;
+
+            // Invalidate cache
+            sessionStorage.removeItem('comment2dm_cached_accounts');
+
+            // Remove card with smooth transition
+            const cardEl = document.getElementById(`account_card_${targetId}`);
+            if (cardEl) cardEl.remove();
+
+            // Update local cached list
+            cachedAccountsList = cachedAccountsList.filter(a => a.id !== targetId);
+            if (cachedAccountsList.length === 0) {
+              emptyState.style.display = 'block';
+              if (connectBtnText) connectBtnText.textContent = '+ Connect Instagram Account';
+            }
+
+            // Update sidebar account state if needed
+            const sidebarUser = document.getElementById('sidebarIgUsername');
+            const sidebarStat = document.getElementById('sidebarIgStatus');
+            if (sidebarUser && (cachedAccountsList.length === 0 || sidebarUser.textContent === '@' + disconnectedUsername)) {
+              if (cachedAccountsList.length > 0) {
+                sidebarUser.textContent = '@' + cachedAccountsList[0].username;
+              } else {
+                sidebarUser.textContent = 'No Account';
+                if (sidebarStat) {
+                  sidebarStat.textContent = 'Connect now';
+                  sidebarStat.style.color = 'var(--ink-secondary)';
+                }
+              }
+            }
+
+            closeDisconnectModal();
+
+            // Show friendly notification
+            notice.innerHTML = `✓ <strong>@${escapeHtml(disconnectedUsername)}</strong> has been successfully disconnected. Automations for this account are paused.`;
+            notice.style.display = 'block';
+            setTimeout(() => { notice.style.display = 'none'; }, 6000);
+
+          } catch (err) {
+            confirmDisconnectBtn.disabled = false;
+            confirmDisconnectText.textContent = 'Disconnect Account';
+            alert('Failed to disconnect: ' + err.message);
+          }
+        });
+      }
+
+      // ==========================================
+      // Data Hydration & Fetching
+      // ==========================================
+
+      // 1. Instant paint from session cache (< 2ms)
       try {
         const cached = sessionStorage.getItem('comment2dm_cached_accounts');
         if (cached) {
           const parsed = JSON.parse(cached);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            renderAccountList(parsed);
+            renderAccountCards(parsed);
           }
         }
       } catch (_) {}
 
-      // 2. Fast fetch accounts directly (single light query, takes ~20ms)
+      // 2. Fetch live accounts from backend
       try {
         const acctRes = await fetch('/api/instagram/accounts', {
           headers: window.getAuthHeaders(),
           credentials: 'same-origin'
         });
+
+        if (acctRes.status === 401) {
+          localStorage.removeItem('comment2dm_token');
+          window.location.replace('login.html?tab=login');
+          return;
+        }
+
         const acctData = await acctRes.json().catch(() => ({}));
         const accounts = acctData.accounts || [];
 
         sessionStorage.setItem('comment2dm_cached_accounts', JSON.stringify(accounts));
-        renderAccountList(accounts);
+        renderAccountCards(accounts);
 
-        // 3. Background fetch automations count without delaying account rendering
-        fetch('/api/automations', { headers: window.getAuthHeaders(), credentials: 'same-origin' })
-          .then(r => r.json())
-          .then(data => {
-            const automations = data.automations || [];
-            accounts.forEach(acct => {
-              const count = automations.filter(a => a.instagramUserId === acct.id).length;
-              const badge = document.getElementById(`autoCountBadge_${acct.id}`);
-              if (badge) badge.innerHTML = `⚡ <strong>${count}</strong> Active Automations`;
-            });
-          })
-          .catch(() => {});
+        // 3. Concurrent fetch of automations count for all accounts
+        if (accounts.length > 0) {
+          fetch('/api/automations', { headers: window.getAuthHeaders(), credentials: 'same-origin' })
+            .then(r => r.json())
+            .then(data => {
+              const automations = data.automations || [];
+              accounts.forEach(acct => {
+                const count = automations.filter(a => String(a.instagramUserId) === String(acct.id)).length;
+                const badge = document.getElementById(`autoCountBadge_${acct.id}`);
+                if (badge) {
+                  badge.innerHTML = `<span>⚡ <strong>${count}</strong> Active Automations</span>`;
+                }
+              });
+            })
+            .catch(() => {});
+        }
+
       } catch (err) {
-        errorBox.textContent = 'Unable to load Instagram accounts.';
-        errorBox.classList.add('show');
+        errorBox.textContent = 'Unable to load Instagram accounts. Please check your network connection.';
+        errorBox.style.display = 'block';
       }
     })();
   </script>
