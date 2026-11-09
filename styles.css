@@ -621,6 +621,7 @@ p {
 /* Main Content Area */
 .app-main {
   flex: 1;
+  min-width: 0;
   margin-left: var(--sidebar-w);
   display: flex;
   flex-direction: column;
@@ -1088,6 +1089,8 @@ p {
   align-items: center;
   gap: 10px;
   margin-bottom: 4px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .ig-account-handle {
@@ -1095,6 +1098,8 @@ p {
   font-weight: 700;
   color: var(--ink);
   letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .ig-verified-badge {
@@ -1136,6 +1141,8 @@ p {
   font-family: var(--font-mono);
   font-size: 0.78rem;
   color: var(--ink);
+  overflow-wrap: anywhere;
+  word-break: break-all;
 }
 
 .ig-meta-tag.highlight {
@@ -1816,7 +1823,8 @@ p {
 
 /* iPhone Live Simulator */
 .phone-simulator-frame {
-  width: 320px;
+  width: 100%;
+  max-width: 320px;
   min-height: 640px;
   background: #000000;
   border: 10px solid #1e1e24;
@@ -1827,6 +1835,7 @@ p {
   position: relative;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
 }
 
 .iphone-notch {
@@ -2347,13 +2356,237 @@ p {
   .mobile-menu-toggle {
     display: flex;
   }
-  .app-header {
-    padding: 0 16px;
-  }
-  .app-content {
-    padding: 20px 16px;
-  }
   .main-nav {
     display: none;
+  }
+
+  /* Compact Responsive Header across Dashboard, Instagram Accounts, & Automations */
+  .app-header {
+    height: 58px;
+    padding: 0 14px;
+  }
+  .app-header-left {
+    gap: 10px;
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+  }
+  .app-header-left > div {
+    min-width: 0;
+    overflow: hidden;
+  }
+  .app-header-left .eyebrow {
+    display: none;
+  }
+  .app-header-left h2 {
+    font-size: 0.95rem !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin: 0;
+  }
+  .header-user-menu {
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .theme-toggle-btn {
+    width: 34px;
+    height: 34px;
+  }
+  .notification-bell {
+    width: 34px;
+    height: 34px;
+  }
+  .user-profile-trigger {
+    padding: 2px 4px;
+    gap: 0;
+    border: none;
+    background: transparent;
+  }
+  .user-profile-trigger > div:not(.user-avatar-circle) {
+    display: none !important;
+  }
+  .user-profile-trigger > svg {
+    display: none !important;
+  }
+  .user-avatar-circle {
+    width: 32px;
+    height: 32px;
+    font-size: 0.85rem;
+  }
+  .app-content {
+    padding: 16px 14px;
+  }
+
+  /* Meta Security Explainer Card */
+  .meta-security-card {
+    padding: 16px 14px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+  }
+  .meta-security-header {
+    width: 100%;
+    min-width: 0;
+    gap: 12px;
+  }
+  .meta-security-header > div {
+    min-width: 0;
+    flex: 1;
+  }
+  .meta-security-header strong {
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+  .meta-security-points {
+    width: 100%;
+    gap: 10px 14px;
+  }
+
+  /* Phone Simulator & Automations Builder */
+  #automationFormCard {
+    padding: 18px 14px !important;
+  }
+  .builder-layout {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+}
+
+@media (max-width: 640px) {
+  /* Dashboard Greeting & Actions */
+  #welcomeGreeting,
+  .page-main-heading {
+    font-size: 1.45rem !important;
+    line-height: 1.25 !important;
+  }
+  .page-main-cta {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+  .dashboard-greeting-actions {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .dashboard-greeting-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+  .overview-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  /* Instagram Connected Account Card on Dashboard */
+  #igConnectedCard {
+    padding: 16px 14px !important;
+  }
+  #igConnectedCard > div {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 14px !important;
+  }
+  #igConnectedCard .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Instagram Accounts Page Cards */
+  .ig-account-card {
+    padding: 16px 14px !important;
+    gap: 14px !important;
+  }
+  .ig-account-card-header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 14px !important;
+  }
+  .ig-account-profile {
+    width: 100% !important;
+  }
+  .ig-account-actions {
+    width: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+  }
+  .ig-account-actions .btn {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+  .ig-account-meta-row {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+  .ig-account-meta-row .ig-meta-tag {
+    width: 100% !important;
+    box-sizing: border-box !important;
+    justify-content: flex-start !important;
+  }
+
+  /* Automations Page Cards */
+  .auto-card {
+    padding: 16px 14px !important;
+  }
+  .auto-card-top-row {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 14px !important;
+  }
+  .auto-card-left-info {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+  .auto-card-actions {
+    width: 100% !important;
+    display: flex !important;
+    gap: 6px !important;
+    flex-wrap: wrap !important;
+  }
+  .auto-card-actions .btn {
+    flex: 1 1 auto !important;
+    justify-content: center !important;
+    padding: 7px 8px !important;
+    font-size: 0.8rem !important;
+  }
+  .auto-card-flow-summary {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+    padding: 12px 14px !important;
+  }
+}
+
+@media (max-width: 380px) {
+  .app-header {
+    padding: 0 10px;
+  }
+  .app-header-left h2 {
+    font-size: 0.88rem !important;
+    max-width: 125px;
+  }
+  .notification-bell {
+    display: none !important;
+  }
+  .meta-security-header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 10px !important;
+  }
+  #accountsEmptyState {
+    padding: 24px 12px !important;
+  }
+  #accountsEmptyState > div:last-child {
+    padding: 12px 10px !important;
+  }
+  .phone-simulator-frame {
+    border-width: 6px;
+    border-radius: 32px;
+  }
+  .simulator-screen {
+    padding: 24px 8px 12px;
   }
 }

@@ -1045,16 +1045,16 @@
       const thumb = auto.mediaThumbnail || 'https://placehold.co/80x100/1e1e24/7655d9?text=Post';
 
       card.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+        <div class="auto-card-top-row" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
           <!-- Left: Linked Reel Preview & Metadata -->
-          <div style="display:flex; align-items:center; gap:16px;">
+          <div class="auto-card-left-info" style="display:flex; align-items:center; gap:16px; min-width:0;">
             <div style="width:48px; height:64px; border-radius:8px; overflow:hidden; background:var(--surface-raised); border:1px solid var(--glass-border); flex-shrink:0;">
               <img src="${escapeHtml(thumb)}" alt="Reel" style="width:100%; height:100%; object-fit:cover;" />
             </div>
 
-            <div>
+            <div style="min-width:0;">
               <div style="display:flex; align-items:center; gap:10px; margin-bottom:4px; flex-wrap:wrap;">
-                <strong style="color:var(--ink); font-size:1.05rem;">@${escapeHtml(auto.username || 'creator')}</strong>
+                <strong style="color:var(--ink); font-size:1.05rem; overflow-wrap:anywhere;">@${escapeHtml(auto.username || 'creator')}</strong>
                 ${statusBadge}
                 ${auto.mediaUrl ? `<a href="${escapeHtml(auto.mediaUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent); font-size:0.8rem; text-decoration:none;">View Reel ↗</a>` : ''}
               </div>
@@ -1066,7 +1066,7 @@
           </div>
 
           <!-- Right: Actions -->
-          <div style="display:flex; align-items:center; gap:10px;">
+          <div class="auto-card-actions" style="display:flex; align-items:center; gap:10px;">
             <button class="btn btn-ghost btn-sm toggle-auto-btn" style="padding:6px 14px;">
               ${auto.enabled ? 'Pause' : 'Activate'}
             </button>
@@ -1082,7 +1082,7 @@
         </div>
 
         <!-- Flow Summary Box -->
-        <div style="display:grid; grid-template-columns: 1.2fr 0.8fr; gap:14px; background:var(--surface-hover); border:1px solid var(--glass-border); border-radius:var(--radius-m); padding:14px 18px; font-size:0.84rem;">
+        <div class="auto-card-flow-summary" style="display:grid; grid-template-columns: 1.2fr 0.8fr; gap:14px; background:var(--surface-hover); border:1px solid var(--glass-border); border-radius:var(--radius-m); padding:14px 18px; font-size:0.84rem;">
           <div>
             <div style="color:var(--ink-muted); font-size:0.75rem; text-transform:uppercase; margin-bottom:4px; font-weight:700;">
               📩 Direct Message Flow
