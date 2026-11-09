@@ -512,6 +512,352 @@ runTest('Meta token redaction hides API secrets in server logs', () => {
   assert.strictEqual(redactToken(null), '[NONE]');
 });
 
+// ==========================================
+// REGRESSION SUITE: Strict State Machine & Access Control
+// ==========================================
+
+// Mock State Machine Runner mimicking server.js
+function createWebhookStateMachine() {
+  const store = new Map();
+  const deliveryCalls = [];
+  const promptCalls = [];
+  const inProgress = new Set();
+
+  async function deliverFinalResource({ automationId, recipientIgId, senderIgsid, flow, prefixMessage }) {
+    const key = `${automationId}:${recipientIgId}:${senderIgsid}`;
+    if (inProgress.has(key)) return { delivered: false, reason: 'concurrency' };
+    inProgress.add(key);
+
+    try {
+      const current = store.get(key) || { resource_delivered: false };
+      if (current.resource_delivered) {
+        return { delivered: false, reason: 'already_delivered' };
+      }
+      current.resource_delivered = true;
+      current.state = 'RESOURCE_DELIVERED';
+      current.delivered_at = Date.now();
+      store.set(key, current);
+
+      const text = (prefixMessage ? `${prefixMessage.trim()}\n\n` : '') + flow.delivery.message;
+      deliveryCalls.push({ automationId, senderIgsid, text, resourceUrl: flow.delivery.resourceUrl });
+      return { delivered: true };
+    } finally {
+      inProgress.delete(key);
+    }
+  }
+
+  async function handleWebhookEvent({ action, automation, recipientIgId, senderIgsid, checkFollowFn }) {
+    // Cross-account routing check: ignore if event recipient does not match creator
+    if (String(automation.instagram_user_id) !== String(recipientIgId)) {
+      return { ignored: true, reason: 'cross_account' };
+    }
+
+    const flow = automation.flow || {};
+    const key = `${automation.id}:${recipientIgId}:${senderIgsid}`;
+    let state = store.get(key) || { key, state: 'INIT', resource_delivered: false };
+
+    if (state.resource_delivered) {
+      return { action, ignored: true, reason: 'idempotent_skip' };
+    }
+
+    if (action === 'SEND_LINK') {
+      if (!flow.followGate?.enabled) {
+        await deliverFinalResource({ automationId: automation.id, recipientIgId, senderIgsid, flow });
+        return { state: 'RESOURCE_DELIVERED' };
+      }
+
+      state.state = 'CHECKING_FOLLOW_STATUS';
+      store.set(key, state);
+
+      const check = await checkFollowFn(recipientIgId, senderIgsid);
+      if (check.isFollowing === true && check.verified === true) {
+        await deliverFinalResource({ automationId: automation.id, recipientIgId, senderIgsid, flow });
+        return { state: 'RESOURCE_DELIVERED' };
+      } else if (check.supported === false || check.error || !check.verified) {
+        state.state = 'VERIFICATION_ERROR';
+        store.set(key, state);
+        promptCalls.push({ type: 'verification_error', senderIgsid });
+        return { state: 'VERIFICATION_ERROR' };
+      } else {
+        state.state = 'FOLLOW_PROMPT_SENT';
+        store.set(key, state);
+        promptCalls.push({ type: 'follow_prompt', senderIgsid });
+        return { state: 'FOLLOW_PROMPT_SENT' };
+      }
+    } else if (action === 'CHECK_FOLLOW') {
+      state.state = 'CHECKING_FOLLOW_STATUS';
+      store.set(key, state);
+
+      const check = await checkFollowFn(recipientIgId, senderIgsid);
+      if (check.isFollowing === true && check.verified === true) {
+        const prefix = flow.followGate?.successMessage || "You're all set! 🎉\n\nHere is your requested guide:";
+        await deliverFinalResource({ automationId: automation.id, recipientIgId, senderIgsid, flow, prefixMessage: prefix });
+        return { state: 'RESOURCE_DELIVERED' };
+      } else if (check.supported === false || check.error || !check.verified) {
+        state.state = 'VERIFICATION_ERROR';
+        store.set(key, state);
+        promptCalls.push({ type: 'verification_error', senderIgsid });
+        return { state: 'VERIFICATION_ERROR' };
+      } else {
+        state.state = 'FOLLOW_RETRY_PROMPT';
+        store.set(key, state);
+        promptCalls.push({ type: 'follow_retry_prompt', senderIgsid });
+        return { state: 'FOLLOW_RETRY_PROMPT' };
+      }
+    }
+  }
+
+  return { store, deliveryCalls, promptCalls, handleWebhookEvent };
+}
+
+// 21. Regression 1: Follow gate enabled + non-follower -> resource send count is ZERO
+runTest('Regression 1: Follow gate enabled + non-follower -> resource send count is ZERO', async () => {
+  const sm = createWebhookStateMachine();
+  const automation = {
+    id: 'auto_reg_1',
+    instagram_user_id: 'creator_1',
+    flow: {
+      followGate: { enabled: true, message: 'Please follow!' },
+      delivery: { message: 'Guide', resourceUrl: 'https://site.com' }
+    }
+  };
+
+  const res = await sm.handleWebhookEvent({
+    action: 'SEND_LINK',
+    automation,
+    recipientIgId: 'creator_1',
+    senderIgsid: 'non_follower_1',
+    checkFollowFn: async () => ({ supported: true, isFollowing: false, verified: true })
+  });
+
+  assert.strictEqual(res.state, 'FOLLOW_PROMPT_SENT');
+  assert.strictEqual(sm.deliveryCalls.length, 0, 'Resource send count must be strictly ZERO for non-follower');
+  assert.strictEqual(sm.promptCalls.length, 1);
+  assert.strictEqual(sm.promptCalls[0].type, 'follow_prompt');
+});
+
+// 22. Regression 2: Follow gate enabled + follower -> resource sent exactly once
+runTest('Regression 2: Follow gate enabled + follower -> resource sent exactly once', async () => {
+  const sm = createWebhookStateMachine();
+  const automation = {
+    id: 'auto_reg_2',
+    instagram_user_id: 'creator_1',
+    flow: {
+      followGate: { enabled: true },
+      delivery: { message: 'Here is your guide', resourceUrl: 'https://site.com/ebook' }
+    }
+  };
+
+  const res = await sm.handleWebhookEvent({
+    action: 'SEND_LINK',
+    automation,
+    recipientIgId: 'creator_1',
+    senderIgsid: 'existing_follower_1',
+    checkFollowFn: async () => ({ supported: true, isFollowing: true, verified: true })
+  });
+
+  assert.strictEqual(res.state, 'RESOURCE_DELIVERED');
+  assert.strictEqual(sm.deliveryCalls.length, 1, 'Resource must be sent exactly once for existing follower');
+  assert.strictEqual(sm.deliveryCalls[0].resourceUrl, 'https://site.com/ebook');
+  assert.strictEqual(sm.promptCalls.length, 0, 'No follow prompt should be sent to existing follower');
+});
+
+// 23. Regression 3: Non-follower later verifies -> resource sent exactly once
+runTest('Regression 3: Non-follower later verifies -> resource sent exactly once', async () => {
+  const sm = createWebhookStateMachine();
+  const automation = {
+    id: 'auto_reg_3',
+    instagram_user_id: 'creator_1',
+    flow: {
+      followGate: { enabled: true, successMessage: "You're all set! 🎉" },
+      delivery: { message: 'Here is your link!', resourceUrl: 'https://site.com/verified' }
+    }
+  };
+
+  // Step 1: User clicks SEND_LINK as non-follower
+  await sm.handleWebhookEvent({
+    action: 'SEND_LINK',
+    automation,
+    recipientIgId: 'creator_1',
+    senderIgsid: 'convert_user',
+    checkFollowFn: async () => ({ supported: true, isFollowing: false, verified: true })
+  });
+  assert.strictEqual(sm.deliveryCalls.length, 0, 'Must not deliver before following');
+
+  // Step 2: User follows on Instagram and clicks "I've followed ✓" (CHECK_FOLLOW)
+  const res = await sm.handleWebhookEvent({
+    action: 'CHECK_FOLLOW',
+    automation,
+    recipientIgId: 'creator_1',
+    senderIgsid: 'convert_user',
+    checkFollowFn: async () => ({ supported: true, isFollowing: true, verified: true })
+  });
+
+  assert.strictEqual(res.state, 'RESOURCE_DELIVERED');
+  assert.strictEqual(sm.deliveryCalls.length, 1, 'Resource delivered exactly once after following');
+  assert(sm.deliveryCalls[0].text.includes("You're all set! 🎉"), 'Must include success confirmation prefix');
+});
+
+// 24. Regression 4: Non-follower fails verification -> resource send count remains ZERO
+runTest('Regression 4: Non-follower fails verification -> resource send count remains ZERO', async () => {
+  const sm = createWebhookStateMachine();
+  const automation = {
+    id: 'auto_reg_4',
+    instagram_user_id: 'creator_1',
+    flow: {
+      followGate: { enabled: true },
+      delivery: { message: 'Link', resourceUrl: 'https://site.com' }
+    }
+  };
+
+  // Step 1: SEND_LINK
+  await sm.handleWebhookEvent({
+    action: 'SEND_LINK',
+    automation,
+    recipientIgId: 'creator_1',
+    senderIgsid: 'stubborn_user',
+    checkFollowFn: async () => ({ supported: true, isFollowing: false, verified: true })
+  });
+
+  // Step 2: User taps "I've followed" without actually following
+  const res = await sm.handleWebhookEvent({
+    action: 'CHECK_FOLLOW',
+    automation,
+    recipientIgId: 'creator_1',
+    senderIgsid: 'stubborn_user',
+    checkFollowFn: async () => ({ supported: true, isFollowing: false, verified: true })
+  });
+
+  assert.strictEqual(res.state, 'FOLLOW_RETRY_PROMPT');
+  assert.strictEqual(sm.deliveryCalls.length, 0, 'Resource count must remain ZERO when verification fails');
+  assert.strictEqual(sm.promptCalls.filter(p => p.type === 'follow_retry_prompt').length, 1);
+});
+
+// 25. Regression 5: Meta API error -> resource send count remains ZERO
+runTest('Regression 5: Meta API error -> resource send count remains ZERO', async () => {
+  const sm = createWebhookStateMachine();
+  const automation = {
+    id: 'auto_reg_5',
+    instagram_user_id: 'creator_1',
+    flow: {
+      followGate: { enabled: true },
+      delivery: { message: 'Secret Resource', resourceUrl: 'https://site.com' }
+    }
+  };
+
+  const res = await sm.handleWebhookEvent({
+    action: 'SEND_LINK',
+    automation,
+    recipientIgId: 'creator_1',
+    senderIgsid: 'error_user',
+    checkFollowFn: async () => ({ supported: false, error: 'Rate limit / OAuth error', verified: false })
+  });
+
+  assert.strictEqual(res.state, 'VERIFICATION_ERROR');
+  assert.strictEqual(sm.deliveryCalls.length, 0, 'Resource must NEVER be delivered on Meta API error');
+  assert.strictEqual(sm.promptCalls[0].type, 'verification_error');
+});
+
+// 26. Regression 6: Duplicate postback -> no duplicate resource
+runTest('Regression 6: Duplicate postback -> no duplicate resource', async () => {
+  const sm = createWebhookStateMachine();
+  const automation = {
+    id: 'auto_reg_6',
+    instagram_user_id: 'creator_1',
+    flow: {
+      followGate: { enabled: false },
+      delivery: { message: 'Link', resourceUrl: 'https://site.com' }
+    }
+  };
+
+  // First tap
+  const res1 = await sm.handleWebhookEvent({
+    action: 'SEND_LINK',
+    automation,
+    recipientIgId: 'creator_1',
+    senderIgsid: 'rapid_user',
+    checkFollowFn: async () => ({ isFollowing: true, verified: true })
+  });
+  assert.strictEqual(sm.deliveryCalls.length, 1);
+
+  // Duplicate tap 1
+  const res2 = await sm.handleWebhookEvent({
+    action: 'SEND_LINK',
+    automation,
+    recipientIgId: 'creator_1',
+    senderIgsid: 'rapid_user',
+    checkFollowFn: async () => ({ isFollowing: true, verified: true })
+  });
+  assert.strictEqual(res2.ignored, true);
+  assert.strictEqual(sm.deliveryCalls.length, 1, 'Duplicate tap must not deliver resource again');
+
+  // Duplicate tap 2
+  await sm.handleWebhookEvent({
+    action: 'CHECK_FOLLOW',
+    automation,
+    recipientIgId: 'creator_1',
+    senderIgsid: 'rapid_user',
+    checkFollowFn: async () => ({ isFollowing: true, verified: true })
+  });
+  assert.strictEqual(sm.deliveryCalls.length, 1, 'Postback on already delivered state must be ignored');
+});
+
+// 27. Regression 7: Follow gate disabled -> resource sent normally
+runTest('Regression 7: Follow gate disabled -> resource sent normally without follower check', async () => {
+  const sm = createWebhookStateMachine();
+  let checkFollowCalled = false;
+  const automation = {
+    id: 'auto_reg_7',
+    instagram_user_id: 'creator_1',
+    flow: {
+      followGate: { enabled: false },
+      delivery: { message: 'Open Access Guide', resourceUrl: 'https://site.com/free' }
+    }
+  };
+
+  const res = await sm.handleWebhookEvent({
+    action: 'SEND_LINK',
+    automation,
+    recipientIgId: 'creator_1',
+    senderIgsid: 'any_commenter',
+    checkFollowFn: async () => {
+      checkFollowCalled = true;
+      return { isFollowing: false };
+    }
+  });
+
+  assert.strictEqual(res.state, 'RESOURCE_DELIVERED');
+  assert.strictEqual(sm.deliveryCalls.length, 1);
+  assert.strictEqual(checkFollowCalled, false, 'Meta follower check must not be queried when follow gate is disabled');
+});
+
+// 28. Regression 8: Concurrent postbacks -> no bypass or duplicate delivery
+runTest('Regression 8: Concurrent postbacks -> no bypass or duplicate delivery', async () => {
+  const sm = createWebhookStateMachine();
+  const automation = {
+    id: 'auto_reg_8',
+    instagram_user_id: 'creator_1',
+    flow: {
+      followGate: { enabled: true },
+      delivery: { message: 'High Value Download', resourceUrl: 'https://site.com/valuable' }
+    }
+  };
+
+  // Launch 10 concurrent postbacks simultaneously for the same user
+  const promises = Array.from({ length: 10 }).map((_, i) =>
+    sm.handleWebhookEvent({
+      action: i % 2 === 0 ? 'SEND_LINK' : 'CHECK_FOLLOW',
+      automation,
+      recipientIgId: 'creator_1',
+      senderIgsid: 'concurrent_user',
+      checkFollowFn: async () => ({ supported: true, isFollowing: true, verified: true })
+    })
+  );
+
+  await Promise.all(promises);
+  assert.strictEqual(sm.deliveryCalls.length, 1, 'Concurrent postbacks must deliver the resource EXACTLY once');
+});
+
 console.log('\n======================================================');
 console.log(`✅ ALL ${passedTests}/${totalTests} AUTOMATIONS SUITE TESTS PASSED!`);
 console.log('======================================================');
