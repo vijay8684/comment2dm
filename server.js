@@ -1052,13 +1052,19 @@ const processingCommentIds = new Set();
 
 // Deliver final resource helper (guaranteed idempotent)
 async function deliverFinalResource({ recipientIgUserId, senderIgsid, automation, tokenData, flow, commentId }) {
-  let deliveryText = flow.delivery?.message || automation.dm_message || "Here's what you requested! Enjoy ✨";
-  const resourceUrl = flow.delivery?.resourceUrl;
-  const buttonText = flow.delivery?.buttonText || "Open Link ↗";
-
-  if (resourceUrl) {
-    deliveryText += `\n\n🔗 ${buttonText}: ${resourceUrl}`;
+  // Idempotency guard: prevent duplicate deliveries on rapid button clicks
+  const key = `${recipientIgUserId}:${senderIgsid}:${automation.id}`;
+  if (db.collections && db.collections().conversationStates) {
+    const existing = await db.collections().conversationStates.findOne({ key });
+    if (existing && existing.resource_delivered === true) {
+      console.log(`[IDEMPOTENCY] Resource already delivered to ${senderIgsid} for automation ${automation.id}.`);
+      return;
+    }
   }
+
+  let deliveryText = flow.delivery?.message || "You're all set! 🎉\n\nHere is your requested guide:";
+  const resourceUrl = flow.delivery?.resourceUrl;
+  const buttonText = (flow.delivery?.buttonText || "Open Guide ↗").trim().slice(0, 20);
 
   // Free branding attribution if not white-label
   try {
@@ -1070,15 +1076,58 @@ async function deliverFinalResource({ recipientIgUserId, senderIgsid, automation
     }
   } catch (_) {}
 
-  await instagramService.sendDirectMessage(
-    recipientIgUserId,
-    senderIgsid,
-    { text: deliveryText },
-    tokenData.accessToken
-  );
+  // Format delivery payload: interactive button if URL is valid, clean text fallback
+  let deliveryPayload;
+  if (resourceUrl && /^https?:\/\//i.test(resourceUrl)) {
+    deliveryPayload = {
+      attachment: {
+        type: 'template',
+        payload: {
+          template_type: 'button',
+          text: deliveryText,
+          buttons: [
+            {
+              type: 'web_url',
+              url: resourceUrl,
+              title: buttonText
+            }
+          ]
+        }
+      }
+    };
+  } else {
+    if (resourceUrl) {
+      deliveryText += `\n\n🔗 ${buttonText}: ${resourceUrl}`;
+    }
+    deliveryPayload = { text: deliveryText };
+  }
+
+  try {
+    await instagramService.sendDirectMessage(
+      recipientIgUserId,
+      senderIgsid,
+      deliveryPayload,
+      tokenData.accessToken
+    );
+  } catch (dmErr) {
+    // Graceful fallback to text if template rejected by client
+    if (deliveryPayload.attachment) {
+      let fallbackText = deliveryText;
+      if (resourceUrl && !fallbackText.includes(resourceUrl)) {
+        fallbackText += `\n\n🔗 ${buttonText}: ${resourceUrl}`;
+      }
+      await instagramService.sendDirectMessage(
+        recipientIgUserId,
+        senderIgsid,
+        { text: fallbackText },
+        tokenData.accessToken
+      );
+    } else {
+      throw dmErr;
+    }
+  }
 
   // Persist conversation state for idempotency
-  const key = `${recipientIgUserId}:${senderIgsid}:${automation.id}`;
   if (db.collections && db.collections().conversationStates) {
     await db.collections().conversationStates.updateOne(
       { key },
@@ -1109,6 +1158,7 @@ async function deliverFinalResource({ recipientIgUserId, senderIgsid, automation
       from_id: senderIgsid,
       event_type: 'resource_delivered',
       message_text: deliveryText,
+      resource_url: resourceUrl || null,
       status: 'success',
       created_at: new Date().toISOString()
     });
@@ -1505,46 +1555,74 @@ app.post('/api/instagram/webhook', async (request, response) => {
             console.log(`[MESSAGING] PATH A: Recipient ${senderIgsid} already follows @${creatorUsername}. Delivering resource immediately.`);
             await deliverFinalResource({ recipientIgUserId, senderIgsid, automation: targetAutomation, tokenData, flow, commentId });
           } else if (followResult.supported === false || followResult.error) {
-            // Safe Retry State if Meta API error or restricted
+            // Safe Retry State if Meta API error or restricted (Never falsely claim follow)
             console.warn(`[MESSAGING] Meta follow check unavailable or error: ${followResult.error || followResult.note}`);
             const retryNotice = "We couldn't verify your follow status right now due to a network or API delay. Please tap below to retry!";
             const profileUrl = flow.followGate?.profileUrl || `https://instagram.com/${creatorUsername}`;
-            await instagramService.sendDirectMessage(
-              recipientIgUserId,
-              senderIgsid,
-              {
-                text: `${retryNotice}\n\n👉 Profile: ${profileUrl}`,
-                quick_replies: [
-                  {
-                    content_type: 'text',
-                    title: 'Retry Follow Check 🔄'.slice(0, 20),
-                    payload: `CHECK_FOLLOW:${targetAutomation.id}:${commentId}`
-                  }
-                ]
-              },
-              tokenData.accessToken
-            );
-          } else {
-            // PATH B — Not Following: Send follow request prompt
-            console.log(`[MESSAGING] PATH B: Recipient ${senderIgsid} does not follow @${creatorUsername}. Sending follow prompt.`);
-            const followPrompt = flow.followGate?.message || "Oops! Looks like you haven't followed me yet 👀\n\nIt would mean a lot if you could visit my profile and hit that follow button 😊";
-            const profileBtn = flow.followGate?.profileBtnText || "Visit Profile";
-            const confirmBtn = flow.followGate?.confirmBtnText || "I've followed ✓";
-            const profileUrl = flow.followGate?.profileUrl || `https://instagram.com/${creatorUsername}`;
+            const profileBtn = (flow.followGate?.profileBtnText || 'Visit Profile').trim().slice(0, 20);
+
+            const errorPayload = {
+              attachment: {
+                type: 'template',
+                payload: {
+                  template_type: 'button',
+                  text: retryNotice,
+                  buttons: [
+                    {
+                      type: 'web_url',
+                      url: profileUrl,
+                      title: profileBtn
+                    },
+                    {
+                      type: 'postback',
+                      title: 'Retry Check 🔄',
+                      payload: `CHECK_FOLLOW:${targetAutomation.id}:${commentId}`
+                    }
+                  ]
+                }
+              }
+            };
 
             await instagramService.sendDirectMessage(
               recipientIgUserId,
               senderIgsid,
-              {
-                text: `${followPrompt}\n\n👉 ${profileBtn}: ${profileUrl}`,
-                quick_replies: [
-                  {
-                    content_type: 'text',
-                    title: confirmBtn.slice(0, 20),
-                    payload: `CHECK_FOLLOW:${targetAutomation.id}:${commentId}`
-                  }
-                ]
-              },
+              errorPayload,
+              tokenData.accessToken
+            );
+          } else {
+            // PATH B — Not Following: Send follow request prompt with TWO actual interactive buttons
+            console.log(`[MESSAGING] PATH B: Recipient ${senderIgsid} does not follow @${creatorUsername}. Sending follow prompt with interactive buttons.`);
+            const followPrompt = flow.followGate?.message || "Oops! Looks like you haven't followed me yet 👀\n\nIt would mean a lot if you could visit my profile and hit that follow button 😊";
+            const profileBtn = (flow.followGate?.profileBtnText || 'Visit Profile').trim().slice(0, 20);
+            const confirmBtn = (flow.followGate?.confirmBtnText || "I've followed ✓").trim().slice(0, 20);
+            const profileUrl = flow.followGate?.profileUrl || `https://instagram.com/${creatorUsername}`;
+
+            const followPayload = {
+              attachment: {
+                type: 'template',
+                payload: {
+                  template_type: 'button',
+                  text: followPrompt,
+                  buttons: [
+                    {
+                      type: 'web_url',
+                      url: profileUrl,
+                      title: profileBtn
+                    },
+                    {
+                      type: 'postback',
+                      title: confirmBtn,
+                      payload: `CHECK_FOLLOW:${targetAutomation.id}:${commentId}`
+                    }
+                  ]
+                }
+              }
+            };
+
+            await instagramService.sendDirectMessage(
+              recipientIgUserId,
+              senderIgsid,
+              followPayload,
               tokenData.accessToken
             );
 
@@ -1574,47 +1652,76 @@ app.post('/api/instagram/webhook', async (request, response) => {
           const recheckResult = await instagramService.checkFollowStatus(recipientIgUserId, senderIgsid, tokenData.accessToken);
 
           if (recheckResult.isFollowing === true) {
-            console.log(`[MESSAGING] Follower confirmed! Delivering resource to ${senderIgsid}.`);
+            console.log(`[MESSAGING] Follower confirmed! Automatically delivering resource to ${senderIgsid}.`);
             await deliverFinalResource({ recipientIgUserId, senderIgsid, automation: targetAutomation, tokenData, flow, commentId });
           } else if (recheckResult.supported === false || recheckResult.error) {
             console.warn(`[MESSAGING] Meta follower recheck error: ${recheckResult.error || recheckResult.note}`);
             const retryNotice = "We couldn't verify your follow status right now due to a network or API delay. Please tap below to retry!";
             const profileUrl = flow.followGate?.profileUrl || `https://instagram.com/${creatorUsername}`;
-            await instagramService.sendDirectMessage(
-              recipientIgUserId,
-              senderIgsid,
-              {
-                text: `${retryNotice}\n\n👉 Profile: ${profileUrl}`,
-                quick_replies: [
-                  {
-                    content_type: 'text',
-                    title: 'Retry Follow Check 🔄'.slice(0, 20),
-                    payload: `CHECK_FOLLOW:${targetAutomation.id}:${commentId}`
-                  }
-                ]
-              },
-              tokenData.accessToken
-            );
-          } else {
-            // Still not following
-            console.log(`[MESSAGING] Follow still not detected for ${senderIgsid}. Sending polite retry prompt.`);
-            const retryMsg = flow.followGate?.retryMessage || "Still not seeing that follow yet! 👀 If you just hit follow, please wait a few seconds for Instagram to sync and tap below to retry.";
-            const profileUrl = flow.followGate?.profileUrl || `https://instagram.com/${creatorUsername}`;
-            const confirmBtn = flow.followGate?.confirmBtnText || "I've followed ✓";
+            const profileBtn = (flow.followGate?.profileBtnText || 'Visit Profile').trim().slice(0, 20);
+
+            const errorPayload = {
+              attachment: {
+                type: 'template',
+                payload: {
+                  template_type: 'button',
+                  text: retryNotice,
+                  buttons: [
+                    {
+                      type: 'web_url',
+                      url: profileUrl,
+                      title: profileBtn
+                    },
+                    {
+                      type: 'postback',
+                      title: 'Retry Check 🔄',
+                      payload: `CHECK_FOLLOW:${targetAutomation.id}:${commentId}`
+                    }
+                  ]
+                }
+              }
+            };
 
             await instagramService.sendDirectMessage(
               recipientIgUserId,
               senderIgsid,
-              {
-                text: `${retryMsg}\n\n👉 Visit Profile: ${profileUrl}`,
-                quick_replies: [
-                  {
-                    content_type: 'text',
-                    title: confirmBtn.slice(0, 20),
-                    payload: `CHECK_FOLLOW:${targetAutomation.id}:${commentId}`
-                  }
-                ]
-              },
+              errorPayload,
+              tokenData.accessToken
+            );
+          } else {
+            // Still not following: Send polite retry prompt with TWO actual interactive buttons
+            console.log(`[MESSAGING] Follow still not detected for ${senderIgsid}. Sending retry prompt with interactive buttons.`);
+            const retryMsg = flow.followGate?.retryMessage || "I couldn't confirm that you're following yet 😊\n\nPlease follow the profile first, then tap below to check again.";
+            const profileUrl = flow.followGate?.profileUrl || `https://instagram.com/${creatorUsername}`;
+            const profileBtn = (flow.followGate?.profileBtnText || 'Visit Profile').trim().slice(0, 20);
+            const confirmBtn = (flow.followGate?.confirmBtnText || "I've followed ✓").trim().slice(0, 20);
+
+            const notVerifiedPayload = {
+              attachment: {
+                type: 'template',
+                payload: {
+                  template_type: 'button',
+                  text: retryMsg,
+                  buttons: [
+                    {
+                      type: 'web_url',
+                      url: profileUrl,
+                      title: profileBtn
+                    },
+                    {
+                      type: 'postback',
+                      title: confirmBtn,
+                      payload: `CHECK_FOLLOW:${targetAutomation.id}:${commentId}`
+                    }
+                  ]
+                }
+              }
+            };
+
+            await instagramService.sendDirectMessage(
+              recipientIgUserId,
+              senderIgsid,
+              notVerifiedPayload,
               tokenData.accessToken
             );
           }
