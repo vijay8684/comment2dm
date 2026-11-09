@@ -498,6 +498,29 @@ async function sendPrivateReply(instagramUserId, commentId, messageContent, acce
     return data;
   }
 
+  // If Button Template on comment_id failed, try fallback to quick_replies
+  if (!response.ok && bodyData.message?.attachment?.payload?.template_type === 'button') {
+    console.warn(`[META RETRY] Button template on comment_id returned HTTP ${response.status}. Retrying with quick_replies fallback...`);
+    const btn = bodyData.message.attachment.payload.buttons?.[0];
+    const fallbackBody = {
+      recipient: { comment_id: commentId },
+      message: {
+        text: bodyData.message.attachment.payload.text || 'Hey! Tap below to continue:',
+        quick_replies: btn ? [{ content_type: 'text', title: btn.title, payload: btn.payload }] : undefined
+      }
+    };
+    const retryRes = await fetch(url1, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(fallbackBody)
+    });
+    const retryData = await retryRes.json().catch(() => ({}));
+    if (retryRes.ok && (retryData.message_id || retryData.id || retryData.recipient_id)) {
+      console.log(`[META SUCCESS] Private DM delivered via quick_replies fallback to comment ${commentId}`);
+      return retryData;
+    }
+  }
+
   // Attempt 2: graph.instagram.com/me/messages fallback
   console.warn(`[META RETRY] Attempt 1 failed (HTTP ${response.status}): ${metaErrorMessage(data, 'Trying /me/messages fallback...')}`);
   const url2 = `https://graph.instagram.com/${apiVersion}/me/messages`;
