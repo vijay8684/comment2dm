@@ -1218,195 +1218,186 @@ app.post('/api/instagram/webhook', async (request, response) => {
 
           const commentMediaId = String(commentVal.media?.id || commentVal.media_id || commentVal.mediaId || '');
 
-          for (const auto of activeAutomations) {
-            // If automation is specific to one reel, check media ID
+          // Prioritize automations matching this specific Reel/Post first, then fallback to general
+          const matchedMediaAutos = activeAutomations.filter((auto) => {
             if (auto.media_id && commentMediaId) {
               const autoMediaIdStr = String(auto.media_id);
-              if (!commentMediaId.includes(autoMediaIdStr) && !autoMediaIdStr.includes(commentMediaId)) {
-                continue;
-              }
+              return commentMediaId.includes(autoMediaIdStr) || autoMediaIdStr.includes(commentMediaId);
             }
+            return !auto.media_id; // general fallback only if no media_id set
+          });
 
-            if (keywordMatches(commentText, auto.keyword, auto.trigger_type)) {
-              console.log(`Matched automation ${auto.id} for comment "${commentText}" (ID: ${commentId}). Sending replies...`);
-              try {
-                const tokenData = await instagramService.getDecryptedTokenByInstagramUserId(recipientIgUserId, auto.owner_user_id);
-                const flow = auto.flow || {};
-                const isFollowGateEnabled = Boolean(flow.followGate?.enabled);
+          // Sort by: specific media match first, then newest updated
+          matchedMediaAutos.sort((a, b) => {
+            if (a.media_id && !b.media_id) return -1;
+            if (!a.media_id && b.media_id) return 1;
+            return new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0);
+          });
 
-                // Prepare message to send based on conversation flow and personalization
-                let messageToSend = flow.openingMessage || auto.dm_message || "Hey! I'm so glad you're here — thanks for your interest 😊\n\nTap below and I'll send you the link in just a moment ✨";
-
-                // If follow-gate is NOT enabled, append final resource delivery immediately (Normal DM delivery)
-                if (!isFollowGateEnabled) {
-                  if (flow.delivery?.message) {
-                    messageToSend += '\n\n' + flow.delivery.message;
-                  }
-                  if (flow.delivery?.resourceUrl) {
-                    const btnLabel = flow.delivery.buttonText || 'Link';
-                    messageToSend += `\n🔗 ${btnLabel}: ${flow.delivery.resourceUrl}`;
-                  }
-                }
-
-                // Variable Personalization
-                if (fromUsername) {
-                  messageToSend = messageToSend.replace(/\{username\}/gi, `@${fromUsername}`);
-                  messageToSend = messageToSend.replace(/\{name\}/gi, fromUsername);
-                  messageToSend = messageToSend.replace(/\{first_name\}/gi, fromUsername);
-                }
-
-                // Plan-based Free Branding Attribution
-                try {
-                  const userEntitlement = await billing.entitlement(auto.owner_user_id);
-                  if (!userEntitlement?.limits?.whiteLabel) {
-                    if (!messageToSend.includes('Powered by Comment2DM')) {
-                      messageToSend += '\n\n⚡ Powered by Comment2DM';
-                    }
-                  }
-                } catch (bErr) {
-                  console.warn('Billing entitlement check note:', bErr.message);
-                }
-
-                // 1. Send Private DM
-                if (isFollowGateEnabled) {
-                  const openingBtnTitle = (flow.openingButtonText || 'Send me the link').slice(0, 20);
-                  const msgPayload = {
-                    text: messageToSend,
-                    quick_replies: [
-                      {
-                        content_type: 'text',
-                        title: openingBtnTitle,
-                        payload: `SEND_LINK:${auto.id}:${commentId}`
-                      }
-                    ]
-                  };
-                  await instagramService.sendPrivateReply(
-                    recipientIgUserId,
-                    commentId,
-                    msgPayload,
-                    tokenData.accessToken
-                  );
-
-                  // Initialize conversation state
-                  const stateKey = `${recipientIgUserId}:${fromId || commentId}:${auto.id}`;
-                  if (db.collections && db.collections().conversationStates) {
-                    await db.collections().conversationStates.updateOne(
-                      { key: stateKey },
-                      {
-                        $set: {
-                          key: stateKey,
-                          automation_id: auto.id,
-                          owner_user_id: auto.owner_user_id,
-                          instagram_user_id: recipientIgUserId,
-                          comment_id: commentId,
-                          commenter_id: fromId,
-                          commenter_username: fromUsername,
-                          state: 'COMMENT_REPLIED',
-                          follow_gate_required: true,
-                          resource_delivered: false,
-                          created_at: new Date().toISOString(),
-                          updated_at: new Date().toISOString()
-                        }
-                      },
-                      { upsert: true }
-                    );
-                  }
-                } else {
-                  await instagramService.sendPrivateReply(
-                    recipientIgUserId,
-                    commentId,
-                    messageToSend,
-                    tokenData.accessToken
-                  );
-
-                  const stateKey = `${recipientIgUserId}:${fromId || commentId}:${auto.id}`;
-                  if (db.collections && db.collections().conversationStates) {
-                    await db.collections().conversationStates.updateOne(
-                      { key: stateKey },
-                      {
-                        $set: {
-                          key: stateKey,
-                          automation_id: auto.id,
-                          owner_user_id: auto.owner_user_id,
-                          instagram_user_id: recipientIgUserId,
-                          comment_id: commentId,
-                          commenter_id: fromId,
-                          commenter_username: fromUsername,
-                          state: 'RESOURCE_DELIVERED',
-                          follow_gate_required: false,
-                          resource_delivered: true,
-                          delivered_at: new Date().toISOString(),
-                          updated_at: new Date().toISOString()
-                        }
-                      },
-                      { upsert: true }
-                    );
-                  }
-                }
-
-                // 2. Send Public Comment Reply (if configured)
-                if (auto.reply_template) {
-                  await instagramService.replyToComment(
-                    commentId,
-                    auto.reply_template,
-                    tokenData.accessToken
-                  );
-                }
-
-                if (db.collections && db.collections().automationEvents) {
-                  await db.collections().automationEvents.insertOne({
-                    event_id: crypto.randomUUID(),
-                    owner_user_id: auto.owner_user_id,
-                    instagram_user_id: recipientIgUserId,
-                    automation_id: auto.id,
-                    comment_id: commentId,
-                    from_username: fromUsername,
-                    from_id: fromId,
-                    comment_text: commentText,
-                    event_type: 'private_reply',
-                    keyword: auto.keyword,
-                    message_text: messageToSend,
-                    status: 'success',
-                    created_at: new Date().toISOString()
-                  });
-                } else {
-                  await db.run(
-                    'INSERT INTO automation_events (owner_user_id, instagram_user_id, automation_id, comment_id, event_type, keyword, message_text, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                    [auto.owner_user_id, recipientIgUserId, auto.id, commentId, 'private_reply', auto.keyword, messageToSend, 'success', new Date().toISOString()]
-                  );
-                }
-                console.log(`Successfully sent DM & reply for comment ID ${commentId}`);
-              } catch (apiErr) {
-                if (db.collections && db.collections().automationEvents) {
-                  await db.collections().automationEvents.insertOne({
-                    event_id: crypto.randomUUID(),
-                    owner_user_id: auto.owner_user_id,
-                    instagram_user_id: recipientIgUserId,
-                    automation_id: auto.id,
-                    comment_id: commentId,
-                    from_username: fromUsername,
-                    from_id: fromId,
-                    comment_text: commentText,
-                    event_type: 'private_reply',
-                    keyword: auto.keyword,
-                    message_text: auto.dm_message,
-                    status: 'failed',
-                    error_message: apiErr.message,
-                    created_at: new Date().toISOString()
-                  });
-                } else {
-                  await db.run(
-                    'INSERT INTO automation_events (owner_user_id, instagram_user_id, automation_id, comment_id, event_type, keyword, message_text, status, error_message, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                    [auto.owner_user_id, recipientIgUserId, auto.id, commentId, 'private_reply', auto.keyword, auto.dm_message, 'failed', apiErr.message, new Date().toISOString()]
-                  );
-                }
-                console.error(`Failed to execute automation for comment ${commentId}:`, apiErr.message);
-              }
-
-              // CRITICAL: Stop after matching first automation so multiple rules do not fire on the same comment
+          let selectedAuto = null;
+          for (const candidate of matchedMediaAutos) {
+            if (keywordMatches(commentText, candidate.keyword, candidate.trigger_type)) {
+              selectedAuto = candidate;
               break;
             }
           }
+
+          if (!selectedAuto) {
+            console.log(`[TRIGGER] No matching automation keyword for comment "${commentText}" (Media: ${commentMediaId}).`);
+            continue;
+          }
+
+          console.log(`[TRIGGER] Matched automation ${selectedAuto.id} for comment "${commentText}" (ID: ${commentId}). Sending interactive opening DM...`);
+
+          try {
+            // Safety: Ensure flow is loaded
+            if (!selectedAuto.flow && db.collections) {
+              const raw = await db.collections().automations.findOne({ id: selectedAuto.id });
+              if (raw && raw.flow) {
+                selectedAuto.flow = raw.flow;
+              }
+            }
+
+            const tokenData = await instagramService.getDecryptedTokenByInstagramUserId(recipientIgUserId, selectedAuto.owner_user_id);
+            const flow = selectedAuto.flow || {};
+            const isFollowGateEnabled = Boolean(flow.followGate?.enabled);
+
+            // Prepare opening message text
+            let messageToSend = flow.openingMessage || selectedAuto.dm_message || "Hey! I'm so glad you're here — thanks for your interest 😊\n\nTap below and I'll send you the link in just a moment ✨";
+
+            // Variable Personalization
+            if (fromUsername) {
+              messageToSend = messageToSend.replace(/\{username\}/gi, `@${fromUsername}`);
+              messageToSend = messageToSend.replace(/\{name\}/gi, fromUsername);
+              messageToSend = messageToSend.replace(/\{first_name\}/gi, fromUsername);
+            }
+
+            // Plan-based Free Branding Attribution
+            try {
+              const userEntitlement = await billing.entitlement(selectedAuto.owner_user_id);
+              if (!userEntitlement?.limits?.whiteLabel) {
+                if (!messageToSend.includes('Powered by Comment2DM')) {
+                  messageToSend += '\n\n⚡ Powered by Comment2DM';
+                }
+              }
+            } catch (bErr) {
+              console.warn('Billing entitlement check note:', bErr.message);
+            }
+
+            // Interactive Opening Button Title (max 20 characters per Meta Graph API rules)
+            const openingBtnTitle = (flow.openingButtonText || 'Send me the link').trim().slice(0, 20);
+
+            // The initial comment private reply MUST ALWAYS contain the interactive button
+            const msgPayload = {
+              text: messageToSend,
+              quick_replies: [
+                {
+                  content_type: 'text',
+                  title: openingBtnTitle,
+                  payload: `SEND_LINK:${selectedAuto.id}:${commentId}`
+                }
+              ]
+            };
+
+            // 1. Send Interactive Private DM via official Meta API
+            const sendResult = await instagramService.sendPrivateReply(
+              recipientIgUserId,
+              commentId,
+              msgPayload,
+              tokenData.accessToken
+            );
+
+            // 2. Initialize conversation state for multi-step tracking & idempotency
+            const stateKey = `${recipientIgUserId}:${fromId || commentId}:${selectedAuto.id}`;
+            if (db.collections && db.collections().conversationStates) {
+              await db.collections().conversationStates.updateOne(
+                { key: stateKey },
+                {
+                  $set: {
+                    key: stateKey,
+                    automation_id: selectedAuto.id,
+                    owner_user_id: selectedAuto.owner_user_id,
+                    instagram_user_id: recipientIgUserId,
+                    comment_id: commentId,
+                    commenter_id: fromId,
+                    commenter_username: fromUsername,
+                    state: 'OPENING_DM_SENT',
+                    button_title: openingBtnTitle,
+                    follow_gate_required: isFollowGateEnabled,
+                    resource_delivered: false,
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                  }
+                },
+                { upsert: true }
+              );
+            }
+
+            // 3. Send Public Comment Reply (if configured)
+            if (selectedAuto.reply_template) {
+              await instagramService.replyToComment(
+                commentId,
+                selectedAuto.reply_template,
+                tokenData.accessToken
+              );
+            }
+
+            // 4. Record automation event
+            if (db.collections && db.collections().automationEvents) {
+              await db.collections().automationEvents.insertOne({
+                event_id: crypto.randomUUID(),
+                owner_user_id: selectedAuto.owner_user_id,
+                instagram_user_id: recipientIgUserId,
+                automation_id: selectedAuto.id,
+                comment_id: commentId,
+                from_username: fromUsername,
+                from_id: fromId,
+                comment_text: commentText,
+                event_type: 'private_reply',
+                keyword: selectedAuto.keyword,
+                message_text: messageToSend,
+                button_text: openingBtnTitle,
+                interactive: true,
+                status: 'success',
+                meta_message_id: sendResult?.message_id || sendResult?.id || null,
+                created_at: new Date().toISOString()
+              });
+            } else {
+              await db.run(
+                'INSERT INTO automation_events (owner_user_id, instagram_user_id, automation_id, comment_id, event_type, keyword, message_text, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [selectedAuto.owner_user_id, recipientIgUserId, selectedAuto.id, commentId, 'private_reply', selectedAuto.keyword, messageToSend, 'success', new Date().toISOString()]
+              );
+            }
+            console.log(`[TRIGGER SUCCESS] Successfully sent interactive DM & reply for comment ID ${commentId}`);
+          } catch (apiErr) {
+            if (db.collections && db.collections().automationEvents) {
+              await db.collections().automationEvents.insertOne({
+                event_id: crypto.randomUUID(),
+                owner_user_id: selectedAuto.owner_user_id,
+                instagram_user_id: recipientIgUserId,
+                automation_id: selectedAuto.id,
+                comment_id: commentId,
+                from_username: fromUsername,
+                from_id: fromId,
+                comment_text: commentText,
+                event_type: 'private_reply',
+                keyword: selectedAuto.keyword,
+                message_text: selectedAuto.dm_message,
+                status: 'failed',
+                error_message: apiErr.message,
+                created_at: new Date().toISOString()
+              });
+            } else {
+              await db.run(
+                'INSERT INTO automation_events (owner_user_id, instagram_user_id, automation_id, comment_id, event_type, keyword, message_text, status, error_message, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [selectedAuto.owner_user_id, recipientIgUserId, selectedAuto.id, commentId, 'private_reply', selectedAuto.keyword, selectedAuto.dm_message, 'failed', apiErr.message, new Date().toISOString()]
+              );
+            }
+            console.error(`Failed to execute automation for comment ${commentId}:`, apiErr.message);
+          }
+
+          // CRITICAL: Stop after matching first automation so multiple rules do not fire on the same comment
+          break;
         } finally {
           // Release in-memory lock after 60 seconds (absorbs rapid re-deliveries from Meta)
           setTimeout(() => {

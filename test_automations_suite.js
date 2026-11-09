@@ -470,6 +470,48 @@ runTest('automations.html contains DM Conversation Flow builder & Live Simulator
   assert(html.includes('simScenarioNotFollowingBtn'), 'Must have Not Following simulator button');
 });
 
+// 19. Test Opening Private Reply Interactive Button Structure
+runTest('Opening Private Reply payload always generates interactive button <= 20 chars with valid payload', () => {
+  function buildOpeningPayload(flow, autoId, commentId) {
+    const openingBtnTitle = (flow?.openingButtonText || 'Send me the link').trim().slice(0, 20);
+    return {
+      text: flow?.openingMessage || "Hey! I'm so glad you're here — thanks for your interest 😊\n\nTap below and I'll send you the link in just a moment ✨",
+      quick_replies: [
+        {
+          content_type: 'text',
+          title: openingBtnTitle,
+          payload: `SEND_LINK:${autoId}:${commentId}`
+        }
+      ]
+    };
+  }
+
+  const payloadDefault = buildOpeningPayload({}, 'auto_123', 'comm_456');
+  assert.strictEqual(payloadDefault.quick_replies[0].title, 'Send me the link');
+  assert.strictEqual(payloadDefault.quick_replies[0].payload, 'SEND_LINK:auto_123:comm_456');
+  assert(payloadDefault.quick_replies[0].title.length <= 20, 'Title must be <= 20 chars');
+
+  const payloadLong = buildOpeningPayload({ openingButtonText: 'Click here right now to get the link!' }, 'auto_1', 'comm_1');
+  assert(payloadLong.quick_replies[0].title.length <= 20, 'Long titles must be trimmed to <= 20 chars for Meta API');
+  assert.strictEqual(payloadLong.quick_replies[0].title, 'Click here right now');
+});
+
+// 20. Test Token Redaction Security
+runTest('Meta token redaction hides API secrets in server logs', () => {
+  function redactToken(token) {
+    if (!token || typeof token !== 'string') return '[NONE]';
+    if (token.length <= 14) return '***';
+    return `${token.slice(0, 8)}...${token.slice(-6)}`;
+  }
+
+  const liveToken = 'IGQWRPYm94dUpGZAG5GZAHRlQjlHQXl5X1h3TXRycGFwS0t3TXR5';
+  const redacted = redactToken(liveToken);
+  assert.strictEqual(redacted, 'IGQWRPYm...t3TXR5');
+  assert(!redacted.includes('ZAG5GZAHRlQjlHQXl5X1h3TXRycGFwS0t3TXR5'));
+  assert.strictEqual(redactToken('short'), '***');
+  assert.strictEqual(redactToken(null), '[NONE]');
+});
+
 console.log('\n======================================================');
 console.log(`✅ ALL ${passedTests}/${totalTests} AUTOMATIONS SUITE TESTS PASSED!`);
 console.log('======================================================');

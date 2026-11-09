@@ -464,57 +464,77 @@ async function getDecryptedTokenByInstagramUserId(instagramUserId, ownerUserId) 
   };
 }
 
+function redactToken(token) {
+  if (!token || typeof token !== 'string') return '[NONE]';
+  if (token.length <= 14) return '***';
+  return `${token.slice(0, 8)}...${token.slice(-6)}`;
+}
+
 // 1. Send Private DM Reply to Commenter
 async function sendPrivateReply(instagramUserId, commentId, messageContent, accessToken) {
   const messageObj = typeof messageContent === 'object' && messageContent !== null
     ? messageContent
     : { text: String(messageContent) };
   const bodyData = { recipient: { comment_id: commentId }, message: messageObj };
+  const sanitizedToken = redactToken(accessToken);
   
-  // Attempt 1: graph.instagram.com with user ID
+  // Attempt 1: graph.instagram.com with user ID (Standard Instagram Graph API)
   const url1 = `https://graph.instagram.com/${apiVersion}/${instagramUserId}/messages`;
+  console.log(`[META PRIVATE REPLY OUTGOING] POST ${url1}`);
+  console.log(`[META PRIVATE REPLY HEADERS] Authorization: Bearer ${sanitizedToken}, Content-Type: application/json`);
+  console.log(`[META PRIVATE REPLY PAYLOAD] ${JSON.stringify(bodyData, null, 2)}`);
+
   let response = await fetch(url1, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify(bodyData)
   });
   let data = await response.json().catch(() => ({}));
-  if (response.ok && (data.message_id || data.id)) {
-    console.log(`Private DM sent successfully via graph.instagram.com to comment ${commentId}`);
+  console.log(`[META PRIVATE REPLY RESPONSE 1] Status: ${response.status} ${response.statusText}, Body: ${JSON.stringify(data)}`);
+
+  if (response.ok && (data.message_id || data.id || data.recipient_id)) {
+    console.log(`[META SUCCESS] Private DM sent successfully via graph.instagram.com to comment ${commentId}. Message ID: ${data.message_id || data.id}`);
+    console.log(`[INBOX PLACEMENT NOTE] Meta routes proactive comment private replies to non-followers into the recipient's "Message Requests" or "Hidden Requests" tab. On Instagram mobile apps, quick reply buttons become interactive once the recipient views or accepts the chat request.`);
     return data;
   }
 
-  // Attempt 2: graph.facebook.com fallback
-  console.warn(`Attempt 1 failed (HTTP ${response.status}): ${metaErrorMessage(data, 'Trying Facebook Graph fallback...')}`);
-  const url2 = `https://graph.facebook.com/${apiVersion}/${instagramUserId}/messages`;
+  // Attempt 2: graph.instagram.com/me/messages fallback
+  console.warn(`[META RETRY] Attempt 1 failed (HTTP ${response.status}): ${metaErrorMessage(data, 'Trying /me/messages fallback...')}`);
+  const url2 = `https://graph.instagram.com/${apiVersion}/me/messages`;
+  console.log(`[META PRIVATE REPLY OUTGOING 2] POST ${url2}`);
   const response2 = await fetch(url2, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify(bodyData)
   });
   const data2 = await response2.json().catch(() => ({}));
-  if (response2.ok && (data2.message_id || data2.id)) {
-    console.log(`Private DM sent successfully via graph.facebook.com to comment ${commentId}`);
+  console.log(`[META PRIVATE REPLY RESPONSE 2] Status: ${response2.status} ${response2.statusText}, Body: ${JSON.stringify(data2)}`);
+
+  if (response2.ok && (data2.message_id || data2.id || data2.recipient_id)) {
+    console.log(`[META SUCCESS] Private DM sent successfully via /me/messages to comment ${commentId}`);
     return data2;
   }
 
-  // Attempt 3: graph.instagram.com/me/messages fallback
-  console.warn(`Attempt 2 failed (HTTP ${response2.status}): ${metaErrorMessage(data2, 'Trying /me/messages fallback...')}`);
-  const url3 = `https://graph.instagram.com/${apiVersion}/me/messages`;
+  // Attempt 3: graph.facebook.com fallback (for Unified Meta Login tokens)
+  console.warn(`[META RETRY] Attempt 2 failed (HTTP ${response2.status}): ${metaErrorMessage(data2, 'Trying Facebook Graph fallback...')}`);
+  const url3 = `https://graph.facebook.com/${apiVersion}/${instagramUserId}/messages`;
+  console.log(`[META PRIVATE REPLY OUTGOING 3] POST ${url3}`);
   const response3 = await fetch(url3, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify(bodyData)
   });
   const data3 = await response3.json().catch(() => ({}));
-  if (response3.ok && (data3.message_id || data3.id)) {
-    console.log(`Private DM sent successfully via /me/messages to comment ${commentId}`);
+  console.log(`[META PRIVATE REPLY RESPONSE 3] Status: ${response3.status} ${response3.statusText}, Body: ${JSON.stringify(data3)}`);
+
+  if (response3.ok && (data3.message_id || data3.id || data3.recipient_id)) {
+    console.log(`[META SUCCESS] Private DM sent successfully via graph.facebook.com to comment ${commentId}`);
     return data3;
   }
 
-  const finalError = data3.error || data2.error || data.error;
+  const finalError = data.error || data2.error || data3.error;
   const error = new Error(`Instagram DM Error: ${metaErrorMessage({ error: finalError }, 'All DM endpoints failed.')}`);
-  error.statusCode = response3.status || response2.status || response.status || 502;
+  error.statusCode = response.status || response2.status || response3.status || 502;
   error.metaError = finalError;
   throw error;
 }
@@ -525,49 +545,60 @@ async function sendDirectMessage(instagramUserId, recipientIgsid, messageContent
     ? messageContent
     : { text: String(messageContent) };
   const bodyData = { recipient: { id: recipientIgsid }, message: messageObj };
+  const sanitizedToken = redactToken(accessToken);
 
-  // Attempt 1: graph.facebook.com with user ID
-  const url1 = `https://graph.facebook.com/${apiVersion}/${instagramUserId}/messages`;
+  // Attempt 1: graph.instagram.com with user ID
+  const url1 = `https://graph.instagram.com/${apiVersion}/${instagramUserId}/messages`;
+  console.log(`[META DIRECT DM OUTGOING] POST ${url1}`);
+  console.log(`[META DIRECT DM HEADERS] Authorization: Bearer ${sanitizedToken}, Content-Type: application/json`);
+  console.log(`[META DIRECT DM PAYLOAD] ${JSON.stringify(bodyData, null, 2)}`);
+
   let response = await fetch(url1, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify(bodyData)
   });
   let data = await response.json().catch(() => ({}));
-  if (response.ok && (data.message_id || data.id)) {
-    console.log(`Direct DM sent successfully via graph.facebook.com to recipient ${recipientIgsid}`);
+  console.log(`[META DIRECT DM RESPONSE 1] Status: ${response.status} ${response.statusText}, Body: ${JSON.stringify(data)}`);
+
+  if (response.ok && (data.message_id || data.id || data.recipient_id)) {
+    console.log(`[META SUCCESS] Direct DM sent successfully via graph.instagram.com to recipient ${recipientIgsid}`);
     return data;
   }
 
-  // Attempt 2: graph.instagram.com fallback
-  const url2 = `https://graph.instagram.com/${apiVersion}/${instagramUserId}/messages`;
+  // Attempt 2: /me/messages fallback
+  console.warn(`[META RETRY] Direct DM Attempt 1 failed (HTTP ${response.status}): ${metaErrorMessage(data, 'Trying /me/messages fallback...')}`);
+  const url2 = `https://graph.instagram.com/${apiVersion}/me/messages`;
   const response2 = await fetch(url2, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify(bodyData)
   });
   const data2 = await response2.json().catch(() => ({}));
-  if (response2.ok && (data2.message_id || data2.id)) {
-    console.log(`Direct DM sent successfully via graph.instagram.com to recipient ${recipientIgsid}`);
+  console.log(`[META DIRECT DM RESPONSE 2] Status: ${response2.status} ${response2.statusText}, Body: ${JSON.stringify(data2)}`);
+
+  if (response2.ok && (data2.message_id || data2.id || data2.recipient_id)) {
+    console.log(`[META SUCCESS] Direct DM sent successfully via /me/messages to recipient ${recipientIgsid}`);
     return data2;
   }
 
-  // Attempt 3: /me/messages fallback
-  const url3 = `https://graph.instagram.com/${apiVersion}/me/messages`;
+  // Attempt 3: graph.facebook.com fallback
+  const url3 = `https://graph.facebook.com/${apiVersion}/${instagramUserId}/messages`;
   const response3 = await fetch(url3, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify(bodyData)
   });
   const data3 = await response3.json().catch(() => ({}));
-  if (response3.ok && (data3.message_id || data3.id)) {
-    console.log(`Direct DM sent successfully via /me/messages to recipient ${recipientIgsid}`);
+
+  if (response3.ok && (data3.message_id || data3.id || data3.recipient_id)) {
+    console.log(`[META SUCCESS] Direct DM sent successfully via graph.facebook.com to recipient ${recipientIgsid}`);
     return data3;
   }
 
-  const finalError = data3.error || data2.error || data.error;
+  const finalError = data.error || data2.error || data3.error;
   const error = new Error(`Instagram Direct DM Error: ${metaErrorMessage({ error: finalError }, 'Failed to deliver direct message.')}`);
-  error.statusCode = response3.status || response2.status || response.status || 502;
+  error.statusCode = response.status || response2.status || response3.status || 502;
   error.metaError = finalError;
   throw error;
 }

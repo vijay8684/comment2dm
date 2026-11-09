@@ -409,13 +409,19 @@ async function all(sql, params = []) {
       owner_user_id: a.owner_user_id,
       instagram_user_id: a.instagram_user_id,
       keyword: a.keyword || '',
+      keywords: Array.isArray(a.keywords) ? a.keywords : (a.keyword ? String(a.keyword).split(',').map(k => k.trim()).filter(Boolean) : []),
       dm_message: a.dm_message || '',
       reply_template: a.reply_template || null,
       trigger_type: a.trigger_type || 'keyword',
+      flow: a.flow || null,
       enabled: a.enabled ? 1 : 0,
       media_id: a.media_id || null,
       media_url: a.media_url || null,
-      created_at: a.created_at
+      media_title: a.media_title || null,
+      media_thumbnail: a.media_thumbnail || null,
+      media_type: a.media_type || null,
+      created_at: a.created_at,
+      updated_at: a.updated_at
     }));
   }
 
@@ -557,6 +563,11 @@ async function get(sql, params = []) {
     const filter = automationIdFilter(id);
     filter.owner_user_id = ownerUserId;
     return automations.findOne(filter);
+  }
+
+  if (normalized.startsWith('select * from automations where id = ?')) {
+    const [id] = params;
+    return automations.findOne(automationIdFilter(id));
   }
 
   if (normalized.startsWith('select event_id from webhook_events where event_id = ?')) {
