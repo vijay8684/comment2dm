@@ -3,93 +3,106 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Automations — Comment2DM</title>
+  <title>Automations Engine — Comment2DM</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
-  <style>
-    #automationFormCard[hidden] {
-      display: none !important;
-    }
-    .selected-reel-card {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      background: rgba(99, 102, 241, 0.08);
-      border: 1px solid rgba(99, 102, 241, 0.35);
-      border-radius: var(--radius-m);
-      padding: 12px 16px;
-      margin-top: 12px;
-      transition: all 0.2s ease;
-    }
-    .selected-reel-thumb {
-      width: 54px;
-      height: 72px;
-      object-fit: cover;
-      border-radius: 8px;
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      flex-shrink: 0;
-    }
-    .selected-reel-link {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      color: var(--accent-light);
-      font-size: 0.84rem;
-      text-decoration: none;
-      font-weight: 500;
-      margin-top: 4px;
-    }
-    .selected-reel-link:hover {
-      text-decoration: underline;
-    }
-  </style>
+
+  <!-- Instant Theme Sync (Default: Light Mode, Zero Flash) -->
+  <script>
+    (function () {
+      const saved = localStorage.getItem('comment2dm_theme');
+      const theme = saved === 'dark' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+  </script>
 </head>
 <body class="app-body" data-page="automations">
 
   <div class="app-shell">
-    <!-- Sidebar -->
+    <!-- Sidebar Navigation -->
     <aside class="app-sidebar" id="appSidebar">
       <div class="sidebar-top">
-        <a href="dashboard.html" class="logo">
+        <a href="dashboard.html" class="logo" aria-label="Comment2DM Dashboard">
           <span class="logo-mark">⚡</span>
           <span>Comment<span style="color:var(--accent-light);">2</span>DM</span>
         </a>
-        <button class="sidebar-toggle-btn" id="sidebarToggleBtn" title="Toggle Sidebar (<<)">
+        <button class="sidebar-toggle-btn" id="sidebarToggleBtn" title="Toggle Sidebar">
           <span id="collapseIcon">«</span>
         </button>
       </div>
 
       <!-- Connected Instagram Account Switcher -->
-      <div class="sidebar-account">
-        <button class="account-selector" id="accountSwitcherBtn">
+      <div class="sidebar-account" id="sidebarAccountArea">
+        <button class="account-selector" id="accountSwitcherBtn" title="Manage Instagram Accounts">
           <div class="account-pill">
-            <div class="account-avatar-img" id="sidebarIgAvatar" style="display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:0.75rem;">IG</div>
+            <div class="account-avatar-img" id="sidebarIgAvatar" style="display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--ink);font-size:0.75rem;">IG</div>
             <div class="account-meta">
-              <span class="account-username" id="sidebarIgUsername">No Account</span>
-              <span class="account-status" id="sidebarIgStatus">Connect now</span>
+              <span class="account-username" id="sidebarIgUsername">Checking...</span>
+              <span class="account-status" id="sidebarIgStatus" style="font-size:0.74rem; color:var(--ink-muted);">Syncing</span>
             </div>
           </div>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
         </button>
       </div>
 
-      <!-- App Navigation -->
+      <!-- App Navigation Links with Clean SVG Icons -->
       <nav class="app-nav" aria-label="Main Navigation">
-        <a href="dashboard.html" data-nav="dashboard"><span class="nav-icon">🏠</span><span>Home</span></a>
-        <a href="instagram-accounts.html" data-nav="instagram"><span class="nav-icon">📸</span><span>Instagram Accounts</span></a>
-        <a href="automations.html" data-nav="automations"><span class="nav-icon">⚙️</span><span>Automations</span></a>
-        <a href="creator-tools.html" data-nav="creator-tools"><span class="nav-icon">✨</span><span>Creator Studio AI</span></a>
-        <a href="analytics.html" data-nav="analytics"><span class="nav-icon">📊</span><span>Analytics</span></a>
-        <a href="messages.html" data-nav="messages"><span class="nav-icon">💌</span><span>DM Log</span></a>
-        <a href="settings.html" data-nav="settings"><span class="nav-icon">👤</span><span>Settings</span></a>
-        <a href="help.html" data-nav="help"><span class="nav-icon">💬</span><span>Help Desk</span></a>
+        <a href="dashboard.html" data-nav="dashboard" title="Home Dashboard">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+          </span>
+          <span>Home</span>
+        </a>
+        <a href="instagram-accounts.html" data-nav="instagram" title="Instagram Accounts">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"></rect><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"></line></svg>
+          </span>
+          <span>Instagram Accounts</span>
+        </a>
+        <a href="automations.html" data-nav="automations" class="active" title="Automations">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+          </span>
+          <span>Automations</span>
+        </a>
+        <a href="creator-tools.html" data-nav="creator-tools" title="Creator Studio AI">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path></svg>
+          </span>
+          <span>Creator Studio AI</span>
+        </a>
+        <a href="analytics.html" data-nav="analytics" title="Analytics">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+          </span>
+          <span>Analytics</span>
+        </a>
+        <a href="messages.html" data-nav="messages" title="DM Log & History">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+          </span>
+          <span>DM Log</span>
+        </a>
+        <a href="settings.html" data-nav="settings" title="Account Settings">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          </span>
+          <span>Settings</span>
+        </a>
+        <a href="help.html" data-nav="help" title="Help Desk & Support">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          </span>
+          <span>Help Desk</span>
+        </a>
       </nav>
 
-      <!-- Sidebar Footer: DM Limit Bar & Mini-Pie Gauge -->
+      <!-- Sidebar Footer -->
       <div class="sidebar-foot">
-        <div class="dm-limit-card">
+        <div class="dm-limit-card" id="dmLimitCard">
           <div class="dm-limit-header">
             <span>Monthly DMs</span>
             <strong id="dmLimitText">0 / 300</strong>
@@ -97,44 +110,67 @@
           <div class="dm-progress-track">
             <div class="dm-progress-fill" id="dmProgressFill" style="width: 5%;"></div>
           </div>
-          <a href="billing.html" class="btn btn-ghost btn-sm btn-block" style="font-size:0.78rem; padding:5px;">
+          <a href="billing.html" class="btn btn-ghost btn-sm btn-block" style="font-size:0.78rem; padding:6px;">
             Upgrade Plan ↗
           </a>
         </div>
 
-        <div class="pie-gauge-collapsed" id="pieGaugeCollapsed" title="View DM Limit & Upgrade">
+        <a href="billing.html" class="pie-gauge-collapsed" id="pieGaugeCollapsed" title="Monthly DM Usage — Click to Upgrade">
           <div class="pie-gauge" id="pieGaugeCircle">
             <div class="pie-gauge-inner" id="pieGaugeInner">0%</div>
           </div>
-        </div>
+        </a>
       </div>
     </aside>
 
-    <!-- Main Workspace -->
+    <!-- Main Workspace Area -->
     <div class="app-main">
+      <!-- Top Application Header -->
       <header class="app-header">
         <div class="app-header-left">
           <button class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="Open navigation menu">☰</button>
           <div>
-            <span class="eyebrow" style="margin-bottom:0;">Automations</span>
-            <h2 style="font-size:1.15rem; font-weight:700;">Comment-to-DM Engine</h2>
+            <span class="eyebrow" style="margin-bottom:0;">Workflow Studio</span>
+            <h2 style="font-size:1.15rem; font-weight:700; color:var(--ink);">Comment-to-DM Engine</h2>
           </div>
         </div>
 
         <div class="header-user-menu">
-          <a href="help.html" class="notification-bell" title="Support Help Desk"><span>💬</span></a>
+          <!-- Shared Theme Toggle Button -->
+          <button class="theme-toggle-btn" id="themeToggleBtn" type="button" aria-label="Toggle theme" title="Toggle theme">
+            <svg class="moon-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+            <svg class="sun-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="5"></circle>
+              <line x1="12" y1="1" x2="12" y2="3"></line>
+              <line x1="12" y1="21" x2="12" y2="23"></line>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+              <line x1="1" y1="12" x2="3" y2="12"></line>
+              <line x1="21" y1="12" x2="23" y2="12"></line>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+            </svg>
+          </button>
+
+          <a href="help.html" class="notification-bell" title="Support Help Desk">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+          </a>
+
           <div style="position:relative;">
-            <button class="user-profile-trigger" id="userProfileBtn">
+            <button class="user-profile-trigger" id="userProfileBtn" aria-label="User profile menu">
               <div class="user-avatar-circle" id="userAvatarInitial">U</div>
               <div style="text-align:left; display:flex; flex-direction:column;">
-                <span style="font-size:0.86rem; font-weight:600; color:#fff;" id="topbarUserName">Loading...</span>
+                <span style="font-size:0.86rem; font-weight:600; color:var(--ink);" id="topbarUserName">Loading...</span>
                 <span class="plan-badge" id="topbarPlanBadge">Free</span>
               </div>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
             </button>
+
             <div class="user-dropdown-menu" id="userDropdownMenu">
-              <div style="padding:8px 12px;">
-                <strong style="display:block; font-size:0.88rem; color:#fff;" id="dropdownName">User</strong>
+              <div style="padding:10px 14px;">
+                <strong style="display:block; font-size:0.88rem; color:var(--ink);" id="dropdownName">User</strong>
                 <small style="color:var(--ink-muted);" id="dropdownEmail">user@domain.com</small>
               </div>
               <div class="dropdown-divider"></div>
@@ -142,47 +178,59 @@
               <a href="billing.html" class="user-dropdown-item">💎 Billing & Plans</a>
               <a href="help.html" class="user-dropdown-item">💬 Support</a>
               <div class="dropdown-divider"></div>
-              <button type="button" class="user-dropdown-item" id="logoutBtn" style="color:var(--rose); width:100%; text-align:left;">🚪 Sign out</button>
+              <button type="button" class="user-dropdown-item" id="logoutBtn" style="color:var(--rose); width:100%; text-align:left; border:none; background:none; cursor:pointer;">🚪 Sign out</button>
             </div>
           </div>
         </div>
       </header>
 
+      <!-- Main Body Content -->
       <main class="app-content">
-        <div id="dashboardError" class="form-error"></div>
-        <div id="automationNotice" class="success-notice" hidden></div>
+        <!-- Error & Success Notices -->
+        <div id="dashboardError" class="form-error" style="display:none; margin-bottom:20px;"></div>
+        <div id="automationNotice" class="success-notice" style="display:none; margin-bottom:20px;"></div>
 
-        <!-- Heading & Action Button -->
+        <!-- Heading & Top Action -->
         <div style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:16px; margin-bottom:28px;">
           <div>
-            <h1 style="font-size:1.8rem; margin-bottom:4px;">Comment-to-DM Workflows</h1>
-            <p style="color:var(--ink-secondary); font-size:0.92rem;">
-              Set triggers to auto-reply to comments on your Instagram Reels with private DMs and public replies.
+            <h1 style="font-size:1.85rem; font-weight:800; letter-spacing:-0.03em; margin-bottom:6px; color:var(--ink);">
+              Comment-to-DM Workflows
+            </h1>
+            <p style="color:var(--ink-secondary); font-size:0.92rem; max-width:680px; margin:0; line-height:1.5;">
+              Create automated conversations that trigger when viewers comment on your specific Instagram Reels. Deliver links, lead magnets, and gated resources directly to their inbox.
             </p>
           </div>
-          <button class="btn btn-accent" id="openCreateBtn">
-            <span>+ Create Automation</span>
+          <button class="btn btn-accent" id="openCreateBtn" style="box-shadow:0 4px 18px var(--accent-glow);">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            <span>Create Automation</span>
           </button>
         </div>
 
-        <!-- Warning Card if 0 IG accounts connected -->
-        <div id="noAccountWarning" class="apple-card" style="text-align:center; padding:48px 24px; margin-bottom:28px;" hidden>
-          <div style="font-size:2.5rem; margin-bottom:12px;">📸</div>
-          <h2 style="font-size:1.3rem; margin-bottom:6px;">Connect an Instagram Account First</h2>
+        <!-- Warning Callout if 0 IG accounts connected -->
+        <div id="noAccountWarning" class="apple-card" style="text-align:center; padding:48px 24px; margin-bottom:28px; display:none;">
+          <div style="width:68px; height:68px; border-radius:20px; background:linear-gradient(135deg, rgba(118,85,217,0.15), rgba(217,70,168,0.15)); display:flex; align-items:center; justify-content:center; margin:0 auto 16px; color:var(--accent);">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"></rect><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"></line></svg>
+          </div>
+          <h2 style="font-size:1.3rem; margin-bottom:6px; color:var(--ink);">Connect an Instagram Account First</h2>
           <p style="color:var(--ink-secondary); max-width:440px; margin:0 auto 20px; font-size:0.9rem;">
-            To create Comment-to-DM automations, connect your professional Instagram account via official Meta Business Login.
+            To create Comment-to-DM automations, connect your professional Instagram Creator or Business profile via official Meta authorization.
           </p>
           <a href="/api/instagram/authorize" class="btn btn-accent">Connect Instagram Now</a>
         </div>
 
         <!-- MULTI-STEP CREATION FORM + LIVE PHONE SIMULATOR -->
-        <section id="automationFormCard" class="apple-card" style="margin-bottom:32px; padding:28px;" hidden>
+        <section id="automationFormCard" class="apple-card" style="margin-bottom:32px; padding:28px; display:none;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; padding-bottom:16px; border-bottom:1px solid var(--glass-border);">
             <div>
-              <h2 style="font-size:1.3rem; margin-bottom:2px;" id="formHeadingTitle">Create Automation</h2>
-              <p style="color:var(--ink-secondary); font-size:0.86rem;">Select a Reel or post, set your comment trigger, and draft your automated DM.</p>
+              <h2 style="font-size:1.3rem; margin-bottom:2px; color:var(--ink);" id="formHeadingTitle">Create Automation</h2>
+              <p style="color:var(--ink-secondary); font-size:0.86rem; margin:0;">
+                Select a specific Reel or post, define trigger keywords, and build your automated conversation flow.
+              </p>
             </div>
-            <button type="button" class="btn btn-ghost btn-sm" id="cancelFormBtn">✕ Close</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="cancelFormBtn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              <span>Close</span>
+            </button>
           </div>
 
           <div class="builder-layout">
@@ -191,100 +239,275 @@
               <input type="hidden" id="automationId" value="" />
               <input type="hidden" id="selectedMediaId" value="" />
               <input type="hidden" id="selectedMediaUrl" value="" />
+              <input type="hidden" id="selectedMediaTitle" value="" />
+              <input type="hidden" id="selectedMediaThumbnail" value="" />
+              <input type="hidden" id="selectedMediaType" value="" />
 
               <!-- Step 1: Instagram Account -->
               <div class="form-group">
-                <label class="form-label" for="automationAccountSelect">1. Target Instagram Account</label>
+                <label class="form-label" for="automationAccountSelect">
+                  1. Target Instagram Account
+                </label>
                 <select id="automationAccountSelect" class="form-select" required></select>
               </div>
 
-              <!-- Step 2: Target Reel / Post Picker (Prominent & Visual) -->
+              <!-- Step 2: Target Reel / Post Picker (Specific Media Workflow Only) -->
               <div class="form-group">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                  <label class="form-label" style="margin-bottom:0;">2. Select Instagram Reel or Post</label>
-                  <button type="button" class="btn btn-ghost btn-sm" id="refreshReelsBtn" style="font-size:0.75rem; padding:3px 10px;">Refresh Reels ↻</button>
-                </div>
-
-                <div style="display:flex; gap:10px; margin-bottom:12px;">
-                  <button type="button" class="btn btn-ghost btn-sm active" id="targetSpecificReelBtn" style="border-color:var(--accent);">
-                    <span>🎯 Specific Reel / Post</span>
-                  </button>
-                  <button type="button" class="btn btn-ghost btn-sm" id="targetAllReelsBtn">
-                    <span>🎬 All Reels & Posts</span>
+                  <label class="form-label" style="margin-bottom:0;">
+                    2. Select Instagram Reel or Post
+                  </label>
+                  <button type="button" class="btn btn-ghost btn-sm" id="refreshReelsBtn" style="font-size:0.75rem; padding:4px 10px;">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" id="refreshReelsIcon"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+                    <span>Refresh Reels</span>
                   </button>
                 </div>
 
                 <!-- Reel Visual Picker Box -->
-                <div id="reelPickerBox" style="background:rgba(0,0,0,0.3); border-radius:var(--radius-m); padding:14px; border:1px solid var(--glass-border); margin-bottom:12px;">
-                  <div style="font-size:0.82rem; color:var(--ink-muted); margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
-                    <span>Click on a Reel or Post below to link this automation:</span>
-                    <span id="reelsCountLabel" style="font-size:0.78rem;"></span>
-                  </div>
-
-                  <div class="reel-picker-grid" id="reelPickerGrid">
-                    <!-- Populated dynamically -->
-                    <div style="text-align:center; padding:24px; color:var(--ink-muted); grid-column:1/-1;">Loading reels from Instagram…</div>
-                  </div>
-
+                <div id="reelPickerBox" style="background:var(--surface-hover); border-radius:var(--radius-m); padding:16px; border:1px solid var(--glass-border); margin-bottom:12px;">
                   <!-- Selected Reel Showcase Box -->
-                  <div id="selectedReelPreview" class="selected-reel-card" style="display:none;">
-                    <img id="selectedReelThumb" src="" class="selected-reel-thumb" alt="Selected Reel" />
-                    <div style="flex:1; min-width:0;">
+                  <div id="selectedReelPreview" class="selected-reel-card" style="display:none; margin-bottom:14px; background:var(--surface); border:2px solid var(--accent); border-radius:var(--radius-m); padding:12px 16px;">
+                    <img id="selectedReelThumb" src="" class="selected-reel-thumb" alt="Selected Reel" style="width:56px; height:74px; object-fit:cover; border-radius:8px;" />
+                    <div style="flex:1; min-width:0; padding-left:12px;">
                       <div style="display:flex; align-items:center; gap:8px;">
-                        <span class="plan-badge pro" style="font-size:0.7rem; padding:2px 8px;">✓ Linked Reel</span>
+                        <span class="plan-badge pro" style="font-size:0.7rem; padding:2px 8px;">✓ Linked Media</span>
                         <code id="selectedReelIdTag" style="font-size:0.75rem; color:var(--ink-muted);"></code>
                       </div>
-                      <div id="selectedReelCaption" style="font-size:0.88rem; color:#fff; font-weight:600; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></div>
-                      <a id="selectedReelPermalink" href="#" target="_blank" rel="noopener" class="selected-reel-link">
-                        <span>🔗 View on Instagram ↗</span>
-                      </a>
+                      <div id="selectedReelCaption" style="font-size:0.88rem; color:var(--ink); font-weight:600; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></div>
+                      <div style="display:flex; align-items:center; gap:12px; margin-top:4px;">
+                        <a id="selectedReelPermalink" href="#" target="_blank" rel="noopener noreferrer" class="selected-reel-link" style="color:var(--accent); font-size:0.82rem; text-decoration:none;">
+                          View on Instagram ↗
+                        </a>
+                      </div>
                     </div>
-                    <button type="button" class="btn btn-ghost btn-xs" id="clearReelSelectionBtn" style="color:var(--rose); align-self:flex-start;">✕ Remove</button>
+                    <button type="button" class="btn btn-ghost btn-sm" id="clearReelSelectionBtn" style="color:var(--rose); padding:4px 10px;">
+                      Change
+                    </button>
+                  </div>
+
+                  <div style="font-size:0.82rem; color:var(--ink-muted); margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
+                    <span>Click a Reel or Post below to link this automation:</span>
+                    <span id="reelsCountLabel" style="font-size:0.78rem; font-weight:600;"></span>
+                  </div>
+
+                  <!-- Gallery Grid -->
+                  <div class="reel-picker-grid" id="reelPickerGrid">
+                    <!-- Populated dynamically with cards & skeletons -->
+                  </div>
+
+                  <!-- Gallery Error/Retry Box -->
+                  <div id="reelGalleryError" style="display:none; text-align:center; padding:20px; color:var(--rose);">
+                    <p id="reelGalleryErrorText" style="margin:0 0 10px; font-size:0.88rem;">Failed to load posts from Instagram.</p>
+                    <button type="button" class="btn btn-secondary btn-sm" id="retryReelsBtn">Retry</button>
                   </div>
                 </div>
               </div>
 
-              <!-- Step 3: Trigger Condition -->
+              <!-- Step 3: Trigger Condition (Specific Keywords Default + Chips) -->
               <div class="form-group">
                 <label class="form-label">3. When to Trigger</label>
                 <div style="display:flex; gap:16px; margin-bottom:12px; flex-wrap:wrap;">
-                  <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.88rem;">
+                  <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.88rem; color:var(--ink);">
                     <input type="radio" name="triggerTypeRadio" id="triggerKeywordRadio" value="keyword" checked />
-                    <span>Specific Keyword(s)</span>
+                    <strong>Specific Keyword(s)</strong>
                   </label>
-                  <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.88rem;">
+                  <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.88rem; color:var(--ink);">
                     <input type="radio" name="triggerTypeRadio" id="triggerAllRadio" value="all" />
                     <span>Any Comment (All Comments) <span class="plan-badge pro" style="font-size:0.65rem;">Pro</span></span>
                   </label>
                 </div>
 
+                <!-- Specific Keywords Chips Input Box -->
                 <div id="keywordInputGroup">
-                  <input type="text" id="automationKeywordInput" class="form-input" placeholder="e.g. LINK, PRICE, PDF, SEND" required />
-                  <small style="color:var(--ink-muted); display:block; margin-top:4px;">
-                    Separate multiple trigger words with commas. The automation triggers if the viewer's comment includes any of them.
+                  <div class="keyword-chips-container" id="keywordChipsContainer">
+                    <!-- Dynamically populated keyword chips -->
+                    <input type="text" id="keywordChipInput" class="keyword-chip-input" placeholder="Type keyword and press Enter or comma..." />
+                  </div>
+                  <small style="color:var(--ink-muted); display:block; margin-top:6px; line-height:1.5;">
+                    💡 <em>Example:</em> If you add <code>LINK</code> and <code>SEND</code>, any comment like "Can you send the link?" will trigger the DM. Matching is case-insensitive.
                   </small>
                 </div>
               </div>
 
-              <!-- Step 4: Private DM Message -->
+              <!-- Step 4: Multi-Step DM Conversation Flow Composer -->
               <div class="form-group">
-                <label class="form-label" for="automationDmMessageInput">4. Automated Direct Message (Inbox)</label>
-                <textarea id="automationDmMessageInput" class="form-textarea" rows="3" placeholder="Hey! Thanks for commenting. Here is your direct link: https://yourbrand.com/deal 🔥" required></textarea>
-                <small style="color:var(--ink-muted); display:block; margin-top:4px;">
-                  Sent instantly to the commenter's Instagram DM inbox. Links are fully clickable!
-                </small>
+                <label class="form-label">
+                  4. Automated Direct Message Flow
+                </label>
+                <p style="color:var(--ink-secondary); font-size:0.84rem; margin:-4px 0 14px;">
+                  Configure what your audience receives in their Instagram DM inbox.
+                </p>
+
+                <!-- Flow Step A: Opening DM -->
+                <div class="flow-step-card">
+                  <div class="flow-step-header">
+                    <div class="flow-step-title">
+                      <span class="flow-step-num">A</span>
+                      <span>Opening Greeting Message</span>
+                    </div>
+                    <span class="plan-badge" style="font-size:0.7rem;">Step 1</span>
+                  </div>
+
+                  <textarea id="openingMessageInput" class="form-textarea" rows="3" placeholder="Hey {first_name}! Thanks for checking out our Reel. Here's what you requested:" required></textarea>
+
+                  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-top:6px;">
+                    <div class="variable-chips-row">
+                      <span style="font-size:0.74rem; color:var(--ink-muted);">Insert tag:</span>
+                      <button type="button" class="variable-chip" data-var="{first_name}">+ {first_name}</button>
+                      <button type="button" class="variable-chip" data-var="{username}">+ {username}</button>
+                    </div>
+                  </div>
+
+                  <div style="margin-top:12px;">
+                    <label class="form-label" style="font-size:0.8rem; margin-bottom:4px;">
+                      Opening Button Text (Optional)
+                    </label>
+                    <input type="text" id="openingButtonInput" class="form-input" placeholder="e.g. Send me the link 🚀" style="font-size:0.84rem; padding:8px 12px;" />
+                  </div>
+                </div>
+
+                <!-- Flow Step B: Follow-to-Unlock Gate (Optional Premium Feature) -->
+                <div class="flow-step-card" id="followGateCard">
+                  <div class="flow-step-header">
+                    <div class="flow-step-title">
+                      <span class="flow-step-num" style="background:linear-gradient(135deg, #f59e0b, #d97706);">B</span>
+                      <span>Follow-to-Unlock Gate (Optional)</span>
+                    </div>
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                      <span class="plan-badge pro" style="font-size:0.68rem;">Pro</span>
+                      <input type="checkbox" id="followGateToggle" style="width:16px; height:16px;" />
+                    </label>
+                  </div>
+
+                  <div id="followGateFields" style="display:none; margin-top:10px;">
+                    <p style="color:var(--ink-secondary); font-size:0.82rem; margin-bottom:10px;">
+                      Ask viewers to follow your Instagram account before releasing the final resource.
+                    </p>
+
+                    <div style="margin-bottom:10px;">
+                      <label class="form-label" style="font-size:0.8rem;">Follow Request Message</label>
+                      <input type="text" id="followGateMessageInput" class="form-input" placeholder="Please follow our page to unlock this exclusive resource! ✨" />
+                    </div>
+
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:10px;">
+                      <div>
+                        <label class="form-label" style="font-size:0.8rem;">Profile Button Label</label>
+                        <input type="text" id="followGateProfileBtnInput" class="form-input" placeholder="Follow Profile 👤" />
+                      </div>
+                      <div>
+                        <label class="form-label" style="font-size:0.8rem;">Confirm Button Label</label>
+                        <input type="text" id="followGateConfirmBtnInput" class="form-input" placeholder="I've Followed — Continue ✓" />
+                      </div>
+                    </div>
+
+                    <div style="background:var(--surface-hover); border:1px solid var(--glass-border); border-radius:var(--radius-s); padding:10px 12px; font-size:0.78rem; color:var(--ink-secondary); line-height:1.5;">
+                      🛡️ <strong>Follower Verification Policy:</strong> Our engine checks follower status via Meta Graph API. If Meta follower queries are restricted in your region, a clearly labeled manual confirmation button ensures your fans receive their resource without interruption.
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Flow Step C: Final Resource Delivery -->
+                <div class="flow-step-card">
+                  <div class="flow-step-header">
+                    <div class="flow-step-title">
+                      <span class="flow-step-num" style="background:linear-gradient(135deg, #10b981, #059669);">C</span>
+                      <span>Resource Delivery & Link</span>
+                    </div>
+                    <span class="plan-badge" style="font-size:0.7rem;">Delivery</span>
+                  </div>
+
+                  <div style="margin-bottom:12px;">
+                    <label class="form-label" style="font-size:0.8rem;">Delivery Message Text</label>
+                    <textarea id="deliveryMessageInput" class="form-textarea" rows="2" placeholder="Here is your link! Click below to access the full guide:"></textarea>
+                  </div>
+
+                  <!-- Resource Type Selector Tabs -->
+                  <div style="margin-bottom:12px;">
+                    <label class="form-label" style="font-size:0.8rem; margin-bottom:6px;">Attachment / Resource Type</label>
+                    <div class="resource-tabs">
+                      <button type="button" class="resource-tab-btn active" data-res-type="url">🔗 Website URL</button>
+                      <button type="button" class="resource-tab-btn" data-res-type="drive">📁 Google Drive</button>
+                      <button type="button" class="resource-tab-btn" data-res-type="image">🖼️ Image Upload</button>
+                      <button type="button" class="resource-tab-btn" data-res-type="document">📄 PDF / Document</button>
+                    </div>
+                  </div>
+
+                  <!-- Resource Input Panels -->
+                  <div id="resourceInputArea">
+                    <!-- URL / Drive Panel -->
+                    <div id="resUrlPanel">
+                      <label class="form-label" style="font-size:0.8rem;" id="resUrlLabel">Destination Website Link</label>
+                      <input type="url" id="deliveryUrlInput" class="form-input" placeholder="https://yourbrand.com/special-deal" />
+                      <small id="resDriveNotice" style="display:none; color:var(--ink-muted); margin-top:4px; font-size:0.76rem;">
+                        ℹ️ <strong>Google Drive Note:</strong> Ensure the link is set to "Anyone with the link can view" in Google Drive so your audience can open it.
+                      </small>
+                    </div>
+
+                    <!-- File Upload Panel -->
+                    <div id="resUploadPanel" style="display:none;">
+                      <input type="file" id="resourceFileInput" style="display:none;" />
+                      <div class="upload-dropzone" id="uploadDropzone">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--accent); margin-bottom:8px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                        <div style="font-size:0.88rem; font-weight:600; color:var(--ink); margin-bottom:4px;" id="dropzonePrompt">
+                          Click to upload file or drag & drop
+                        </div>
+                        <div style="font-size:0.76rem; color:var(--ink-muted);" id="dropzoneTypes">
+                          JPG, PNG, WEBP, GIF, or PDF (Up to 10MB)
+                        </div>
+                      </div>
+
+                      <div id="uploadProgressContainer" style="display:none; margin-top:10px;">
+                        <div style="display:flex; justify-content:space-between; font-size:0.78rem; margin-bottom:4px;">
+                          <span>Uploading resource…</span>
+                          <span id="uploadPercent">0%</span>
+                        </div>
+                        <div class="dm-progress-track">
+                          <div class="dm-progress-fill" id="uploadProgressBar" style="width:0%;"></div>
+                        </div>
+                      </div>
+
+                      <!-- Uploaded File Card -->
+                      <div class="uploaded-file-card" id="uploadedFileCard" style="display:none;">
+                        <div style="display:flex; align-items:center; gap:10px;">
+                          <div style="width:34px; height:34px; border-radius:8px; background:var(--accent-glow); display:flex; align-items:center; justify-content:center; color:var(--accent); font-weight:700;" id="uploadedFileIcon">
+                            📄
+                          </div>
+                          <div>
+                            <strong style="font-size:0.84rem; color:var(--ink); display:block;" id="uploadedFileName">file.pdf</strong>
+                            <small style="color:var(--ink-muted); font-size:0.75rem;" id="uploadedFileSize">1.2 MB</small>
+                          </div>
+                        </div>
+                        <button type="button" class="btn btn-ghost btn-xs" id="removeUploadedFileBtn" style="color:var(--rose);">✕ Remove</button>
+                      </div>
+                    </div>
+
+                    <!-- Button Label Input -->
+                    <div style="margin-top:12px;">
+                      <label class="form-label" style="font-size:0.8rem;">Delivery Button Text</label>
+                      <input type="text" id="deliveryButtonInput" class="form-input" placeholder="e.g. Open Free Guide ↗" style="font-size:0.84rem;" />
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              <!-- Step 5: Public Comment Reply (In-thread) -->
+              <!-- Step 5: Public Comment Reply (Optional) -->
               <div class="form-group">
-                <label class="form-label" for="automationPublicReplyInput">5. Public Reply in Comment Box (Optional)</label>
-                <input type="text" id="automationPublicReplyInput" class="form-input" placeholder="Sent to your DM! Check inbox 📩" />
-                <small style="color:var(--ink-muted); display:block; margin-top:4px;">
-                  Leaves a public reply in the comment section confirming the DM was sent.
-                </small>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                  <label class="form-label" style="margin-bottom:0;">5. Public Reply in Comment Box (Optional)</label>
+                  <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:0.82rem;">
+                    <input type="checkbox" id="publicReplyToggle" checked style="width:15px; height:15px;" />
+                    <span>Enabled</span>
+                  </label>
+                </div>
+                <div id="publicReplyInputWrap">
+                  <input type="text" id="automationPublicReplyInput" class="form-input" placeholder="Sent to your DM! Check inbox 📩" />
+                  <small style="color:var(--ink-muted); display:block; margin-top:4px;">
+                    Leaves a public confirmation reply in the post's comment thread so the user knows to check their inbox.
+                  </small>
+                </div>
               </div>
 
-              <!-- Enabled Toggle -->
+              <!-- Active Status Toggle -->
               <div class="form-group" style="margin-bottom:24px;">
                 <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:0.88rem;">
                   <input type="checkbox" id="automationEnabledCheckbox" checked style="width:16px; height:16px;" />
@@ -292,8 +515,9 @@
                 </label>
               </div>
 
+              <!-- Submit & Cancel Buttons -->
               <div style="display:flex; gap:12px; flex-wrap:wrap;">
-                <button type="submit" class="btn btn-accent" id="saveAutomationBtn" style="min-width:180px;">
+                <button type="submit" class="btn btn-accent" id="saveAutomationBtn" style="min-width:200px;">
                   <span>Save & Launch Automation ⚡</span>
                 </button>
                 <button type="button" class="btn btn-ghost" id="cancelFormBtn2">Cancel</button>
@@ -306,14 +530,21 @@
               <div class="phone-simulator-frame">
                 <div class="iphone-notch"></div>
                 <div class="simulator-screen">
-                  <div style="display:flex; justify-content:space-between; align-items:center; padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.06); font-size:0.75rem; color:var(--ink-muted);">
-                    <span id="simReelHeader">Instagram Reel</span>
-                    <span style="color:var(--emerald);">● Live</span>
+                  <div class="sim-preview-badge">Interactive Preview · Not an actual Instagram screen</div>
+
+                  <!-- Linked Reel Header -->
+                  <div class="sim-reel-header-card">
+                    <img id="simReelThumb" class="sim-reel-header-thumb" src="https://placehold.co/60x80/1a1a24/6366f1?text=Reel" alt="Reel" />
+                    <div style="text-align:left; flex:1; min-width:0;">
+                      <strong id="simReelTitle" style="font-size:0.75rem; color:#fff; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Select a Reel</strong>
+                      <span id="simAccountHandle" style="font-size:0.68rem; color:var(--ink-muted);">@yourhandle</span>
+                    </div>
+                    <span style="color:var(--emerald); font-size:0.7rem; font-weight:700;">● Live</span>
                   </div>
 
                   <!-- Simulated User Comment -->
                   <div class="sim-comment-bubble" id="simCommentDisplay">
-                    💬 "Can you send the <strong>LINK</strong>?"
+                    💬 "Can you send the <strong style="color:var(--accent-light);">LINK</strong>?"
                   </div>
 
                   <!-- Simulated Public Reply -->
@@ -321,15 +552,42 @@
                     ↳ @yourpage: "Sent to your DM! Check inbox 📩"
                   </div>
 
-                  <div style="height:12px;"></div>
-
-                  <!-- Simulated Direct Message -->
-                  <div style="font-size:0.7rem; color:var(--ink-muted); text-transform:uppercase; text-align:center;">
+                  <!-- Divider -->
+                  <div style="font-size:0.66rem; color:rgba(255,255,255,0.4); text-transform:uppercase; text-align:center; margin:4px 0;">
                     — Direct Message Inbox —
                   </div>
 
-                  <div class="sim-dm-bubble" id="simDmDisplay">
-                    Hey! Thanks for commenting. Here is your direct link: https://yourbrand.com/deal 🔥
+                  <!-- Simulated Opening DM Bubble -->
+                  <div class="sim-dm-bubble" id="simOpeningDmDisplay">
+                    Hey Creator! Thanks for commenting on our Reel. Here's what you requested:
+                    <div class="sim-dm-button" id="simOpeningBtnDisplay" style="display:none;">
+                      Send me the link 🚀
+                    </div>
+                  </div>
+
+                  <!-- Simulated Follow Gate Card -->
+                  <div class="sim-gate-card" id="simGateDisplay" style="display:none;">
+                    <div style="display:flex; align-items:center; gap:6px;">
+                      <span>🔒</span>
+                      <strong id="simGateMsgDisplay">Follow @creator to unlock:</strong>
+                    </div>
+                    <div style="display:flex; gap:6px; margin-top:4px;">
+                      <span class="sim-dm-button" style="background:rgba(255,255,255,0.15);" id="simGateProfileBtn">Follow Profile</span>
+                      <span class="sim-dm-button" style="background:var(--accent-gradient);" id="simGateConfirmBtn">I've Followed ✓</span>
+                    </div>
+                  </div>
+
+                  <!-- Simulated Resource Delivery Bubble -->
+                  <div class="sim-dm-bubble" id="simDeliveryDisplay">
+                    <div id="simDeliveryMsgText">Here is your link! Click below to access:</div>
+                    <div class="sim-dm-button" id="simDeliveryBtnDisplay" style="margin-top:8px;">
+                      Open Free Guide ↗
+                    </div>
+                  </div>
+
+                  <!-- Subtle Free Branding Tag -->
+                  <div class="sim-branding-tag" id="simBrandingTag">
+                    ⚡ Powered by Comment2DM
                   </div>
                 </div>
               </div>
@@ -337,23 +595,50 @@
           </div>
         </section>
 
-        <!-- AUTOMATIONS LIST -->
+        <!-- AUTOMATIONS LIST SECTION -->
         <section id="automationsListSection">
-          <div id="automationsListGrid" style="display:flex; flex-direction:column; gap:14px;">
-            <!-- Populated dynamically -->
+          <div id="automationsListGrid" style="display:flex; flex-direction:column; gap:16px;">
+            <!-- Populated dynamically with rich automation cards -->
           </div>
 
-          <!-- Empty State -->
-          <div id="automationsEmptyState" class="apple-card" style="text-align:center; padding:48px 24px;" hidden>
-            <div style="font-size:2.4rem; margin-bottom:12px;">⚡</div>
-            <h2 style="font-size:1.25rem; margin-bottom:6px;">No Automations Created Yet</h2>
-            <p style="color:var(--ink-secondary); font-size:0.9rem; max-width:420px; margin:0 auto 20px;">
-              Create your first Comment-to-DM automation to automatically turn Instagram Reel comments into private sales and leads.
+          <!-- Empty State (Hidden cleanly when automations > 0) -->
+          <div id="automationsEmptyState" class="apple-card" style="text-align:center; padding:54px 28px; display:none;">
+            <div style="width:72px; height:72px; border-radius:22px; background:linear-gradient(135deg, rgba(118,85,217,0.15), rgba(217,70,168,0.15)); border:1px solid rgba(118,85,217,0.25); display:flex; align-items:center; justify-content:center; margin:0 auto 20px; color:var(--accent);">
+              <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+            </div>
+            <h2 style="font-size:1.35rem; font-weight:700; margin-bottom:8px; color:var(--ink);">
+              No Automations Created Yet
+            </h2>
+            <p style="color:var(--ink-secondary); font-size:0.92rem; max-width:460px; margin:0 auto 24px; line-height:1.6;">
+              Create your first Comment-to-DM automation to instantly turn comments on your Instagram Reels into private links, sales, and leads.
             </p>
-            <button class="btn btn-accent" id="createFirstBtn">+ Create Your First Automation</button>
+            <button class="btn btn-accent" id="createFirstBtn" style="padding:12px 28px; font-size:0.96rem;">
+              + Create Your First Automation
+            </button>
           </div>
         </section>
       </main>
+    </div>
+  </div>
+
+  <!-- Custom Delete Confirmation Modal -->
+  <div class="modal-overlay" id="deleteAutomationModal" aria-hidden="true" role="dialog" aria-labelledby="deleteModalTitle">
+    <div class="modal-card">
+      <div class="modal-icon-badge danger">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+        </svg>
+      </div>
+      <h2 id="deleteModalTitle" style="font-size:1.3rem; font-weight:700; margin-bottom:8px; color:var(--ink);">
+        Delete Automation?
+      </h2>
+      <p style="color:var(--ink-secondary); font-size:0.9rem; line-height:1.6; margin:0 0 20px;">
+        Are you sure you want to delete this automation? It will permanently stop responding to incoming comments on this Reel.
+      </p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="cancelDeleteBtn">Cancel</button>
+        <button type="button" class="btn btn-danger" id="confirmDeleteBtn">Delete Automation</button>
+      </div>
     </div>
   </div>
 

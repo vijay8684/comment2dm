@@ -621,23 +621,29 @@ app.get('/api/automations', requireAuth, async (request, response, next) => {
 
 app.post('/api/automations', requireAuth, async (request, response, next) => {
   try {
-    const { instagramUserId, keyword, dmMessage, replyTemplate, triggerType, enabled, mediaUrl, mediaId } = request.body || {};
-    const trimmedKeyword = typeof keyword === 'string' ? keyword.trim() : '';
-    const trimmedMessage = typeof dmMessage === 'string' ? dmMessage.trim() : '';
-    const trimmedReply = typeof replyTemplate === 'string' ? replyTemplate.trim() : '';
-    const trigger = triggerType === 'all' ? 'all' : 'keyword';
-    const targetIgId = typeof instagramUserId === 'string' ? instagramUserId.trim() : '';
+    const {
+      instagramUserId,
+      keyword,
+      keywords,
+      dmMessage,
+      replyTemplate,
+      triggerType,
+      enabled,
+      mediaUrl,
+      mediaId,
+      mediaTitle,
+      mediaThumbnail,
+      mediaType,
+      flow
+    } = request.body || {};
+
+    let targetIgId = typeof instagramUserId === 'string' ? instagramUserId.trim() : '';
 
     if (!targetIgId) {
       return response.status(400).json({ error: 'Please select a connected Instagram account.' });
     }
-    if (trigger === 'keyword' && !trimmedKeyword) {
-      return response.status(400).json({ error: 'Trigger keyword must not be empty.' });
-    }
-    if (!trimmedMessage) {
-      return response.status(400).json({ error: 'Private DM message must not be empty.' });
-    }
 
+    // Account ownership verification
     let account = null;
     if (targetIgId) {
       account = await db.get(
@@ -656,14 +662,13 @@ app.post('/api/automations', requireAuth, async (request, response, next) => {
       return response.status(403).json({ error: 'No connected Instagram account found. Please connect your Instagram account first.' });
     }
 
-    const now = new Date().toISOString();
-    const isEnabled = enabled === false || enabled === 0 ? 0 : 1;
-    let selectedMediaId = mediaId || null;
-    let selectedMediaUrl = mediaUrl || null;
+    // Specific Reel or Post selection is mandatory
+    let selectedMediaId = mediaId ? String(mediaId).trim() : null;
+    let selectedMediaUrl = mediaUrl ? String(mediaUrl).trim() : null;
 
-    if (!selectedMediaId && mediaUrl && String(mediaUrl).trim() !== '') {
+    if (!selectedMediaId && selectedMediaUrl) {
       try {
-        const media = await instagramService.resolveReelUrl(request.user.id, targetIgId, mediaUrl);
+        const media = await instagramService.resolveReelUrl(request.user.id, targetIgId, selectedMediaUrl);
         if (media) {
           selectedMediaId = media.id;
           selectedMediaUrl = media.permalink;
@@ -673,10 +678,80 @@ app.post('/api/automations', requireAuth, async (request, response, next) => {
       }
     }
 
+    if (!selectedMediaId) {
+      return response.status(400).json({ error: 'Please select a specific Instagram Reel or Post to link this automation.' });
+    }
+
+    // Entitlement & Tier Quota Check
+    const userEntitlement = await billing.entitlement(request.user.id);
+    const trigger = triggerType === 'all' ? 'all' : 'keyword';
+
+    if (trigger === 'all' && !userEntitlement?.limits?.allCommentsTrigger) {
+      return response.status(403).json({
+        error: 'The "Any Comment" trigger is available exclusively on Pro and Elite plans. Please upgrade to unlock.'
+      });
+    }
+
+    if (flow?.followGate?.enabled && !userEntitlement?.limits?.followToUnlock) {
+      return response.status(403).json({
+        error: 'Follow-to-unlock is a premium feature available on Pro and Elite plans. Please upgrade to unlock.'
+      });
+    }
+
+    // Clean & normalize keywords (removes duplicates, case-insensitive)
+    let cleanKeywords = [];
+    if (Array.isArray(keywords)) {
+      cleanKeywords = keywords.map(k => String(k).trim()).filter(Boolean);
+    } else if (typeof keyword === 'string') {
+      cleanKeywords = keyword.split(',').map(k => k.trim()).filter(Boolean);
+    }
+    const seenKw = new Set();
+    cleanKeywords = cleanKeywords.filter(k => {
+      const lower = k.toLowerCase();
+      if (seenKw.has(lower)) return false;
+      seenKw.add(lower);
+      return true;
+    });
+
+    const primaryKeyword = cleanKeywords.join(', ') || (trigger === 'all' ? '*' : '');
+    if (trigger === 'keyword' && cleanKeywords.length === 0) {
+      return response.status(400).json({ error: 'Please add at least one trigger keyword.' });
+    }
+
+    // Determine DM message
+    let trimmedMessage = typeof dmMessage === 'string' ? dmMessage.trim() : '';
+    if (!trimmedMessage && flow?.openingMessage) {
+      trimmedMessage = String(flow.openingMessage).trim();
+    }
+    if (!trimmedMessage) {
+      return response.status(400).json({ error: 'Direct Message content must not be empty.' });
+    }
+
+    const trimmedReply = typeof replyTemplate === 'string' ? replyTemplate.trim() : '';
+    const isEnabled = enabled === false || enabled === 0 ? 0 : 1;
+    const now = new Date().toISOString();
+
     const result = await db.run(
-      `INSERT INTO automations (owner_user_id, instagram_user_id, keyword, dm_message, enabled, created_at, updated_at, media_id, media_url, reply_template, trigger_type)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [request.user.id, targetIgId, trimmedKeyword, trimmedMessage, isEnabled, now, now, selectedMediaId, selectedMediaUrl, trimmedReply, trigger]
+      `INSERT INTO automations (owner_user_id, instagram_user_id, keyword, dm_message, enabled, created_at, updated_at, media_id, media_url, reply_template, trigger_type, flow, keywords, media_title, media_thumbnail, media_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        request.user.id,
+        targetIgId,
+        primaryKeyword,
+        trimmedMessage,
+        isEnabled,
+        now,
+        now,
+        selectedMediaId,
+        selectedMediaUrl,
+        trimmedReply,
+        trigger,
+        flow || null,
+        cleanKeywords,
+        mediaTitle || null,
+        mediaThumbnail || null,
+        mediaType || null
+      ]
     );
 
     const created = await db.get(
@@ -707,24 +782,67 @@ app.patch('/api/automations/:id', requireAuth, async (request, response, next) =
       return response.status(404).json({ error: 'Automation not found.' });
     }
 
-    const { instagramUserId, keyword, dmMessage, replyTemplate, triggerType, enabled, mediaUrl, mediaId } = request.body || {};
+    const {
+      instagramUserId,
+      keyword,
+      keywords,
+      dmMessage,
+      replyTemplate,
+      triggerType,
+      enabled,
+      mediaUrl,
+      mediaId,
+      mediaTitle,
+      mediaThumbnail,
+      mediaType,
+      flow
+    } = request.body || {};
 
     let targetIgId = existing.instagram_user_id;
     if (typeof instagramUserId === 'string' && instagramUserId.trim() !== '') {
       targetIgId = instagramUserId.trim();
     }
 
+    const userEntitlement = await billing.entitlement(request.user.id);
+
+    let newTrigger = existing.trigger_type || 'keyword';
+    if (triggerType !== undefined) {
+      newTrigger = triggerType === 'all' ? 'all' : 'keyword';
+      if (newTrigger === 'all' && !userEntitlement?.limits?.allCommentsTrigger) {
+        return response.status(403).json({
+          error: 'The "Any Comment" trigger is available exclusively on Pro and Elite plans. Please upgrade to unlock.'
+        });
+      }
+    }
+
+    if (flow?.followGate?.enabled && !userEntitlement?.limits?.followToUnlock) {
+      return response.status(403).json({
+        error: 'Follow-to-unlock is a premium feature available on Pro and Elite plans. Please upgrade to unlock.'
+      });
+    }
+
+    let newKeywords = existing.keywords;
     let newKeyword = existing.keyword;
-    if (keyword !== undefined) newKeyword = String(keyword).trim();
+    if (keywords !== undefined || keyword !== undefined) {
+      let rawList = [];
+      if (Array.isArray(keywords)) rawList = keywords;
+      else if (typeof keyword === 'string') rawList = keyword.split(',');
+      const seenKw = new Set();
+      newKeywords = rawList.map(k => String(k).trim()).filter(Boolean).filter(k => {
+        const lower = k.toLowerCase();
+        if (seenKw.has(lower)) return false;
+        seenKw.add(lower);
+        return true;
+      });
+      newKeyword = newKeywords.join(', ');
+    }
 
     let newMessage = existing.dm_message;
     if (dmMessage !== undefined) newMessage = String(dmMessage).trim();
+    if (flow?.openingMessage && !newMessage) newMessage = String(flow.openingMessage).trim();
 
     let newReply = existing.reply_template;
     if (replyTemplate !== undefined) newReply = String(replyTemplate).trim();
-
-    let newTrigger = existing.trigger_type || 'keyword';
-    if (triggerType !== undefined) newTrigger = triggerType === 'all' ? 'all' : 'keyword';
 
     let newEnabled = existing.enabled;
     if (enabled !== undefined) newEnabled = enabled === true || enabled === 1 || enabled === '1' ? 1 : 0;
@@ -735,12 +853,41 @@ app.patch('/api/automations/:id', requireAuth, async (request, response, next) =
     let newMediaUrl = existing.media_url || null;
     if (mediaUrl !== undefined) newMediaUrl = mediaUrl || null;
 
+    let newMediaTitle = existing.media_title || null;
+    if (mediaTitle !== undefined) newMediaTitle = mediaTitle || null;
+
+    let newMediaThumbnail = existing.media_thumbnail || null;
+    if (mediaThumbnail !== undefined) newMediaThumbnail = mediaThumbnail || null;
+
+    let newMediaType = existing.media_type || null;
+    if (mediaType !== undefined) newMediaType = mediaType || null;
+
+    let newFlow = existing.flow || null;
+    if (flow !== undefined) newFlow = flow;
+
     const now = new Date().toISOString();
     await db.run(
       `UPDATE automations
-       SET instagram_user_id = ?, keyword = ?, dm_message = ?, enabled = ?, updated_at = ?, media_id = ?, media_url = ?, reply_template = ?, trigger_type = ?
+       SET instagram_user_id = ?, keyword = ?, dm_message = ?, enabled = ?, updated_at = ?, media_id = ?, media_url = ?, reply_template = ?, trigger_type = ?, flow = ?, keywords = ?, media_title = ?, media_thumbnail = ?, media_type = ?
        WHERE id = ? AND owner_user_id = ?`,
-      [targetIgId, newKeyword, newMessage, newEnabled, now, newMediaId, newMediaUrl, newReply, newTrigger, automationId, request.user.id]
+      [
+        targetIgId,
+        newKeyword,
+        newMessage,
+        newEnabled,
+        now,
+        newMediaId,
+        newMediaUrl,
+        newReply,
+        newTrigger,
+        newFlow,
+        newKeywords,
+        newMediaTitle,
+        newMediaThumbnail,
+        newMediaType,
+        automationId,
+        request.user.id
+      ]
     );
 
     const updated = await db.get(
@@ -788,6 +935,76 @@ app.delete('/api/automations/:id', requireAuth, async (request, response, next) 
     } else {
       await db.run('DELETE FROM automations WHERE id = ? AND owner_user_id = ?', [automationId, request.user.id]);
     }
+    return response.status(204).end();
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// Resource Upload Endpoint (Images, PDFs up to 10MB)
+app.post('/api/automations/upload-resource', requireAuth, async (request, response) => {
+  try {
+    const { fileName, fileType, fileData } = request.body || {};
+    if (!fileData || !fileName) {
+      return response.status(400).json({ error: 'No file data received.' });
+    }
+    const matches = String(fileData).match(/^data:([A-Za-z0-9\/\-+.]+);base64,(.+)$/);
+    if (!matches || matches.length !== 3) {
+      return response.status(400).json({ error: 'Invalid file payload. Base64 encoding required.' });
+    }
+    const mimeType = matches[1].toLowerCase();
+    const base64Buffer = Buffer.from(matches[2], 'base64');
+
+    if (base64Buffer.length > 10 * 1024 * 1024) {
+      return response.status(400).json({ error: 'File size exceeds maximum allowed 10MB limit.' });
+    }
+
+    const allowedMimes = {
+      'image/jpeg': '.jpg',
+      'image/png': '.png',
+      'image/webp': '.webp',
+      'image/gif': '.gif',
+      'application/pdf': '.pdf'
+    };
+
+    if (!allowedMimes[mimeType]) {
+      return response.status(400).json({ error: 'Unsupported file type. Only JPG, PNG, WEBP, GIF, and PDF files are allowed.' });
+    }
+
+    const ext = allowedMimes[mimeType];
+    const safeBase = path.basename(fileName, path.extname(fileName)).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 32);
+    const uniqueName = `res_${Date.now()}_${crypto.randomBytes(4).toString('hex')}_${safeBase}${ext}`;
+    const uploadsDir = path.join(__dirname, 'uploads');
+    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+    fs.writeFileSync(path.join(uploadsDir, uniqueName), base64Buffer);
+
+    return response.json({
+      success: true,
+      url: `/uploads/${uniqueName}`,
+      fileName: `${safeBase}${ext}`,
+      fileType: mimeType,
+      fileSize: base64Buffer.length
+    });
+  } catch (err) {
+    console.error('Resource upload failed:', err);
+    return response.status(500).json({ error: 'Failed to process resource upload.' });
+  }
+});
+
+// Follow Verification Endpoint
+app.post('/api/automations/check-follow', requireAuth, async (request, response) => {
+  try {
+    const { instagramUserId, commenterId } = request.body || {};
+    if (!instagramUserId || !commenterId) {
+      return response.status(400).json({ error: 'Missing instagram account ID or commenter ID.' });
+    }
+    const tokenData = await instagramService.getDecryptedTokenByInstagramUserId(instagramUserId, request.user.id);
+    const result = await instagramService.checkFollowStatus(instagramUserId, commenterId, tokenData.accessToken);
+    return response.json(result);
+  } catch (err) {
+    return response.status(500).json({ error: err.message });
+  }
+});
     return response.status(200).json({ success: true, message: 'Automation deleted successfully.' });
   } catch (error) {
     return next(error);
@@ -952,11 +1169,53 @@ app.post('/api/instagram/webhook', async (request, response) => {
               try {
                 const tokenData = await instagramService.getDecryptedTokenByInstagramUserId(recipientIgUserId, auto.owner_user_id);
 
+                // Prepare message to send based on conversation flow and personalization
+                let messageToSend = auto.dm_message || '';
+
+                if (auto.flow && typeof auto.flow === 'object') {
+                  const flow = auto.flow;
+                  if (flow.openingMessage) {
+                    messageToSend = flow.openingMessage;
+                  }
+                  // If follow-gate is NOT enabled, append final resource delivery immediately
+                  if (!flow.followGate?.enabled && flow.delivery?.message) {
+                    messageToSend += '\n\n' + flow.delivery.message;
+                    if (flow.delivery.resourceUrl) {
+                      const btnLabel = flow.delivery.buttonText || 'Link';
+                      messageToSend += `\n🔗 ${btnLabel}: ${flow.delivery.resourceUrl}`;
+                    }
+                  } else if (flow.followGate?.enabled && flow.followGate?.message) {
+                    messageToSend += '\n\n' + flow.followGate.message;
+                    if (flow.followGate.profileUrl) {
+                      messageToSend += `\n👉 Follow: ${flow.followGate.profileUrl}`;
+                    }
+                  }
+                }
+
+                // Variable Personalization
+                if (fromUsername) {
+                  messageToSend = messageToSend.replace(/\{username\}/gi, `@${fromUsername}`);
+                  messageToSend = messageToSend.replace(/\{name\}/gi, fromUsername);
+                  messageToSend = messageToSend.replace(/\{first_name\}/gi, fromUsername);
+                }
+
+                // Plan-based Free Branding Attribution
+                try {
+                  const userEntitlement = await billing.entitlement(auto.owner_user_id);
+                  if (!userEntitlement?.limits?.whiteLabel) {
+                    if (!messageToSend.includes('Powered by Comment2DM')) {
+                      messageToSend += '\n\n⚡ Powered by Comment2DM';
+                    }
+                  }
+                } catch (bErr) {
+                  console.warn('Billing entitlement check note:', bErr.message);
+                }
+
                 // 1. Send Private DM
                 await instagramService.sendPrivateReply(
                   recipientIgUserId,
                   commentId,
-                  auto.dm_message,
+                  messageToSend,
                   tokenData.accessToken
                 );
 

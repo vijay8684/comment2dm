@@ -73,7 +73,9 @@ const LIMITS = {
     dmMonthly: 300,
     aiCreditsMonthly: 100,
     allCommentsTrigger: false,
-    publicReplies: true
+    publicReplies: true,
+    followToUnlock: false,
+    whiteLabel: false
   },
   pro: {
     instagramAccounts: 3,
@@ -81,7 +83,9 @@ const LIMITS = {
     dmMonthly: 5000,
     aiCreditsMonthly: 2500,
     allCommentsTrigger: true,
-    publicReplies: true
+    publicReplies: true,
+    followToUnlock: true,
+    whiteLabel: true
   },
   elite: {
     instagramAccounts: 10,
@@ -89,7 +93,9 @@ const LIMITS = {
     dmMonthly: 50000,
     aiCreditsMonthly: 30000,
     allCommentsTrigger: true,
-    publicReplies: true
+    publicReplies: true,
+    followToUnlock: true,
+    whiteLabel: true
   },
   // Aliases for legacy plan data in DB
   creator: {
@@ -98,7 +104,9 @@ const LIMITS = {
     dmMonthly: 5000,
     aiCreditsMonthly: 2500,
     allCommentsTrigger: true,
-    publicReplies: true
+    publicReplies: true,
+    followToUnlock: true,
+    whiteLabel: true
   },
   growth: {
     instagramAccounts: 5,
@@ -106,7 +114,9 @@ const LIMITS = {
     dmMonthly: 15000,
     aiCreditsMonthly: 10000,
     allCommentsTrigger: true,
-    publicReplies: true
+    publicReplies: true,
+    followToUnlock: true,
+    whiteLabel: true
   },
   scale: {
     instagramAccounts: 10,
@@ -114,7 +124,9 @@ const LIMITS = {
     dmMonthly: 50000,
     aiCreditsMonthly: 30000,
     allCommentsTrigger: true,
-    publicReplies: true
+    publicReplies: true,
+    followToUnlock: true,
+    whiteLabel: true
   }
 };
 
@@ -187,7 +199,9 @@ async function entitlement(uid) {
         dmMonthly: Infinity,
         aiCreditsMonthly: Infinity,
         allCommentsTrigger: true,
-        publicReplies: true
+        publicReplies: true,
+        followToUnlock: true,
+        whiteLabel: true
       },
       subscription: null
     };

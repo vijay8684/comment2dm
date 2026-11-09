@@ -1,48 +1,43 @@
 // ============================================================
-// Comment2DM — Automations Engine & Reel Picker Flow
-// Zero-lag, visual Reel selector, live simulator & clean state
+// Comment2DM — Automations Studio & Workflow Engine
+// Single Reel/Post Flow, Keyword Chips, Multi-Step Conversation Builder,
+// Resource Attachments & Real-Time Interaction Simulator
 // ============================================================
 
 (function () {
+  // Application State
   let userAccounts = [];
   let userAutomations = [];
   let loadedReels = [];
+  let selectedReel = null;
+  let keywordsList = ['LINK'];
+  let currentResourceType = 'url';
+  let uploadedResourceData = null;
+  let userPlan = 'free';
+  let pendingDeleteId = null;
 
+  // DOM Elements - Shell & Navigation
   const openCreateBtn = document.getElementById('openCreateBtn');
   const createFirstBtn = document.getElementById('createFirstBtn');
   const cancelFormBtn = document.getElementById('cancelFormBtn');
   const cancelFormBtn2 = document.getElementById('cancelFormBtn2');
   const automationFormCard = document.getElementById('automationFormCard');
-  const automationsListSection = document.getElementById('automationsListSection');
   const automationsListGrid = document.getElementById('automationsListGrid');
   const automationsEmptyState = document.getElementById('automationsEmptyState');
   const noAccountWarning = document.getElementById('noAccountWarning');
   const automationForm = document.getElementById('automationForm');
   const accountSelect = document.getElementById('automationAccountSelect');
   const saveBtn = document.getElementById('saveAutomationBtn');
+  const noticeBox = document.getElementById('automationNotice');
+  const errorBox = document.getElementById('dashboardError');
 
-  // Simulator elements
-  const simComment = document.getElementById('simCommentDisplay');
-  const simPublicReply = document.getElementById('simPublicReplyDisplay');
-  const simDm = document.getElementById('simDmDisplay');
-  const simReelHeader = document.getElementById('simReelHeader');
-
-  const keywordInput = document.getElementById('automationKeywordInput');
-  const dmMessageInput = document.getElementById('automationDmMessageInput');
-  const publicReplyInput = document.getElementById('automationPublicReplyInput');
-  const automationIdInput = document.getElementById('automationId');
-
-  // Specific reel vs all reels toggle
-  const targetAllBtn = document.getElementById('targetAllReelsBtn');
-  const targetSpecificBtn = document.getElementById('targetSpecificReelBtn');
-  const reelPickerBox = document.getElementById('reelPickerBox');
+  // Reel Picker Elements
   const reelPickerGrid = document.getElementById('reelPickerGrid');
   const refreshReelsBtn = document.getElementById('refreshReelsBtn');
+  const refreshReelsIcon = document.getElementById('refreshReelsIcon');
   const reelsCountLabel = document.getElementById('reelsCountLabel');
-  const selectedMediaIdInput = document.getElementById('selectedMediaId');
-  const selectedMediaUrlInput = document.getElementById('selectedMediaUrl');
-
-  // Selected reel showcase elements
+  const reelGalleryError = document.getElementById('reelGalleryError');
+  const retryReelsBtn = document.getElementById('retryReelsBtn');
   const selectedReelPreview = document.getElementById('selectedReelPreview');
   const selectedReelThumb = document.getElementById('selectedReelThumb');
   const selectedReelCaption = document.getElementById('selectedReelCaption');
@@ -50,112 +45,496 @@
   const selectedReelIdTag = document.getElementById('selectedReelIdTag');
   const clearReelSelectionBtn = document.getElementById('clearReelSelectionBtn');
 
-  // Trigger radio
+  // Hidden Inputs
+  const automationIdInput = document.getElementById('automationId');
+  const selectedMediaIdInput = document.getElementById('selectedMediaId');
+  const selectedMediaUrlInput = document.getElementById('selectedMediaUrl');
+  const selectedMediaTitleInput = document.getElementById('selectedMediaTitle');
+  const selectedMediaThumbnailInput = document.getElementById('selectedMediaThumbnail');
+  const selectedMediaTypeInput = document.getElementById('selectedMediaType');
+
+  // Trigger Inputs
   const triggerKeywordRadio = document.getElementById('triggerKeywordRadio');
   const triggerAllRadio = document.getElementById('triggerAllRadio');
-  const keywordGroup = document.getElementById('keywordInputGroup');
+  const keywordInputGroup = document.getElementById('keywordInputGroup');
+  const keywordChipsContainer = document.getElementById('keywordChipsContainer');
+  const keywordChipInput = document.getElementById('keywordChipInput');
 
+  // Conversation Flow Inputs
+  const openingMessageInput = document.getElementById('openingMessageInput');
+  const openingButtonInput = document.getElementById('openingButtonInput');
+  const followGateToggle = document.getElementById('followGateToggle');
+  const followGateFields = document.getElementById('followGateFields');
+  const followGateMessageInput = document.getElementById('followGateMessageInput');
+  const followGateProfileBtnInput = document.getElementById('followGateProfileBtnInput');
+  const followGateConfirmBtnInput = document.getElementById('followGateConfirmBtnInput');
+  const deliveryMessageInput = document.getElementById('deliveryMessageInput');
+  const deliveryUrlInput = document.getElementById('deliveryUrlInput');
+  const deliveryButtonInput = document.getElementById('deliveryButtonInput');
+  const resUrlPanel = document.getElementById('resUrlPanel');
+  const resUploadPanel = document.getElementById('resUploadPanel');
+  const resUrlLabel = document.getElementById('resUrlLabel');
+  const resDriveNotice = document.getElementById('resDriveNotice');
+  const resourceFileInput = document.getElementById('resourceFileInput');
+  const uploadDropzone = document.getElementById('uploadDropzone');
+  const uploadedFileCard = document.getElementById('uploadedFileCard');
+  const uploadedFileName = document.getElementById('uploadedFileName');
+  const uploadedFileSize = document.getElementById('uploadedFileSize');
+  const removeUploadedFileBtn = document.getElementById('removeUploadedFileBtn');
+
+  // Public Reply & Status Inputs
+  const publicReplyToggle = document.getElementById('publicReplyToggle');
+  const publicReplyInputWrap = document.getElementById('publicReplyInputWrap');
+  const automationPublicReplyInput = document.getElementById('automationPublicReplyInput');
+  const automationEnabledCheckbox = document.getElementById('automationEnabledCheckbox');
+
+  // Simulator Elements
+  const simReelThumb = document.getElementById('simReelThumb');
+  const simReelTitle = document.getElementById('simReelTitle');
+  const simAccountHandle = document.getElementById('simAccountHandle');
+  const simComment = document.getElementById('simCommentDisplay');
+  const simPublicReply = document.getElementById('simPublicReplyDisplay');
+  const simOpeningDm = document.getElementById('simOpeningDmDisplay');
+  const simOpeningBtn = document.getElementById('simOpeningBtnDisplay');
+  const simGateDisplay = document.getElementById('simGateDisplay');
+  const simGateMsgDisplay = document.getElementById('simGateMsgDisplay');
+  const simGateProfileBtn = document.getElementById('simGateProfileBtn');
+  const simGateConfirmBtn = document.getElementById('simGateConfirmBtn');
+  const simDeliveryDisplay = document.getElementById('simDeliveryDisplay');
+  const simDeliveryMsgText = document.getElementById('simDeliveryMsgText');
+  const simDeliveryBtn = document.getElementById('simDeliveryBtnDisplay');
+  const simBrandingTag = document.getElementById('simBrandingTag');
+
+  // Delete Modal Elements
+  const deleteModal = document.getElementById('deleteAutomationModal');
+  const cancelDeleteBtn = document.getElementById('cancelDeleteBtn');
+  const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
+
+  // Notice & Error Helpers
   function showNotice(msg) {
-    const notice = document.getElementById('automationNotice');
-    if (!notice) return;
-    notice.textContent = msg;
-    notice.hidden = false;
-    setTimeout(() => { notice.hidden = true; }, 4000);
+    if (!noticeBox) return;
+    noticeBox.innerHTML = `✓ ${escapeHtml(msg)}`;
+    noticeBox.style.display = 'block';
+    setTimeout(() => { noticeBox.style.display = 'none'; }, 5000);
   }
 
   function showError(msg) {
-    const errorBox = document.getElementById('dashboardError');
     if (!errorBox) return;
-    errorBox.textContent = msg;
-    errorBox.classList.add('show');
-    setTimeout(() => { errorBox.classList.remove('show'); }, 5000);
+    errorBox.innerHTML = `⚠️ ${escapeHtml(msg)}`;
+    errorBox.style.display = 'block';
+    errorBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => { errorBox.style.display = 'none'; }, 6000);
   }
 
-  // Update simulator live
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  // ==========================================
+  // Keyword Chips Management
+  // ==========================================
+  function renderKeywordChips() {
+    // Remove existing chip tags, preserve input
+    const chips = keywordChipsContainer.querySelectorAll('.keyword-chip');
+    chips.forEach(c => c.remove());
+
+    keywordsList.forEach((kw, index) => {
+      const chip = document.createElement('span');
+      chip.className = 'keyword-chip';
+      chip.innerHTML = `
+        <span>${escapeHtml(kw)}</span>
+        <button type="button" class="keyword-chip-remove" title="Remove keyword">✕</button>
+      `;
+
+      chip.querySelector('.keyword-chip-remove').addEventListener('click', (e) => {
+        e.stopPropagation();
+        keywordsList.splice(index, 1);
+        renderKeywordChips();
+        updateSimulator();
+      });
+
+      keywordChipsContainer.insertBefore(chip, keywordChipInput);
+    });
+  }
+
+  function addKeywordFromInput() {
+    const raw = keywordChipInput.value.trim();
+    if (!raw) return;
+
+    // Support comma-separated batch input
+    const parts = raw.split(/[,]+/);
+    parts.forEach(part => {
+      const cleaned = part.trim().toUpperCase();
+      if (cleaned && !keywordsList.includes(cleaned)) {
+        keywordsList.push(cleaned);
+      }
+    });
+
+    keywordChipInput.value = '';
+    renderKeywordChips();
+    updateSimulator();
+  }
+
+  if (keywordChipInput) {
+    keywordChipInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ',') {
+        e.preventDefault();
+        addKeywordFromInput();
+      } else if (e.key === 'Backspace' && keywordChipInput.value === '' && keywordsList.length > 0) {
+        keywordsList.pop();
+        renderKeywordChips();
+        updateSimulator();
+      }
+    });
+
+    keywordChipInput.addEventListener('blur', () => {
+      addKeywordFromInput();
+    });
+  }
+
+  // Trigger Radios
+  if (triggerKeywordRadio && triggerAllRadio) {
+    triggerKeywordRadio.addEventListener('change', () => {
+      keywordInputGroup.style.display = 'block';
+      updateSimulator();
+    });
+
+    triggerAllRadio.addEventListener('change', () => {
+      if (userPlan === 'free') {
+        showError('The "Any Comment" trigger is available exclusively on Pro and Elite plans. Upgrade your plan to activate.');
+        triggerKeywordRadio.checked = true;
+        keywordInputGroup.style.display = 'block';
+        return;
+      }
+      keywordInputGroup.style.display = 'none';
+      updateSimulator();
+    });
+  }
+
+  // Variable chip buttons in textareas
+  document.querySelectorAll('.variable-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const varTag = btn.getAttribute('data-var');
+      if (!varTag || !openingMessageInput) return;
+      const start = openingMessageInput.selectionStart;
+      const end = openingMessageInput.selectionEnd;
+      const text = openingMessageInput.value;
+      openingMessageInput.value = text.substring(0, start) + varTag + text.substring(end);
+      openingMessageInput.focus();
+      openingMessageInput.selectionStart = openingMessageInput.selectionEnd = start + varTag.length;
+      updateSimulator();
+    });
+  });
+
+  // Follow Gate Toggle
+  if (followGateToggle) {
+    followGateToggle.addEventListener('change', () => {
+      if (followGateToggle.checked && userPlan === 'free') {
+        showError('Follow-to-unlock is a premium feature exclusive to Pro and Elite plans. Upgrade to enable follower gates.');
+        followGateToggle.checked = false;
+        followGateFields.style.display = 'none';
+        updateSimulator();
+        return;
+      }
+      followGateFields.style.display = followGateToggle.checked ? 'block' : 'none';
+      updateSimulator();
+    });
+  }
+
+  // Public Reply Toggle
+  if (publicReplyToggle) {
+    publicReplyToggle.addEventListener('change', () => {
+      publicReplyInputWrap.style.display = publicReplyToggle.checked ? 'block' : 'none';
+      updateSimulator();
+    });
+  }
+
+  // ==========================================
+  // Resource Selector Tabs & Upload
+  // ==========================================
+  document.querySelectorAll('.resource-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.resource-tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const resType = btn.getAttribute('data-res-type');
+      currentResourceType = resType;
+
+      if (resType === 'url') {
+        resUrlPanel.style.display = 'block';
+        resUploadPanel.style.display = 'none';
+        resUrlLabel.textContent = 'Destination Website Link';
+        deliveryUrlInput.placeholder = 'https://yourbrand.com/special-deal';
+        resDriveNotice.style.display = 'none';
+        deliveryButtonInput.placeholder = 'Open Website ↗';
+      } else if (resType === 'drive') {
+        resUrlPanel.style.display = 'block';
+        resUploadPanel.style.display = 'none';
+        resUrlLabel.textContent = 'Google Drive / Cloud Shareable Link';
+        deliveryUrlInput.placeholder = 'https://drive.google.com/file/d/.../view?usp=sharing';
+        resDriveNotice.style.display = 'block';
+        deliveryButtonInput.placeholder = 'Open Google Drive 📁';
+      } else if (resType === 'image') {
+        resUrlPanel.style.display = 'none';
+        resUploadPanel.style.display = 'block';
+        resourceFileInput.accept = 'image/jpeg,image/png,image/webp,image/gif';
+        document.getElementById('dropzonePrompt').textContent = 'Click to upload Image (JPG, PNG, WEBP, GIF)';
+        document.getElementById('dropzoneTypes').textContent = 'Images up to 10MB';
+        deliveryButtonInput.placeholder = 'View Image 🖼️';
+      } else if (resType === 'document') {
+        resUrlPanel.style.display = 'none';
+        resUploadPanel.style.display = 'block';
+        resourceFileInput.accept = 'application/pdf';
+        document.getElementById('dropzonePrompt').textContent = 'Click to upload PDF Document';
+        document.getElementById('dropzoneTypes').textContent = 'PDF files up to 10MB';
+        deliveryButtonInput.placeholder = 'Download PDF 📄';
+      }
+
+      updateSimulator();
+    });
+  });
+
+  // Dropzone click & drag handling
+  if (uploadDropzone && resourceFileInput) {
+    uploadDropzone.addEventListener('click', () => resourceFileInput.click());
+
+    uploadDropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      uploadDropzone.classList.add('dragover');
+    });
+
+    uploadDropzone.addEventListener('dragleave', () => {
+      uploadDropzone.classList.remove('dragover');
+    });
+
+    uploadDropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      uploadDropzone.classList.remove('dragover');
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        handleFileUpload(e.dataTransfer.files[0]);
+      }
+    });
+
+    resourceFileInput.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files[0]) {
+        handleFileUpload(e.target.files[0]);
+      }
+    });
+  }
+
+  function handleFileUpload(file) {
+    if (!file) return;
+
+    if (file.size > 10 * 1024 * 1024) {
+      showError('File is too large. Maximum file size is 10MB.');
+      return;
+    }
+
+    const progressContainer = document.getElementById('uploadProgressContainer');
+    const progressBar = document.getElementById('uploadProgressBar');
+    const progressPercent = document.getElementById('uploadPercent');
+
+    progressContainer.style.display = 'block';
+    progressBar.style.width = '30%';
+    progressPercent.textContent = '30%';
+
+    const reader = new FileReader();
+    reader.onload = async function (e) {
+      const base64Data = e.target.result;
+      progressBar.style.width = '70%';
+      progressPercent.textContent = '70%';
+
+      try {
+        const res = await fetch('/api/automations/upload-resource', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...window.getAuthHeaders()
+          },
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            fileName: file.name,
+            fileType: file.type,
+            fileData: base64Data
+          })
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Failed to upload file');
+
+        progressBar.style.width = '100%';
+        progressPercent.textContent = '100%';
+        setTimeout(() => { progressContainer.style.display = 'none'; }, 500);
+
+        uploadedResourceData = data;
+        uploadedFileCard.style.display = 'flex';
+        uploadedFileName.textContent = data.fileName;
+        uploadedFileSize.textContent = (data.fileSize / (1024 * 1024)).toFixed(2) + ' MB';
+        uploadDropzone.style.display = 'none';
+
+        updateSimulator();
+      } catch (err) {
+        progressContainer.style.display = 'none';
+        showError('Upload failed: ' + err.message);
+      }
+    };
+    reader.readAsDataURL(file);
+  }
+
+  if (removeUploadedFileBtn) {
+    removeUploadedFileBtn.addEventListener('click', () => {
+      uploadedResourceData = null;
+      uploadedFileCard.style.display = 'none';
+      uploadDropzone.style.display = 'block';
+      resourceFileInput.value = '';
+      updateSimulator();
+    });
+  }
+
+  // ==========================================
+  // Live Interaction Simulator
+  // ==========================================
   function updateSimulator() {
     const isAll = triggerAllRadio ? triggerAllRadio.checked : false;
-    const kw = keywordInput.value.trim() || 'LINK';
-    const dm = dmMessageInput.value.trim() || 'Hey! Thanks for commenting. Here is your direct link: https://yourbrand.com/deal 🔥';
-    const reply = publicReplyInput.value.trim();
+    const primaryKw = keywordsList.length > 0 ? keywordsList[0] : 'LINK';
+    const acct = userAccounts.find(a => a.id === accountSelect.value) || userAccounts[0];
+    const username = acct ? acct.username : 'yourpage';
 
+    // Top Header
+    if (simAccountHandle) simAccountHandle.textContent = `@${username}`;
+    if (simReelTitle) {
+      simReelTitle.textContent = selectedReel ? (selectedReel.caption || 'Linked Instagram Reel') : 'No Reel Selected';
+    }
+    if (simReelThumb) {
+      simReelThumb.src = (selectedReel && selectedReel.thumbnailUrl) ? selectedReel.thumbnailUrl : 'https://placehold.co/60x80/1a1a24/6366f1?text=Reel';
+    }
+
+    // Comment bubble
     if (simComment) {
       simComment.innerHTML = isAll
         ? '💬 "Awesome video! 🔥"'
-        : `💬 "Can you send the <strong>${kw.split(',')[0].trim().toUpperCase()}</strong>?"`;
+        : `💬 "Can you send the <strong style="color:var(--accent-light);">${escapeHtml(primaryKw)}</strong>?"`;
     }
+
+    // Public reply
+    const hasPublicReply = publicReplyToggle && publicReplyToggle.checked;
+    const publicReplyText = automationPublicReplyInput ? automationPublicReplyInput.value.trim() : '';
     if (simPublicReply) {
-      if (reply) {
+      if (hasPublicReply && publicReplyText) {
         simPublicReply.style.display = 'block';
-        simPublicReply.textContent = `↳ @yourpage: "${reply}"`;
+        simPublicReply.textContent = `↳ @${username}: "${publicReplyText}"`;
       } else {
         simPublicReply.style.display = 'none';
       }
     }
-    if (simDm) {
-      simDm.textContent = dm;
+
+    // Opening DM Bubble
+    const openingMsg = openingMessageInput ? openingMessageInput.value.trim() : '';
+    const openingBtnText = openingButtonInput ? openingButtonInput.value.trim() : '';
+    if (simOpeningDm) {
+      simOpeningDm.childNodes[0].textContent = (openingMsg || "Hey Creator! Thanks for checking out our Reel. Here's what you requested:") + ' ';
+    }
+    if (simOpeningBtn) {
+      if (openingBtnText) {
+        simOpeningBtn.style.display = 'inline-flex';
+        simOpeningBtn.textContent = openingBtnText;
+      } else {
+        simOpeningBtn.style.display = 'none';
+      }
+    }
+
+    // Follow Gate Card
+    const isFollowGate = followGateToggle && followGateToggle.checked;
+    if (simGateDisplay) {
+      if (isFollowGate) {
+        simGateDisplay.style.display = 'flex';
+        const gateMsg = followGateMessageInput ? followGateMessageInput.value.trim() : '';
+        const profileBtn = followGateProfileBtnInput ? followGateProfileBtnInput.value.trim() : '';
+        const confirmBtn = followGateConfirmBtnInput ? followGateConfirmBtnInput.value.trim() : '';
+
+        if (simGateMsgDisplay) simGateMsgDisplay.textContent = gateMsg || `Follow @${username} to unlock:`;
+        if (simGateProfileBtn) simGateProfileBtn.textContent = profileBtn || 'Follow Profile 👤';
+        if (simGateConfirmBtn) simGateConfirmBtn.textContent = confirmBtn || "I've Followed ✓";
+      } else {
+        simGateDisplay.style.display = 'none';
+      }
+    }
+
+    // Final Delivery Bubble
+    const deliveryMsg = deliveryMessageInput ? deliveryMessageInput.value.trim() : '';
+    const deliveryBtnText = deliveryButtonInput ? deliveryButtonInput.value.trim() : '';
+    if (simDeliveryMsgText) {
+      simDeliveryMsgText.textContent = deliveryMsg || 'Here is your link! Click below to access:';
+    }
+    if (simDeliveryBtn) {
+      if (currentResourceType === 'image' && uploadedResourceData) {
+        simDeliveryBtn.textContent = `🖼️ ${deliveryBtnText || 'View Image'}`;
+      } else if (currentResourceType === 'document' && uploadedResourceData) {
+        simDeliveryBtn.textContent = `📄 ${deliveryBtnText || 'Download PDF'}`;
+      } else {
+        simDeliveryBtn.textContent = deliveryBtnText || 'Open Free Guide ↗';
+      }
+    }
+
+    // Free plan branding tag
+    if (simBrandingTag) {
+      simBrandingTag.style.display = userPlan === 'free' ? 'block' : 'none';
     }
   }
 
-  [keywordInput, dmMessageInput, publicReplyInput].forEach(el => {
+  // Bind live updates
+  [
+    openingMessageInput,
+    openingButtonInput,
+    followGateMessageInput,
+    followGateProfileBtnInput,
+    followGateConfirmBtnInput,
+    deliveryMessageInput,
+    deliveryUrlInput,
+    deliveryButtonInput,
+    automationPublicReplyInput
+  ].forEach(el => {
     if (el) el.addEventListener('input', updateSimulator);
   });
 
-  if (triggerKeywordRadio && triggerAllRadio) {
-    triggerKeywordRadio.addEventListener('change', () => {
-      keywordGroup.style.display = 'block';
-      updateSimulator();
-    });
-    triggerAllRadio.addEventListener('change', () => {
-      keywordGroup.style.display = 'none';
-      updateSimulator();
-    });
-  }
-
-  // Reel target toggle
-  if (targetAllBtn && targetSpecificBtn && reelPickerBox) {
-    targetAllBtn.addEventListener('click', () => {
-      targetAllBtn.classList.add('active');
-      targetAllBtn.style.borderColor = 'var(--accent)';
-      targetSpecificBtn.classList.remove('active');
-      targetSpecificBtn.style.borderColor = 'transparent';
-      reelPickerBox.style.display = 'none';
-      clearSelectedReel();
-    });
-
-    targetSpecificBtn.addEventListener('click', () => {
-      targetSpecificBtn.classList.add('active');
-      targetSpecificBtn.style.borderColor = 'var(--accent)';
-      targetAllBtn.classList.remove('active');
-      targetAllBtn.style.borderColor = 'transparent';
-      reelPickerBox.style.display = 'block';
-      loadReelsForSelectedAccount(false);
-    });
-  }
-
-  function clearSelectedReel() {
-    selectedMediaIdInput.value = '';
-    selectedMediaUrlInput.value = '';
-    if (selectedReelPreview) selectedReelPreview.style.display = 'none';
-    if (simReelHeader) simReelHeader.textContent = 'Instagram Reel';
-    document.querySelectorAll('.reel-choice-card').forEach(c => c.classList.remove('selected'));
-  }
-
-  if (clearReelSelectionBtn) {
-    clearReelSelectionBtn.addEventListener('click', clearSelectedReel);
-  }
-
-  // Load published reels from Meta API
+  // ==========================================
+  // Reels Gallery & Selection (Specific Media Only)
+  // ==========================================
   async function loadReelsForSelectedAccount(force = false) {
     const igUserId = accountSelect.value;
     if (!igUserId) return;
 
-    reelPickerGrid.innerHTML = '<div style="text-align:center; padding:24px; color:var(--ink-muted); grid-column:1/-1;">Loading reels & posts from Instagram…</div>';
+    if (refreshReelsIcon) refreshReelsIcon.style.animation = 'spin 0.8s linear infinite';
+    if (reelGalleryError) reelGalleryError.style.display = 'none';
+
+    // Render 6 skeleton cards while loading
+    reelPickerGrid.innerHTML = `
+      <div class="reel-skeleton-card"></div>
+      <div class="reel-skeleton-card"></div>
+      <div class="reel-skeleton-card"></div>
+      <div class="reel-skeleton-card"></div>
+      <div class="reel-skeleton-card"></div>
+      <div class="reel-skeleton-card"></div>
+    `;
 
     try {
       const res = await fetch(`/api/instagram/accounts/${encodeURIComponent(igUserId)}/reels${force ? '?refresh=1' : ''}`, {
         headers: window.getAuthHeaders(),
         credentials: 'same-origin'
       });
+
+      if (refreshReelsIcon) refreshReelsIcon.style.animation = 'none';
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to load posts from Instagram');
+      }
+
       const data = await res.json().catch(() => ({}));
       loadedReels = data.reels || [];
 
@@ -164,7 +543,12 @@
       }
 
       if (loadedReels.length === 0) {
-        reelPickerGrid.innerHTML = '<div style="text-align:center; padding:24px; color:var(--ink-muted); grid-column:1/-1;">No Reels or Posts found for this account. Create one on Instagram to target it specifically!</div>';
+        reelPickerGrid.innerHTML = `
+          <div style="text-align:center; padding:32px 16px; color:var(--ink-secondary); grid-column:1/-1;">
+            <p style="font-size:0.92rem; margin-bottom:8px;">No Reels or Posts found on this Instagram account.</p>
+            <small style="color:var(--ink-muted);">Publish a Reel or post on Instagram, then click Refresh Reels.</small>
+          </div>
+        `;
         return;
       }
 
@@ -176,13 +560,16 @@
           card.classList.add('selected');
         }
 
-        const thumb = reel.thumbnailUrl || 'https://placehold.co/180x320/121217/6366f1?text=Reel';
-        const title = (reel.caption || 'Instagram Post').slice(0, 36);
+        const thumb = reel.thumbnailUrl || 'https://placehold.co/180x320/121217/6366f1?text=Post';
         const isReel = (reel.mediaType === 'VIDEO') || (reel.mediaProductType === 'REELS');
+        const pubDate = reel.timestamp ? new Date(reel.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '';
 
         card.innerHTML = `
-          <img src="${thumb}" class="reel-thumb-img" alt="Reel thumbnail" loading="lazy" />
-          <div class="reel-choice-badge">${isReel ? '🎬' : '📸'} ${reel.commentsCount || 0}</div>
+          <img src="${escapeHtml(thumb)}" class="reel-thumb-img" alt="Reel thumbnail" loading="lazy" />
+          <div class="reel-choice-badge">
+            <span>${isReel ? '🎬 Reel' : '📸 Post'}</span>
+            <span>💬 ${reel.commentsCount || 0}</span>
+          </div>
         `;
 
         card.addEventListener('click', () => {
@@ -193,15 +580,24 @@
 
         reelPickerGrid.appendChild(card);
       });
-    } catch (e) {
-      reelPickerGrid.innerHTML = '<div style="text-align:center; padding:24px; color:var(--rose); grid-column:1/-1;">Failed to load reels. Check your Instagram connection.</div>';
+    } catch (err) {
+      if (refreshReelsIcon) refreshReelsIcon.style.animation = 'none';
+      reelPickerGrid.innerHTML = '';
+      if (reelGalleryError) {
+        document.getElementById('reelGalleryErrorText').textContent = err.message || 'Unable to connect to Instagram API.';
+        reelGalleryError.style.display = 'block';
+      }
     }
   }
 
   function selectReel(reel) {
     if (!reel) return;
+    selectedReel = reel;
     selectedMediaIdInput.value = reel.id;
     selectedMediaUrlInput.value = reel.permalink || '';
+    selectedMediaTitleInput.value = reel.caption || 'Instagram Reel';
+    selectedMediaThumbnailInput.value = reel.thumbnailUrl || '';
+    selectedMediaTypeInput.value = reel.mediaType || 'VIDEO';
 
     if (selectedReelPreview) {
       selectedReelPreview.style.display = 'flex';
@@ -220,101 +616,161 @@
       }
     }
 
-    if (simReelHeader) {
-      simReelHeader.textContent = reel.caption ? `Reel: "${reel.caption.slice(0, 20)}…"` : 'Instagram Reel';
-    }
+    updateSimulator();
   }
 
-  if (refreshReelsBtn) {
-    refreshReelsBtn.addEventListener('click', () => loadReelsForSelectedAccount(true));
+  function clearSelectedReel() {
+    selectedReel = null;
+    selectedMediaIdInput.value = '';
+    selectedMediaUrlInput.value = '';
+    selectedMediaTitleInput.value = '';
+    selectedMediaThumbnailInput.value = '';
+    selectedMediaTypeInput.value = '';
+
+    if (selectedReelPreview) selectedReelPreview.style.display = 'none';
+    document.querySelectorAll('.reel-choice-card').forEach(c => c.classList.remove('selected'));
+    updateSimulator();
   }
+
+  if (clearReelSelectionBtn) clearReelSelectionBtn.addEventListener('click', clearSelectedReel);
+  if (refreshReelsBtn) refreshReelsBtn.addEventListener('click', () => loadReelsForSelectedAccount(true));
+  if (retryReelsBtn) retryReelsBtn.addEventListener('click', () => loadReelsForSelectedAccount(true));
 
   if (accountSelect) {
     accountSelect.addEventListener('change', () => {
-      if (targetSpecificBtn.classList.contains('active')) {
-        loadReelsForSelectedAccount(false);
-      }
+      clearSelectedReel();
+      loadReelsForSelectedAccount(false);
+      updateSimulator();
     });
   }
 
-  // Open & Close Builder Form
+  // ==========================================
+  // Open / Edit / Close Builder Form
+  // ==========================================
   function openBuilder(automation = null) {
     if (userAccounts.length === 0) {
-      showError('Please connect an Instagram account first.');
+      showError('Please connect an Instagram account first on the Instagram Accounts page.');
       return;
     }
 
-    // Reset all form inputs completely so old/deleted data never leaks
     automationForm.reset();
     clearSelectedReel();
+    uploadedResourceData = null;
+    if (uploadedFileCard) uploadedFileCard.style.display = 'none';
+    if (uploadDropzone) uploadDropzone.style.display = 'block';
 
-    automationFormCard.hidden = false;
     automationFormCard.style.display = 'block';
+    automationFormCard.hidden = false;
     automationFormCard.scrollIntoView({ behavior: 'smooth' });
 
     if (automation) {
-      // EDIT MODE
+      // Edit Mode
       document.getElementById('formHeadingTitle').textContent = 'Edit Automation';
       automationIdInput.value = automation.id || '';
       accountSelect.value = automation.instagramUserId || (userAccounts[0] && userAccounts[0].id) || '';
-      keywordInput.value = (automation.keyword === '*' ? '' : (automation.keyword || ''));
-      dmMessageInput.value = automation.dmMessage || '';
-      publicReplyInput.value = automation.replyTemplate || '';
-      document.getElementById('automationEnabledCheckbox').checked = Boolean(automation.enabled);
 
+      // Keywords
+      if (Array.isArray(automation.keywords) && automation.keywords.length > 0) {
+        keywordsList = [...automation.keywords];
+      } else if (automation.keyword && automation.keyword !== '*') {
+        keywordsList = automation.keyword.split(',').map(s => s.trim()).filter(Boolean);
+      } else {
+        keywordsList = ['LINK'];
+      }
+      renderKeywordChips();
+
+      // Trigger type
       if (automation.triggerType === 'all' || automation.keyword === '*') {
         triggerAllRadio.checked = true;
-        keywordGroup.style.display = 'none';
+        keywordInputGroup.style.display = 'none';
       } else {
         triggerKeywordRadio.checked = true;
-        keywordGroup.style.display = 'block';
+        keywordInputGroup.style.display = 'block';
       }
 
-      if (automation.mediaId || automation.mediaUrl) {
-        targetSpecificBtn.classList.add('active');
-        targetSpecificBtn.style.borderColor = 'var(--accent)';
-        targetAllBtn.classList.remove('active');
-        targetAllBtn.style.borderColor = 'transparent';
-        reelPickerBox.style.display = 'block';
-
-        selectedMediaIdInput.value = automation.mediaId || '';
-        selectedMediaUrlInput.value = automation.mediaUrl || '';
-
-        // Pre-fill selected reel showcase
+      // Pre-select media
+      if (automation.mediaId) {
         selectReel({
           id: automation.mediaId,
-          permalink: automation.mediaUrl,
-          caption: 'Linked Instagram Reel',
-          thumbnailUrl: 'https://placehold.co/180x320/121217/6366f1?text=Reel'
+          permalink: automation.mediaUrl || '',
+          caption: automation.mediaTitle || 'Linked Instagram Reel',
+          thumbnailUrl: automation.mediaThumbnail || 'https://placehold.co/180x320/121217/6366f1?text=Reel',
+          mediaType: automation.mediaType || 'VIDEO'
         });
-
-        loadReelsForSelectedAccount(false);
-      } else {
-        targetAllBtn.classList.add('active');
-        targetAllBtn.style.borderColor = 'var(--accent)';
-        targetSpecificBtn.classList.remove('active');
-        targetSpecificBtn.style.borderColor = 'transparent';
-        reelPickerBox.style.display = 'none';
       }
+
+      // Populate flow if present, or legacy dm_message
+      const flow = automation.flow || {};
+      openingMessageInput.value = flow.openingMessage || automation.dmMessage || '';
+      openingButtonInput.value = flow.openingButtonText || '';
+
+      // Follow gate
+      if (flow.followGate && flow.followGate.enabled) {
+        followGateToggle.checked = true;
+        followGateFields.style.display = 'block';
+        followGateMessageInput.value = flow.followGate.message || '';
+        followGateProfileBtnInput.value = flow.followGate.buttonText || '';
+        followGateConfirmBtnInput.value = flow.followGate.checkButtonText || '';
+      } else {
+        followGateToggle.checked = false;
+        followGateFields.style.display = 'none';
+      }
+
+      // Delivery
+      if (flow.delivery) {
+        deliveryMessageInput.value = flow.delivery.message || '';
+        deliveryUrlInput.value = flow.delivery.resourceUrl || '';
+        deliveryButtonInput.value = flow.delivery.buttonText || '';
+        const resType = flow.delivery.resourceType || 'url';
+        const targetTab = document.querySelector(`.resource-tab-btn[data-res-type="${resType}"]`);
+        if (targetTab) targetTab.click();
+      } else {
+        deliveryMessageInput.value = '';
+        deliveryUrlInput.value = '';
+        deliveryButtonInput.value = 'Open Link ↗';
+      }
+
+      // Public reply
+      if (automation.replyTemplate) {
+        publicReplyToggle.checked = true;
+        publicReplyInputWrap.style.display = 'block';
+        automationPublicReplyInput.value = automation.replyTemplate;
+      } else {
+        publicReplyToggle.checked = false;
+        publicReplyInputWrap.style.display = 'none';
+        automationPublicReplyInput.value = '';
+      }
+
+      automationEnabledCheckbox.checked = Boolean(automation.enabled);
+      loadReelsForSelectedAccount(false);
+
     } else {
-      // BRAND NEW AUTOMATION MODE
+      // Create Mode
       document.getElementById('formHeadingTitle').textContent = 'Create New Automation';
       automationIdInput.value = '';
-      keywordInput.value = '';
-      dmMessageInput.value = '';
-      publicReplyInput.value = 'Sent to your DM! Check inbox 📩';
-      document.getElementById('automationEnabledCheckbox').checked = true;
+      keywordsList = ['LINK'];
+      renderKeywordChips();
+
       triggerKeywordRadio.checked = true;
-      keywordGroup.style.display = 'block';
+      keywordInputGroup.style.display = 'block';
 
-      // Default: Specific Reel tab selected so creator sees their posts right away!
-      targetSpecificBtn.classList.add('active');
-      targetSpecificBtn.style.borderColor = 'var(--accent)';
-      targetAllBtn.classList.remove('active');
-      targetAllBtn.style.borderColor = 'transparent';
-      reelPickerBox.style.display = 'block';
+      openingMessageInput.value = "Hey {first_name}! Thanks for checking out our Reel. Here's the link you asked for:";
+      openingButtonInput.value = 'Send me the link 🚀';
 
-      // Load reels immediately for the default account
+      followGateToggle.checked = false;
+      followGateFields.style.display = 'none';
+
+      deliveryMessageInput.value = 'Here is your direct access:';
+      deliveryUrlInput.value = '';
+      deliveryButtonInput.value = 'Open Free Guide ↗';
+
+      publicReplyToggle.checked = true;
+      publicReplyInputWrap.style.display = 'block';
+      automationPublicReplyInput.value = 'Sent to your DM! Check inbox 📩';
+
+      automationEnabledCheckbox.checked = true;
+
+      // Select default account and load its reels
       if (userAccounts.length > 0) {
         accountSelect.value = userAccounts[0].id;
         loadReelsForSelectedAccount(false);
@@ -325,8 +781,8 @@
   }
 
   function closeBuilder() {
-    automationFormCard.hidden = true;
     automationFormCard.style.display = 'none';
+    automationFormCard.hidden = true;
     automationForm.reset();
     clearSelectedReel();
   }
@@ -336,7 +792,9 @@
   if (cancelFormBtn) cancelFormBtn.addEventListener('click', closeBuilder);
   if (cancelFormBtn2) cancelFormBtn2.addEventListener('click', closeBuilder);
 
-  // Form Submission
+  // ==========================================
+  // Form Submission & Persistence
+  // ==========================================
   if (automationForm) {
     automationForm.addEventListener('submit', async function (e) {
       e.preventDefault();
@@ -344,28 +802,59 @@
       const id = automationIdInput.value.trim();
       const igUserId = accountSelect.value || (userAccounts[0] && userAccounts[0].id);
       const isAll = triggerAllRadio.checked;
-      const kw = keywordInput.value.trim();
-      const dm = dmMessageInput.value.trim();
-      const reply = publicReplyInput.value.trim();
-      const enabled = document.getElementById('automationEnabledCheckbox').checked;
       const mediaId = selectedMediaIdInput.value.trim();
       const mediaUrl = selectedMediaUrlInput.value.trim();
+      const mediaTitle = selectedMediaTitleInput.value.trim();
+      const mediaThumbnail = selectedMediaThumbnailInput.value.trim();
+      const mediaType = selectedMediaTypeInput.value.trim();
 
-      if (!igUserId) {
-        showError('Please connect an Instagram account first.');
-        return;
-      }
-      if (!isAll && !kw) {
-        showError('Please specify at least one trigger keyword (e.g. LINK).');
-        keywordInput.focus();
-        return;
-      }
-      if (!dm) {
-        showError('Please write your automated Direct Message.');
-        dmMessageInput.focus();
+      // Enforce Specific Reel/Post requirement
+      if (!mediaId) {
+        showError('Please click on a Reel or Post above to link this automation.');
         return;
       }
 
+      // Keyword requirement
+      if (!isAll && keywordsList.length === 0) {
+        showError('Please add at least one trigger keyword (e.g. LINK).');
+        keywordChipInput.focus();
+        return;
+      }
+
+      // Message requirement
+      const openingMsg = openingMessageInput.value.trim();
+      if (!openingMsg) {
+        showError('Please enter an opening Direct Message.');
+        openingMessageInput.focus();
+        return;
+      }
+
+      // Build structured conversation flow object
+      const flow = {
+        openingMessage: openingMsg,
+        openingButtonText: openingButtonInput.value.trim() || null,
+        followGate: {
+          enabled: followGateToggle ? followGateToggle.checked : false,
+          message: followGateMessageInput.value.trim() || null,
+          buttonText: followGateProfileBtnInput.value.trim() || null,
+          checkButtonText: followGateConfirmBtnInput.value.trim() || null,
+          profileUrl: `https://instagram.com/${(userAccounts.find(a => a.id === igUserId) || {}).username || ''}`
+        },
+        delivery: {
+          message: deliveryMessageInput.value.trim() || 'Here is your resource:',
+          resourceType: currentResourceType,
+          resourceUrl: uploadedResourceData ? uploadedResourceData.url : (deliveryUrlInput.value.trim() || null),
+          resourceName: uploadedResourceData ? uploadedResourceData.fileName : null,
+          buttonText: deliveryButtonInput.value.trim() || 'Open Resource ↗'
+        }
+      };
+
+      const publicReply = (publicReplyToggle && publicReplyToggle.checked)
+        ? automationPublicReplyInput.value.trim()
+        : '';
+      const enabled = automationEnabledCheckbox.checked;
+
+      // Prevent duplicate clicks
       saveBtn.disabled = true;
       saveBtn.innerHTML = '<span>Saving automation…</span>';
 
@@ -382,13 +871,18 @@
           credentials: 'same-origin',
           body: JSON.stringify({
             instagramUserId: igUserId,
-            keyword: isAll ? '*' : kw,
+            keyword: isAll ? '*' : keywordsList.join(', '),
+            keywords: isAll ? [] : keywordsList,
             triggerType: isAll ? 'all' : 'keyword',
-            dmMessage: dm,
-            replyTemplate: reply,
+            dmMessage: openingMsg,
+            replyTemplate: publicReply,
             enabled,
-            mediaId: mediaId || null,
-            mediaUrl: mediaUrl || null
+            mediaId,
+            mediaUrl,
+            mediaTitle,
+            mediaThumbnail,
+            mediaType,
+            flow
           })
         });
 
@@ -407,16 +901,17 @@
           } else {
             userAutomations.unshift(saved);
           }
-        } else {
-          // Re-fetch clean list from backend
-          const autoRes = await fetch('/api/automations', { headers: window.getAuthHeaders(), credentials: 'same-origin' });
-          const autoData = await autoRes.json().catch(() => ({}));
-          userAutomations = autoData.automations || [];
         }
+
+        // Cache update
+        try {
+          sessionStorage.setItem('comment2dm_cached_automations', JSON.stringify(userAutomations));
+        } catch (_) {}
 
         renderAutomations();
         closeBuilder();
         showNotice(id ? 'Automation updated successfully! ⚡' : 'Automation created and active! ⚡');
+
       } catch (err) {
         showError('Network error. Unable to save automation.');
       } finally {
@@ -426,14 +921,20 @@
     });
   }
 
-  // Render Automations List
+  // ==========================================
+  // Render Automations List (Fixed Empty State Bug)
+  // ==========================================
   function renderAutomations() {
     automationsListGrid.innerHTML = '';
 
-    if (userAutomations.length === 0) {
+    // Bug Fix: Explicitly manage both .style.display and [hidden] attribute
+    if (!userAutomations || userAutomations.length === 0) {
+      automationsEmptyState.style.display = 'block';
       automationsEmptyState.hidden = false;
       return;
     }
+
+    automationsEmptyState.style.display = 'none';
     automationsEmptyState.hidden = true;
 
     userAutomations.forEach(auto => {
@@ -441,121 +942,125 @@
       card.className = 'apple-card';
       card.style.display = 'flex';
       card.style.flexDirection = 'column';
-      card.style.gap = '14px';
-      card.style.padding = '20px 24px';
+      card.style.gap = '16px';
+      card.style.padding = '22px 26px';
       card.id = `automation_card_${auto.id}`;
 
       const isAll = auto.triggerType === 'all' || auto.keyword === '*';
       const statusBadge = auto.enabled
-        ? `<span class="plan-badge pro" style="color:var(--emerald);">● Active</span>`
-        : `<span class="plan-badge free" style="color:var(--amber);">● Paused</span>`;
+        ? `<span class="status-pill status-connected"><span class="status-dot green"></span> Active</span>`
+        : `<span class="status-pill status-expired"><span class="status-dot amber"></span> Paused</span>`;
 
-      let targetHtml = `<span class="plan-badge free">🎬 All Reels & Posts</span>`;
-      if (auto.mediaId || auto.mediaUrl) {
-        const link = auto.mediaUrl
-          ? `<a href="${auto.mediaUrl}" target="_blank" rel="noopener" style="color:var(--accent-light); text-decoration:none; margin-left:6px;">View ↗</a>`
-          : '';
-        targetHtml = `<span class="plan-badge pro" style="background:rgba(99,102,241,0.12); color:var(--accent-light);">🎯 Specific Reel ${link}</span>`;
+      // Keywords tags
+      let keywordsHtml = '';
+      if (isAll) {
+        keywordsHtml = `<span class="plan-badge pro" style="font-size:0.72rem;">★ Any Comment</span>`;
+      } else {
+        const kws = Array.isArray(auto.keywords) && auto.keywords.length > 0
+          ? auto.keywords
+          : (auto.keyword ? auto.keyword.split(',') : ['LINK']);
+        keywordsHtml = kws.map(k => `<span class="keyword-chip" style="font-size:0.74rem; padding:2px 8px;">${escapeHtml(k.trim())}</span>`).join(' ');
       }
 
+      // Flow tags
+      const hasFollowGate = auto.flow?.followGate?.enabled;
+      const resType = auto.flow?.delivery?.resourceType || 'url';
+      const resTypeIcons = { url: '🔗 Link', drive: '📁 Drive', image: '🖼️ Image', document: '📄 PDF' };
+
+      const thumb = auto.mediaThumbnail || 'https://placehold.co/80x100/1e1e24/7655d9?text=Post';
+
       card.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
-          <div style="display:flex; align-items:center; gap:12px;">
-            <div style="width:40px; height:40px; border-radius:50%; background:var(--accent-gradient); display:flex; align-items:center; justify-content:center; color:#fff; font-size:1.1rem; font-weight:700;">
-              ${(auto.username || 'I').charAt(0).toUpperCase()}
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+          <!-- Left: Linked Reel Preview & Metadata -->
+          <div style="display:flex; align-items:center; gap:16px;">
+            <div style="width:48px; height:64px; border-radius:8px; overflow:hidden; background:var(--surface-raised); border:1px solid var(--glass-border); flex-shrink:0;">
+              <img src="${escapeHtml(thumb)}" alt="Reel" style="width:100%; height:100%; object-fit:cover;" />
             </div>
+
             <div>
-              <div style="display:flex; align-items:center; gap:8px;">
-                <strong style="color:#fff; font-size:0.95rem;">@${auto.username || 'Instagram'}</strong>
+              <div style="display:flex; align-items:center; gap:10px; margin-bottom:4px; flex-wrap:wrap;">
+                <strong style="color:var(--ink); font-size:1.05rem;">@${escapeHtml(auto.username || 'creator')}</strong>
                 ${statusBadge}
-                ${targetHtml}
+                ${auto.mediaUrl ? `<a href="${escapeHtml(auto.mediaUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent); font-size:0.8rem; text-decoration:none;">View Reel ↗</a>` : ''}
               </div>
-              <div style="font-size:0.8rem; color:var(--ink-muted); margin-top:2px;">
-                Trigger: ${isAll ? '<strong>Any Comment</strong>' : `Keyword <code>"${auto.keyword}"</code>`}
+              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:0.84rem; color:var(--ink-secondary);">
+                <span>Trigger:</span>
+                ${keywordsHtml}
               </div>
             </div>
           </div>
 
-          <div style="display:flex; align-items:center; gap:8px;">
+          <!-- Right: Actions -->
+          <div style="display:flex; align-items:center; gap:10px;">
             <button class="btn btn-ghost btn-sm toggle-auto-btn" style="padding:6px 14px;">
               ${auto.enabled ? 'Pause' : 'Activate'}
             </button>
             <button class="btn btn-ghost btn-sm edit-auto-btn" style="padding:6px 14px;">
-              Edit
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+              <span>Edit</span>
             </button>
-            <button class="btn btn-ghost btn-sm delete-auto-btn" style="padding:6px 14px; color:var(--rose);">
-              Delete
+            <button class="btn btn-danger-ghost btn-sm delete-auto-btn" style="padding:6px 14px;" title="Delete this automation">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
+              <span>Delete</span>
             </button>
           </div>
         </div>
 
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:14px; background:rgba(0,0,0,0.2); padding:12px 16px; border-radius:var(--radius-s); font-size:0.84rem;">
+        <!-- Flow Summary Box -->
+        <div style="display:grid; grid-template-columns: 1.2fr 0.8fr; gap:14px; background:var(--surface-hover); border:1px solid var(--glass-border); border-radius:var(--radius-m); padding:14px 18px; font-size:0.84rem;">
           <div>
-            <span style="color:var(--ink-muted); display:block; margin-bottom:4px; font-size:0.75rem; text-transform:uppercase;">📩 Automated Direct Message</span>
-            <div style="color:var(--ink-primary); line-height:1.4; word-break:break-word;">
+            <div style="color:var(--ink-muted); font-size:0.75rem; text-transform:uppercase; margin-bottom:4px; font-weight:700;">
+              📩 Direct Message Flow
+            </div>
+            <div style="color:var(--ink); line-height:1.4;">
               ${escapeHtml(auto.dmMessage || 'No message set')}
             </div>
+            <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+              ${hasFollowGate ? '<span class="plan-badge pro" style="font-size:0.7rem;">🔒 Follow-to-Unlock Active</span>' : ''}
+              <span class="plan-badge" style="font-size:0.7rem;">📦 ${resTypeIcons[resType] || 'Resource'}</span>
+            </div>
           </div>
+
           <div>
-            <span style="color:var(--ink-muted); display:block; margin-bottom:4px; font-size:0.75rem; text-transform:uppercase;">💬 Public Comment Reply</span>
-            <div style="color:var(--ink-secondary); line-height:1.4; word-break:break-word;">
+            <div style="color:var(--ink-muted); font-size:0.75rem; text-transform:uppercase; margin-bottom:4px; font-weight:700;">
+              💬 Public Comment Reply
+            </div>
+            <div style="color:var(--ink-secondary); line-height:1.4;">
               ${auto.replyTemplate ? `↳ "${escapeHtml(auto.replyTemplate)}"` : '<em style="color:var(--ink-muted);">None (DM only)</em>'}
             </div>
           </div>
         </div>
       `;
 
-      // Toggle Active / Paused
+      // Toggle Pause/Activate
       card.querySelector('.toggle-auto-btn').addEventListener('click', async () => {
-        const newEnabled = !auto.enabled;
+        const nextState = !auto.enabled;
         try {
           await fetch(`/api/automations/${encodeURIComponent(auto.id)}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json', ...window.getAuthHeaders() },
             credentials: 'same-origin',
-            body: JSON.stringify({ enabled: newEnabled })
+            body: JSON.stringify({ enabled: nextState })
           });
-          auto.enabled = newEnabled;
+          auto.enabled = nextState;
           renderAutomations();
-          showNotice(newEnabled ? 'Automation activated! ⚡' : 'Automation paused.');
-        } catch (e) {
-          showError('Failed to update status.');
+          showNotice(nextState ? 'Automation activated! ⚡' : 'Automation paused.');
+        } catch (_) {
+          showError('Failed to change status.');
         }
       });
 
-      // Edit
+      // Edit Button
       card.querySelector('.edit-auto-btn').addEventListener('click', () => {
         openBuilder(auto);
       });
 
-      // Delete
-      card.querySelector('.delete-auto-btn').addEventListener('click', async () => {
-        if (!confirm('Are you sure you want to delete this automation? It will permanently stop replying to comments.')) return;
-        try {
-          const res = await fetch(`/api/automations/${encodeURIComponent(auto.id)}`, {
-            method: 'DELETE',
-            headers: window.getAuthHeaders(),
-            credentials: 'same-origin'
-          });
-          if (!res.ok) {
-            const errData = await res.json().catch(() => ({}));
-            throw new Error(errData.error || 'Failed to delete');
-          }
-
-          // Immediately remove from memory array and update cache
-          userAutomations = userAutomations.filter(a => String(a.id) !== String(auto.id));
-          try { sessionStorage.setItem('comment2dm_cached_automations', JSON.stringify(userAutomations)); } catch (_) {}
-
-          // If currently editing this automation, close builder immediately
-          if (automationIdInput.value === String(auto.id)) {
-            closeBuilder();
-          }
-
-          // Instantly re-render without page reload
-          renderAutomations();
-          showNotice('Automation deleted successfully.');
-        } catch (e) {
-          showError('Failed to delete automation.');
+      // Delete Button (Opens custom confirmation modal)
+      card.querySelector('.delete-auto-btn').addEventListener('click', () => {
+        pendingDeleteId = auto.id;
+        if (deleteModal) {
+          deleteModal.classList.add('show');
+          deleteModal.setAttribute('aria-hidden', 'false');
         }
       });
 
@@ -563,18 +1068,68 @@
     });
   }
 
-  function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+  // Delete Modal Confirmation Handlers
+  if (cancelDeleteBtn && deleteModal) {
+    cancelDeleteBtn.addEventListener('click', () => {
+      deleteModal.classList.remove('show');
+      deleteModal.setAttribute('aria-hidden', 'true');
+      pendingDeleteId = null;
+    });
+
+    deleteModal.addEventListener('click', (e) => {
+      if (e.target === deleteModal) {
+        deleteModal.classList.remove('show');
+        deleteModal.setAttribute('aria-hidden', 'true');
+        pendingDeleteId = null;
+      }
+    });
   }
 
+  if (confirmDeleteBtn) {
+    confirmDeleteBtn.addEventListener('click', async () => {
+      if (!pendingDeleteId) return;
+
+      confirmDeleteBtn.disabled = true;
+      confirmDeleteBtn.textContent = 'Deleting…';
+
+      try {
+        const res = await fetch(`/api/automations/${encodeURIComponent(pendingDeleteId)}`, {
+          method: 'DELETE',
+          headers: window.getAuthHeaders(),
+          credentials: 'same-origin'
+        });
+
+        if (!res.ok) throw new Error('Failed to delete automation.');
+
+        userAutomations = userAutomations.filter(a => String(a.id) !== String(pendingDeleteId));
+        try {
+          sessionStorage.setItem('comment2dm_cached_automations', JSON.stringify(userAutomations));
+        } catch (_) {}
+
+        deleteModal.classList.remove('show');
+        deleteModal.setAttribute('aria-hidden', 'true');
+        pendingDeleteId = null;
+
+        renderAutomations();
+        showNotice('Automation deleted successfully.');
+      } catch (err) {
+        showError('Delete failed: ' + err.message);
+      } finally {
+        confirmDeleteBtn.disabled = false;
+        confirmDeleteBtn.textContent = 'Delete Automation';
+      }
+    });
+  }
+
+  // ==========================================
+  // Initialization & Cache Hydration
+  // ==========================================
   function updateAccountSelectUi() {
     if (userAccounts.length === 0) {
-      if (noAccountWarning) noAccountWarning.hidden = false;
+      if (noAccountWarning) noAccountWarning.style.display = 'block';
       if (openCreateBtn) openCreateBtn.disabled = true;
     } else {
-      if (noAccountWarning) noAccountWarning.hidden = true;
+      if (noAccountWarning) noAccountWarning.style.display = 'none';
       if (openCreateBtn) openCreateBtn.disabled = false;
       accountSelect.innerHTML = '';
       userAccounts.forEach(acct => {
@@ -586,7 +1141,6 @@
     }
   }
 
-  // Initial Data Load (Instant paint from cache + fast concurrent background refresh)
   async function init() {
     // 0. Paint cached state immediately (0ms latency on page switch)
     try {
@@ -603,30 +1157,31 @@
     } catch (_) {}
 
     try {
-      // Fast concurrent fetch (1 round trip instead of 2 sequential)
-      const [acctRes, autoRes] = await Promise.all([
-        fetch('/api/instagram/accounts', {
-          headers: window.getAuthHeaders(),
-          credentials: 'same-origin'
-        }),
-        fetch('/api/automations', {
-          headers: window.getAuthHeaders(),
-          credentials: 'same-origin'
-        })
+      // Fetch plan status, accounts, and automations concurrently
+      const [acctRes, autoRes, billRes] = await Promise.allSettled([
+        fetch('/api/instagram/accounts', { headers: window.getAuthHeaders(), credentials: 'same-origin' }),
+        fetch('/api/automations', { headers: window.getAuthHeaders(), credentials: 'same-origin' }),
+        fetch('/api/billing/status', { headers: window.getAuthHeaders(), credentials: 'same-origin' })
       ]);
 
-      if (acctRes.ok) {
-        const acctData = await acctRes.json().catch(() => ({}));
+      if (acctRes.status === 'fulfilled' && acctRes.value.ok) {
+        const acctData = await acctRes.value.json().catch(() => ({}));
         userAccounts = acctData.accounts || [];
         sessionStorage.setItem('comment2dm_cached_accounts', JSON.stringify(userAccounts));
         updateAccountSelectUi();
       }
 
-      if (autoRes.ok) {
-        const autoData = await autoRes.json().catch(() => ({}));
+      if (autoRes.status === 'fulfilled' && autoRes.value.ok) {
+        const autoData = await autoRes.value.json().catch(() => ({}));
         userAutomations = autoData.automations || [];
         sessionStorage.setItem('comment2dm_cached_automations', JSON.stringify(userAutomations));
         renderAutomations();
+      }
+
+      if (billRes.status === 'fulfilled' && billRes.value.ok) {
+        const billData = await billRes.value.json().catch(() => ({}));
+        userPlan = billData.plan || 'free';
+        updateSimulator();
       }
 
       // Check URL query param e.g. ?action=new
@@ -634,9 +1189,9 @@
       if (params.get('action') === 'new') {
         openBuilder(null);
       }
-    } catch (e) {
+    } catch (_) {
       if (userAutomations.length === 0) {
-        showError('Unable to load automations data.');
+        renderAutomations();
       }
     }
   }

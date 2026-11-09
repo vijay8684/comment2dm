@@ -273,7 +273,7 @@ async function listReels(ownerUserId, instagramUserId, forceRefresh = false) {
   const accessToken = await getDecryptedTokenForAccount(ownerUserId, instagramUserId);
   const items = [];
   let nextUrl = new URL(`https://graph.instagram.com/${apiVersion}/${instagramUserId}/media`);
-  nextUrl.searchParams.set('fields', 'id,caption,media_type,media_product_type,permalink,timestamp,thumbnail_url,comments_count,like_count');
+  nextUrl.searchParams.set('fields', 'id,caption,media_type,media_product_type,permalink,timestamp,thumbnail_url,media_url,comments_count,like_count');
   nextUrl.searchParams.set('limit', '50');
   nextUrl.searchParams.set('access_token', accessToken);
 
@@ -284,7 +284,7 @@ async function listReels(ownerUserId, instagramUserId, forceRefresh = false) {
       if (!response.ok) {
         // Fallback to Facebook Graph endpoint for Unified Login tokens
         const fbMediaUrl = new URL(`https://graph.facebook.com/${apiVersion}/${instagramUserId}/media`);
-        fbMediaUrl.searchParams.set('fields', 'id,caption,media_type,media_product_type,permalink,timestamp,thumbnail_url,comments_count,like_count');
+        fbMediaUrl.searchParams.set('fields', 'id,caption,media_type,media_product_type,permalink,timestamp,thumbnail_url,media_url,comments_count,like_count');
         fbMediaUrl.searchParams.set('limit', '50');
         fbMediaUrl.searchParams.set('access_token', accessToken);
         const fbRes = await fetch(fbMediaUrl);
@@ -302,7 +302,7 @@ async function listReels(ownerUserId, instagramUserId, forceRefresh = false) {
           caption: String(media.caption || ''),
           permalink: media.permalink || '',
           timestamp: media.timestamp || null,
-          thumbnailUrl: media.thumbnail_url || null,
+          thumbnailUrl: media.thumbnail_url || media.media_url || null,
           mediaType: media.media_product_type || media.media_type || 'POST',
           commentsCount: Number(media.comments_count) || 0,
           likeCount: Number(media.like_count) || 0
@@ -548,6 +548,63 @@ async function replyToComment(commentId, messageText, accessToken) {
   return data;
 }
 
+// 3. Follow-to-Unlock Meta Graph API Verification
+async function checkFollowStatus(instagramUserId, userIgsid, accessToken) {
+  if (!userIgsid || !accessToken) {
+    return {
+      supported: false,
+      isFollowing: false,
+      verified: false,
+      note: 'Commenter identifier or access token missing.'
+    };
+  }
+
+  try {
+    // Attempt 1: graph.instagram.com query for is_user_follow_business
+    const url1 = `https://graph.instagram.com/${apiVersion}/${userIgsid}?fields=is_user_follow_business&access_token=${accessToken}`;
+    let response = await fetch(url1);
+    let data = await response.json().catch(() => ({}));
+
+    if (response.ok && data && typeof data.is_user_follow_business === 'boolean') {
+      return {
+        supported: true,
+        isFollowing: data.is_user_follow_business,
+        verified: true,
+        note: data.is_user_follow_business ? 'Verified via official Meta Graph API' : 'Not currently following'
+      };
+    }
+
+    // Attempt 2: graph.facebook.com query
+    const url2 = `https://graph.facebook.com/${apiVersion}/${userIgsid}?fields=is_user_follow_business&access_token=${accessToken}`;
+    const response2 = await fetch(url2);
+    const data2 = await response2.json().catch(() => ({}));
+
+    if (response2.ok && data2 && typeof data2.is_user_follow_business === 'boolean') {
+      return {
+        supported: true,
+        isFollowing: data2.is_user_follow_business,
+        verified: true,
+        note: data2.is_user_follow_business ? 'Verified via official Meta Graph API' : 'Not currently following'
+      };
+    }
+
+    // Meta API restricts this query in standard comment context without an active 24h thread
+    return {
+      supported: false,
+      isFollowing: false,
+      verified: null,
+      note: 'Meta Graph API restricts automated follower checking in this context. Manual confirmation is available.'
+    };
+  } catch (err) {
+    return {
+      supported: false,
+      isFollowing: false,
+      verified: null,
+      note: 'Meta API follow verification unavailable.'
+    };
+  }
+}
+
 module.exports = {
   ensureConfiguration,
   exchangeCode,
@@ -564,5 +621,6 @@ module.exports = {
   getDecryptedTokenForAccount,
   getDecryptedTokenByInstagramUserId,
   sendPrivateReply,
-  replyToComment
+  replyToComment,
+  checkFollowStatus
 };

@@ -235,10 +235,12 @@ async function run(sql, params = []) {
   }
 
   // Automations insert: Handle standard server.js format
-  // INSERT INTO automations (owner_user_id, instagram_user_id, keyword, dm_message, enabled, created_at, updated_at, media_id, media_url, reply_template, trigger_type)
+  // INSERT INTO automations (owner_user_id, instagram_user_id, keyword, dm_message, enabled, created_at, updated_at, media_id, media_url, reply_template, trigger_type, flow, keywords, media_title, media_thumbnail, media_type)
   if (normalized.startsWith('insert into automations')) {
-    let ownerUserId, instagramUserId, keyword, dmMessage, enabled, createdAt, updatedAt, mediaId, mediaUrl, replyTemplate, triggerType;
-    if (params.length >= 9) {
+    let ownerUserId, instagramUserId, keyword, dmMessage, enabled, createdAt, updatedAt, mediaId, mediaUrl, replyTemplate, triggerType, flow, keywords, mediaTitle, mediaThumbnail, mediaType;
+    if (params.length >= 11) {
+      [ownerUserId, instagramUserId, keyword, dmMessage, enabled, createdAt, updatedAt, mediaId, mediaUrl, replyTemplate, triggerType, flow, keywords, mediaTitle, mediaThumbnail, mediaType] = params;
+    } else if (params.length >= 9) {
       [ownerUserId, instagramUserId, keyword, dmMessage, enabled, createdAt, updatedAt, mediaId, mediaUrl, replyTemplate, triggerType] = params;
     } else {
       [ownerUserId, instagramUserId, keyword, dmMessage, enabled, createdAt, updatedAt] = params;
@@ -251,10 +253,15 @@ async function run(sql, params = []) {
       instagram_user_id: instagramUserId,
       media_id: mediaId || null,
       media_url: mediaUrl || null,
+      media_title: mediaTitle || null,
+      media_thumbnail: mediaThumbnail || null,
+      media_type: mediaType || null,
       keyword: String(keyword || '').trim(),
+      keywords: Array.isArray(keywords) ? keywords : (keyword ? String(keyword).split(',').map(k => k.trim()).filter(Boolean) : []),
       dm_message: String(dmMessage || '').trim(),
       reply_template: replyTemplate ? String(replyTemplate).trim() : null,
       trigger_type: triggerType || 'keyword',
+      flow: flow || null,
       enabled: Boolean(enabled),
       created_at: createdAt || new Date().toISOString(),
       updated_at: updatedAt || new Date().toISOString()
@@ -265,7 +272,7 @@ async function run(sql, params = []) {
 
   // Automations update
   if (normalized.startsWith('update automations set')) {
-    // Standard format: [targetIgId, newKeyword, newMessage, newEnabled, now, newMediaId, newMediaUrl, newReplyTemplate, newTriggerType, automationId, ownerUserId]
+    // Standard format: [targetIgId, newKeyword, newMessage, newEnabled, now, newMediaId, newMediaUrl, newReplyTemplate, newTriggerType, newFlow, newKeywords, newMediaTitle, newMediaThumbnail, newMediaType, automationId, ownerUserId]
     // Or legacy format
     const autoId = params[params.length - 2] || params[params.length - 1];
     const ownerUserId = params[params.length - 1];
@@ -282,6 +289,13 @@ async function run(sql, params = []) {
     if (params[6] !== undefined) updateDoc.media_url = params[6];
     if (params[7] !== undefined) updateDoc.reply_template = params[7];
     if (params[8] !== undefined) updateDoc.trigger_type = params[8];
+    if (params.length >= 16) {
+      if (params[9] !== undefined) updateDoc.flow = params[9];
+      if (params[10] !== undefined) updateDoc.keywords = params[10];
+      if (params[11] !== undefined) updateDoc.media_title = params[11];
+      if (params[12] !== undefined) updateDoc.media_thumbnail = params[12];
+      if (params[13] !== undefined) updateDoc.media_type = params[13];
+    }
 
     const result = await automations.updateOne(filter, { $set: updateDoc });
     return { changes: result.modifiedCount };
@@ -359,12 +373,17 @@ async function all(sql, params = []) {
       ownerUserId: a.owner_user_id,
       instagramUserId: a.instagram_user_id,
       keyword: a.keyword || '',
+      keywords: Array.isArray(a.keywords) ? a.keywords : (a.keyword ? String(a.keyword).split(',').map(k => k.trim()).filter(Boolean) : []),
       dmMessage: a.dm_message || '',
       replyTemplate: a.reply_template || null,
       triggerType: a.trigger_type || 'keyword',
+      flow: a.flow || null,
       enabled: a.enabled ? 1 : 0,
       mediaId: a.media_id || null,
       mediaUrl: a.media_url || null,
+      mediaTitle: a.media_title || null,
+      mediaThumbnail: a.media_thumbnail || null,
+      mediaType: a.media_type || null,
       createdAt: a.created_at,
       updatedAt: a.updated_at,
       username: acctMap.get(a.instagram_user_id) || ''
@@ -515,12 +534,17 @@ async function get(sql, params = []) {
       ownerUserId: item.owner_user_id,
       instagramUserId: item.instagram_user_id,
       keyword: item.keyword || '',
+      keywords: Array.isArray(item.keywords) ? item.keywords : (item.keyword ? String(item.keyword).split(',').map(k => k.trim()).filter(Boolean) : []),
       dmMessage: item.dm_message || '',
       replyTemplate: item.reply_template || null,
       triggerType: item.trigger_type || 'keyword',
+      flow: item.flow || null,
       enabled: item.enabled ? 1 : 0,
       mediaId: item.media_id || null,
       mediaUrl: item.media_url || null,
+      mediaTitle: item.media_title || null,
+      mediaThumbnail: item.media_thumbnail || null,
+      mediaType: item.media_type || null,
       createdAt: item.created_at,
       updatedAt: item.updated_at,
       username: acct?.username || ''
