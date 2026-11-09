@@ -1005,11 +1005,6 @@ app.post('/api/automations/check-follow', requireAuth, async (request, response)
     return response.status(500).json({ error: err.message });
   }
 });
-    return response.status(200).json({ success: true, message: 'Automation deleted successfully.' });
-  } catch (error) {
-    return next(error);
-  }
-});
 
 // ==========================================
 // Instagram Webhook Handler (Comment to DM + Public Reply)
