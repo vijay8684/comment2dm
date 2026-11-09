@@ -218,7 +218,7 @@ async function fetchProfile(accessToken) {
 
 async function subscribeToWebhooks(instagramUserId, accessToken) {
   const url = new URL(`https://graph.instagram.com/${apiVersion}/${instagramUserId}/subscribed_apps`);
-  url.searchParams.set('subscribed_fields', 'comments,messages,messaging_postbacks,message_reactions');
+  url.searchParams.set('subscribed_fields', 'comments,messages');
 
   const response = await fetch(url, {
     method: 'POST',
@@ -228,7 +228,7 @@ async function subscribeToWebhooks(instagramUserId, accessToken) {
 
   if (!response.ok || data.success !== true) {
     const fallbackUrl = new URL(`https://graph.facebook.com/${apiVersion}/${instagramUserId}/subscribed_apps`);
-    fallbackUrl.searchParams.set('subscribed_fields', 'comments,messages,messaging_postbacks,message_reactions');
+    fallbackUrl.searchParams.set('subscribed_fields', 'comments,messages');
     const fbRes = await fetch(fallbackUrl, {
       method: 'POST',
       headers: { Authorization: `Bearer ${accessToken}` }
@@ -243,7 +243,7 @@ async function subscribeToWebhooks(instagramUserId, accessToken) {
     return data;
   }
 
-  console.log(`Instagram webhook subscription succeeded for account ${instagramUserId} with postbacks enabled.`);
+  console.log(`Instagram webhook subscription succeeded for account ${instagramUserId}.`);
   return data;
 }
 

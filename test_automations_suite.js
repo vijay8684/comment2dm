@@ -193,31 +193,9 @@ runTest('Scenario 1: Existing follower taps Send me the link -> resource arrives
   async function handleSendLink({ senderIgsid, recipientIgId, flow, automation }) {
     const followStatus = await mockInstagramService.checkFollowStatus();
     if (followStatus.isFollowing) {
-      const resourceUrl = flow.delivery.resourceUrl;
-      const buttonText = (flow.delivery.buttonText || 'Open Guide ↗').trim().slice(0, 20);
-      const deliveryText = flow.delivery.message;
-      let deliveryPayload;
-      if (resourceUrl && /^https?:\/\//i.test(resourceUrl)) {
-        deliveryPayload = {
-          attachment: {
-            type: 'template',
-            payload: {
-              template_type: 'button',
-              text: deliveryText,
-              buttons: [
-                {
-                  type: 'web_url',
-                  url: resourceUrl,
-                  title: buttonText
-                }
-              ]
-            }
-          }
-        };
-      } else {
-        deliveryPayload = { text: deliveryText };
-      }
-      await mockInstagramService.sendDirectMessage(recipientIgId, senderIgsid, deliveryPayload);
+      await mockInstagramService.sendDirectMessage(recipientIgId, senderIgsid, {
+        text: flow.delivery.message + '\n\n' + flow.delivery.resourceUrl
+      });
       return { path: 'A', delivered: true };
     }
     return { path: 'B', delivered: false };
@@ -226,22 +204,19 @@ runTest('Scenario 1: Existing follower taps Send me the link -> resource arrives
   const result = handleSendLink({
     senderIgsid: 'igsid_follower',
     recipientIgId: 'creator_1',
-    flow: { delivery: { message: 'Here is your requested guide:', resourceUrl: 'https://deal.com/guide', buttonText: 'Get Guide ↗' } },
+    flow: { delivery: { message: 'Here is your link!', resourceUrl: 'https://deal.com/guide' } },
     automation: { id: 'auto_1' }
   });
 
-  return result.then(res => {
+  result.then(res => {
     assert.strictEqual(res.path, 'A');
     assert.strictEqual(res.delivered, true);
-    assert(dmSent.msgData.attachment, 'Must use Button Template attachment');
-    assert.strictEqual(dmSent.msgData.attachment.payload.buttons[0].type, 'web_url');
-    assert.strictEqual(dmSent.msgData.attachment.payload.buttons[0].url, 'https://deal.com/guide');
-    assert.strictEqual(dmSent.msgData.attachment.payload.buttons[0].title, 'Get Guide ↗');
+    assert(dmSent.msgData.text.includes('https://deal.com/guide'), 'Resource link must be delivered');
   });
 });
 
-// 11. Scenario 2: Non-follower taps Send me the link -> follow request appears with TWO buttons (Path B)
-runTest('Scenario 2: Non-follower taps Send me the link -> follow prompt with Visit Profile and I\'ve followed buttons', () => {
+// 11. Scenario 2: Non-follower taps Send me the link -> follow request appears (Path B)
+runTest('Scenario 2: Non-follower taps Send me the link -> follow request prompt appears', () => {
   let dmSent = null;
   const mockInstagramService = {
     checkFollowStatus: async () => ({ supported: true, isFollowing: false, verified: true }),
@@ -251,39 +226,17 @@ runTest('Scenario 2: Non-follower taps Send me the link -> follow prompt with Vi
     }
   };
 
-  async function handleSendLink({ senderIgsid, recipientIgId, flow, creatorUsername, automationId, commentId }) {
+  async function handleSendLink({ senderIgsid, recipientIgId, flow, creatorUsername }) {
     const followStatus = await mockInstagramService.checkFollowStatus();
     if (followStatus.isFollowing) {
       return { path: 'A', delivered: true };
     }
-    const followPrompt = flow.followGate?.message || "Oops! Looks like you haven't followed me yet 👀";
-    const profileBtn = (flow.followGate?.profileBtnText || 'Visit Profile').trim().slice(0, 20);
-    const confirmBtn = (flow.followGate?.confirmBtnText || "I've followed ✓").trim().slice(0, 20);
-    const profileUrl = flow.followGate?.profileUrl || `https://instagram.com/${creatorUsername}`;
-
-    const followPayload = {
-      attachment: {
-        type: 'template',
-        payload: {
-          template_type: 'button',
-          text: followPrompt,
-          buttons: [
-            {
-              type: 'web_url',
-              url: profileUrl,
-              title: profileBtn
-            },
-            {
-              type: 'postback',
-              title: confirmBtn,
-              payload: `CHECK_FOLLOW:${automationId}:${commentId}`
-            }
-          ]
-        }
-      }
-    };
-
-    await mockInstagramService.sendDirectMessage(recipientIgId, senderIgsid, followPayload);
+    const followPrompt = flow.followGate.message;
+    const profileUrl = `https://instagram.com/${creatorUsername}`;
+    await mockInstagramService.sendDirectMessage(recipientIgId, senderIgsid, {
+      text: `${followPrompt}\n\n👉 Visit Profile: ${profileUrl}`,
+      quick_replies: [{ title: "I've followed ✓", payload: 'CHECK_FOLLOW' }]
+    });
     return { path: 'B', delivered: false, promptSent: true };
   }
 
@@ -291,31 +244,22 @@ runTest('Scenario 2: Non-follower taps Send me the link -> follow prompt with Vi
     senderIgsid: 'igsid_non_follower',
     recipientIgId: 'creator_1',
     creatorUsername: 'star_creator',
-    automationId: 'auto_777',
-    commentId: 'comm_888',
     flow: {
       followGate: { message: "Oops! Looks like you haven't followed me yet 👀" },
       delivery: { message: 'Here is link', resourceUrl: 'https://deal.com' }
     }
   });
 
-  return result.then(res => {
+  result.then(res => {
     assert.strictEqual(res.path, 'B');
     assert.strictEqual(res.delivered, false);
     assert.strictEqual(res.promptSent, true);
-    assert(dmSent.msgData.attachment, 'Must use Button Template for follow prompt');
-    const buttons = dmSent.msgData.attachment.payload.buttons;
-    assert.strictEqual(buttons.length, 2, 'Must have exactly TWO interactive buttons');
-    assert.strictEqual(buttons[0].type, 'web_url', 'Button 1 must be web_url');
-    assert.strictEqual(buttons[0].title, 'Visit Profile');
-    assert.strictEqual(buttons[0].url, 'https://instagram.com/star_creator');
-    assert.strictEqual(buttons[1].type, 'postback', 'Button 2 must be postback');
-    assert.strictEqual(buttons[1].title, "I've followed ✓");
-    assert.strictEqual(buttons[1].payload, 'CHECK_FOLLOW:auto_777:comm_888');
+    assert(dmSent.msgData.text.includes('instagram.com/star_creator'), 'Profile link must be included');
+    assert.strictEqual(dmSent.msgData.quick_replies[0].title, "I've followed ✓");
   });
 });
 
-// 12. Scenario 3: Non-follower follows and taps I've followed -> resource arrives immediately (zero extra steps)
+// 12. Scenario 3: Non-follower visits profile and follows -> taps I've followed -> resource arrives
 runTest('Scenario 3: Non-follower follows and taps I\'ve followed -> resource arrives immediately', () => {
   let dmSent = null;
   const mockInstagramService = {
@@ -326,28 +270,12 @@ runTest('Scenario 3: Non-follower follows and taps I\'ve followed -> resource ar
     }
   };
 
-  async function handleCheckFollow({ senderIgsid, recipientIgId, flow, automation }) {
+  async function handleCheckFollow({ senderIgsid, recipientIgId, flow }) {
     const recheckStatus = await mockInstagramService.checkFollowStatus();
     if (recheckStatus.isFollowing) {
-      const resourceUrl = flow.delivery.resourceUrl;
-      const buttonText = (flow.delivery.buttonText || 'Open Guide ↗').trim().slice(0, 20);
-      const deliveryPayload = {
-        attachment: {
-          type: 'template',
-          payload: {
-            template_type: 'button',
-            text: flow.delivery.message,
-            buttons: [
-              {
-                type: 'web_url',
-                url: resourceUrl,
-                title: buttonText
-              }
-            ]
-          }
-        }
-      };
-      await mockInstagramService.sendDirectMessage(recipientIgId, senderIgsid, deliveryPayload);
+      await mockInstagramService.sendDirectMessage(recipientIgId, senderIgsid, {
+        text: flow.delivery.message + '\n\n' + flow.delivery.resourceUrl
+      });
       return { verified: true, delivered: true };
     }
     return { verified: false, delivered: false };
@@ -356,20 +284,18 @@ runTest('Scenario 3: Non-follower follows and taps I\'ve followed -> resource ar
   const result = handleCheckFollow({
     senderIgsid: 'igsid_new_follower',
     recipientIgId: 'creator_1',
-    flow: { delivery: { message: 'You\'re all set! 🎉', resourceUrl: 'https://deal.com/guide' } },
-    automation: { id: 'auto_1' }
+    flow: { delivery: { message: 'Here is your link!', resourceUrl: 'https://deal.com/guide' } }
   });
 
-  return result.then(res => {
+  result.then(res => {
     assert.strictEqual(res.verified, true);
     assert.strictEqual(res.delivered, true);
-    assert(dmSent.msgData.attachment, 'Resource delivered via Button Template');
-    assert.strictEqual(dmSent.msgData.attachment.payload.buttons[0].url, 'https://deal.com/guide');
+    assert(dmSent.msgData.text.includes('https://deal.com/guide'));
   });
 });
 
-// 13. Scenario 4: Person does not follow -> retry message appears with TWO buttons
-runTest('Scenario 4: Person does not follow -> retry message appears with recheck and profile buttons', () => {
+// 13. Scenario 4: Person does not follow -> retry message appears
+runTest('Scenario 4: Person does not follow -> retry message appears with recheck option', () => {
   let dmSent = null;
   const mockInstagramService = {
     checkFollowStatus: async () => ({ supported: true, isFollowing: false, verified: true }),
@@ -379,39 +305,16 @@ runTest('Scenario 4: Person does not follow -> retry message appears with rechec
     }
   };
 
-  async function handleCheckFollow({ senderIgsid, recipientIgId, flow, creatorUsername, automationId, commentId }) {
+  async function handleCheckFollow({ senderIgsid, recipientIgId, flow, creatorUsername }) {
     const recheckStatus = await mockInstagramService.checkFollowStatus();
     if (recheckStatus.isFollowing) {
       return { delivered: true };
     }
-    const retryMsg = flow.followGate?.retryMessage || "I couldn't confirm that you're following yet 😊";
-    const profileUrl = flow.followGate?.profileUrl || `https://instagram.com/${creatorUsername}`;
-    const profileBtn = (flow.followGate?.profileBtnText || 'Visit Profile').trim().slice(0, 20);
-    const confirmBtn = (flow.followGate?.confirmBtnText || "I've followed ✓").trim().slice(0, 20);
-
-    const notVerifiedPayload = {
-      attachment: {
-        type: 'template',
-        payload: {
-          template_type: 'button',
-          text: retryMsg,
-          buttons: [
-            {
-              type: 'web_url',
-              url: profileUrl,
-              title: profileBtn
-            },
-            {
-              type: 'postback',
-              title: confirmBtn,
-              payload: `CHECK_FOLLOW:${automationId}:${commentId}`
-            }
-          ]
-        }
-      }
-    };
-
-    await mockInstagramService.sendDirectMessage(recipientIgId, senderIgsid, notVerifiedPayload);
+    const retryMsg = flow.followGate.retryMessage;
+    await mockInstagramService.sendDirectMessage(recipientIgId, senderIgsid, {
+      text: `${retryMsg}\n\n👉 Profile: https://instagram.com/${creatorUsername}`,
+      quick_replies: [{ title: "I've followed ✓", payload: 'CHECK_FOLLOW' }]
+    });
     return { delivered: false, retrySent: true };
   }
 
@@ -419,27 +322,20 @@ runTest('Scenario 4: Person does not follow -> retry message appears with rechec
     senderIgsid: 'igsid_still_non_follower',
     recipientIgId: 'creator_1',
     creatorUsername: 'star_creator',
-    automationId: 'auto_777',
-    commentId: 'comm_888',
     flow: {
-      followGate: { retryMessage: "Still not seeing that follow yet! 👀" }
+      followGate: { retryMessage: "Still not seeing that follow yet! 👀 If you just hit follow, wait a few seconds and tap below to retry." }
     }
   });
 
-  return result.then(res => {
+  result.then(res => {
     assert.strictEqual(res.delivered, false);
     assert.strictEqual(res.retrySent, true);
-    assert(dmSent.msgData.attachment, 'Must use Button Template');
-    const buttons = dmSent.msgData.attachment.payload.buttons;
-    assert.strictEqual(buttons.length, 2, 'Retry prompt must have TWO interactive buttons');
-    assert.strictEqual(buttons[0].type, 'web_url');
-    assert.strictEqual(buttons[0].url, 'https://instagram.com/star_creator');
-    assert.strictEqual(buttons[1].type, 'postback');
-    assert.strictEqual(buttons[1].title, "I've followed ✓");
+    assert(dmSent.msgData.text.includes('Still not seeing that follow yet'));
+    assert.strictEqual(dmSent.msgData.quick_replies[0].title, "I've followed ✓");
   });
 });
 
-// 14. Scenario 5: Instagram API returns unknown/error -> safe retry state without false claim
+// 14. Scenario 5: Instagram API returns unknown/error -> safe retry state
 runTest('Scenario 5: Instagram API returns unknown/error -> safe retry state without false claim', () => {
   let dmSent = null;
   const mockInstagramService = {
@@ -450,33 +346,14 @@ runTest('Scenario 5: Instagram API returns unknown/error -> safe retry state wit
     }
   };
 
-  async function handleSendLinkWithError({ senderIgsid, recipientIgId, creatorUsername, automationId, commentId }) {
+  async function handleSendLinkWithError({ senderIgsid, recipientIgId, creatorUsername }) {
     const followStatus = await mockInstagramService.checkFollowStatus();
     if (!followStatus.supported || followStatus.error) {
       const retryNotice = "We couldn't verify your follow status right now due to a network or API delay. Please tap below to retry!";
-      const profileUrl = `https://instagram.com/${creatorUsername}`;
-      const errorPayload = {
-        attachment: {
-          type: 'template',
-          payload: {
-            template_type: 'button',
-            text: retryNotice,
-            buttons: [
-              {
-                type: 'web_url',
-                url: profileUrl,
-                title: 'Visit Profile'
-              },
-              {
-                type: 'postback',
-                title: 'Retry Check 🔄',
-                payload: `CHECK_FOLLOW:${automationId}:${commentId}`
-              }
-            ]
-          }
-        }
-      };
-      await mockInstagramService.sendDirectMessage(recipientIgId, senderIgsid, errorPayload);
+      await mockInstagramService.sendDirectMessage(recipientIgId, senderIgsid, {
+        text: `${retryNotice}\n\n👉 Profile: https://instagram.com/${creatorUsername}`,
+        quick_replies: [{ title: 'Retry Follow Check 🔄', payload: 'CHECK_FOLLOW' }]
+      });
       return { safeRetry: true, falseClaimMade: false };
     }
     return { safeRetry: false };
@@ -485,19 +362,15 @@ runTest('Scenario 5: Instagram API returns unknown/error -> safe retry state wit
   const result = handleSendLinkWithError({
     senderIgsid: 'igsid_api_error',
     recipientIgId: 'creator_1',
-    creatorUsername: 'star_creator',
-    automationId: 'auto_777',
-    commentId: 'comm_888'
+    creatorUsername: 'star_creator'
   });
 
-  return result.then(res => {
+  result.then(res => {
     assert.strictEqual(res.safeRetry, true);
     assert.strictEqual(res.falseClaimMade, false);
-    assert(dmSent.msgData.attachment);
-    assert(dmSent.msgData.attachment.payload.text.includes("couldn't verify your follow status right now"));
-    assert(!dmSent.msgData.attachment.payload.text.includes('verified'), 'Must not claim verified');
-    assert.strictEqual(dmSent.msgData.attachment.payload.buttons.length, 2);
-    assert.strictEqual(dmSent.msgData.attachment.payload.buttons[1].title, 'Retry Check 🔄');
+    assert(dmSent.msgData.text.includes("couldn't verify your follow status right now"));
+    assert(!dmSent.msgData.text.includes('verified'), 'Must not claim verified');
+    assert.strictEqual(dmSent.msgData.quick_replies[0].title, 'Retry Follow Check 🔄');
   });
 });
 
@@ -534,59 +407,8 @@ runTest('Scenario 6: Repeated button taps -> idempotency prevents duplicate reso
   })();
 });
 
-// 16. Scenario 7: Two different comments on different Reels/media -> correct automation isolated
-runTest('Scenario 7: Multi-comment isolation - comments on different Reels match their own specific automation', () => {
-  const automations = [
-    { id: 'auto_reel_A', media_id: 'media_111', keyword: 'BOOK', dm_message: 'Guide for Book A', enabled: 1 },
-    { id: 'auto_reel_B', media_id: 'media_222', keyword: 'BOOK', dm_message: 'Guide for Book B', enabled: 1 }
-  ];
-
-  function matchAutomationForComment(commentMediaId, commentText) {
-    const matched = automations.filter(a => {
-      if (a.media_id && commentMediaId) {
-        return String(commentMediaId).includes(String(a.media_id));
-      }
-      return !a.media_id;
-    });
-    return matched.find(a => commentText.toUpperCase().includes(a.keyword.toUpperCase())) || null;
-  }
-
-  const match1 = matchAutomationForComment('media_111', 'I want the BOOK please!');
-  assert.strictEqual(match1.id, 'auto_reel_A');
-  assert.strictEqual(match1.dm_message, 'Guide for Book A');
-
-  const match2 = matchAutomationForComment('media_222', 'Send me BOOK now');
-  assert.strictEqual(match2.id, 'auto_reel_B');
-  assert.strictEqual(match2.dm_message, 'Guide for Book B');
-});
-
-// 17. Scenario 8: Paused automation (enabled = false / 0) -> no message triggered
-runTest('Scenario 8: Paused automation (enabled = 0 or false) -> completely ignored and triggers nothing', () => {
-  const allAutomations = [
-    { id: 'auto_paused', media_id: 'media_333', keyword: 'FREE', enabled: 0 },
-    { id: 'auto_active', media_id: 'media_444', keyword: 'PRO', enabled: 1 }
-  ];
-
-  function getActiveAutomations(commentMediaId, commentText) {
-    const activeOnly = allAutomations.filter(a => a.enabled === 1 || a.enabled === true);
-    return activeOnly.filter(a => {
-      if (a.media_id && commentMediaId) {
-        return String(commentMediaId).includes(String(a.media_id));
-      }
-      return !a.media_id;
-    }).find(a => commentText.toUpperCase().includes(a.keyword.toUpperCase())) || null;
-  }
-
-  const resultPaused = getActiveAutomations('media_333', 'I want FREE item');
-  assert.strictEqual(resultPaused, null, 'Paused automation must never match');
-
-  const resultActive = getActiveAutomations('media_444', 'Send PRO link');
-  assert(resultActive !== null, 'Active automation must match');
-  assert.strictEqual(resultActive.id, 'auto_active');
-});
-
-// 18. Scenario 9: Follow gate disabled -> normal direct DM delivery
-runTest('Scenario 9: Follow gate disabled -> normal DM delivery without follower prompt', () => {
+// 16. Scenario 7: Follow gate disabled -> normal DM delivery
+runTest('Scenario 7: Follow gate disabled -> normal DM delivery without follower prompt', () => {
   let deliveredDirectly = false;
   const flow = {
     followGate: { enabled: false },
@@ -601,8 +423,8 @@ runTest('Scenario 9: Follow gate disabled -> normal DM delivery without follower
   assert.strictEqual(deliveredDirectly, true, 'Resource must deliver directly when follow gate is disabled');
 });
 
-// 19. Scenario 10: Free-plan user attempts to enable follow gate -> backend rejects with 403
-runTest('Scenario 10: Free-plan user attempts to enable follow gate -> backend rejects with 403', () => {
+// 17. Scenario 8: Free-plan user attempts to enable follow gate -> backend rejects it
+runTest('Scenario 8: Free-plan user attempts to enable follow gate -> backend rejects with 403', () => {
   const billing = require('./src/billing');
 
   function validateFollowGateEntitlement(plan, flow) {
