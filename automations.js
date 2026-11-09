@@ -485,7 +485,7 @@
 
       const gateMsg = followGateMessageInput ? followGateMessageInput.value.trim() : '';
       const profileBtn = followGateProfileBtnInput ? followGateProfileBtnInput.value.trim() : 'Visit Profile';
-      const confirmBtn = followGateConfirmBtnInput ? followGateConfirmBtnInput.value.trim() : "I've followed ✓";
+      const confirmBtn = followGateConfirmBtnInput ? followGateConfirmBtnInput.value.trim() : "I'm following ✅";
 
       if (currentSimScenario === 'following') {
         // PATH A: Already Following (Delivers immediately, no follow gate shown)
@@ -508,11 +508,11 @@
             simGateMsgDisplay.innerHTML = escapeHtml(gateMsg || "Oops! Looks like you haven't followed me yet 👀\n\nIt would mean a lot if you could visit my profile and hit that follow button 😊").replace(/\n/g, '<br>');
           }
           if (simGateProfileBtn) simGateProfileBtn.textContent = profileBtn || 'Visit Profile';
-          if (simGateConfirmBtn) simGateConfirmBtn.textContent = confirmBtn || "I've followed ✓";
+          if (simGateConfirmBtn) simGateConfirmBtn.textContent = confirmBtn || "I'm following ✅";
         }
         if (simUserConfirmTapDisplay) {
           simUserConfirmTapDisplay.style.display = 'block';
-          simUserConfirmTapDisplay.textContent = confirmBtn || "I've followed ✓";
+          simUserConfirmTapDisplay.textContent = confirmBtn || "I'm following ✅";
         }
         if (simDeliveryDisplay) simDeliveryDisplay.style.display = 'block';
       }
@@ -775,7 +775,7 @@
         if (followGateDisabledView) followGateDisabledView.style.display = 'none';
         followGateMessageInput.value = flow.followGate.message || "Oops! Looks like you haven't followed me yet 👀\n\nIt would mean a lot if you could visit my profile and hit that follow button 😊";
         followGateProfileBtnInput.value = flow.followGate.profileBtnText || flow.followGate.buttonText || 'Visit Profile';
-        followGateConfirmBtnInput.value = flow.followGate.confirmBtnText || flow.followGate.checkButtonText || "I've followed ✓";
+        followGateConfirmBtnInput.value = flow.followGate.confirmBtnText || flow.followGate.checkButtonText || "I'm following ✅";
         if (followGateRetryMsgInput) followGateRetryMsgInput.value = flow.followGate.retryMessage || "Still not seeing that follow yet! 👀 If you just hit follow, wait a few seconds and tap below to retry.";
       } else {
         followGateToggle.checked = false;
@@ -829,7 +829,7 @@
       if (followGateDisabledView) followGateDisabledView.style.display = 'block';
       if (followGateMessageInput) followGateMessageInput.value = "Oops! Looks like you haven't followed me yet 👀\n\nIt would mean a lot if you could visit my profile and hit that follow button 😊";
       if (followGateProfileBtnInput) followGateProfileBtnInput.value = 'Visit Profile';
-      if (followGateConfirmBtnInput) followGateConfirmBtnInput.value = "I've followed ✓";
+      if (followGateConfirmBtnInput) followGateConfirmBtnInput.value = "I'm following ✅";
       if (followGateRetryMsgInput) followGateRetryMsgInput.value = "Still not seeing that follow yet! 👀 If you just hit follow, wait a few seconds and tap below to retry.";
 
       deliveryMessageInput.value = 'Here is your link! Click below to access the full guide:';
@@ -909,10 +909,10 @@
           enabled: followGateToggle ? followGateToggle.checked : false,
           message: followGateMessageInput ? followGateMessageInput.value.trim() : null,
           profileBtnText: followGateProfileBtnInput ? followGateProfileBtnInput.value.trim() : 'Visit Profile',
-          confirmBtnText: followGateConfirmBtnInput ? followGateConfirmBtnInput.value.trim() : "I've followed ✓",
+          confirmBtnText: followGateConfirmBtnInput ? followGateConfirmBtnInput.value.trim() : "I'm following ✅",
           retryMessage: followGateRetryMsgInput ? followGateRetryMsgInput.value.trim() : null,
           buttonText: followGateProfileBtnInput ? followGateProfileBtnInput.value.trim() : 'Visit Profile',
-          checkButtonText: followGateConfirmBtnInput ? followGateConfirmBtnInput.value.trim() : "I've followed ✓",
+          checkButtonText: followGateConfirmBtnInput ? followGateConfirmBtnInput.value.trim() : "I'm following ✅",
           profileUrl: `https://instagram.com/${(userAccounts.find(a => a.id === igUserId) || {}).username || ''}`
         },
         delivery: {

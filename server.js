@@ -1523,9 +1523,9 @@ app.post('/api/instagram/webhook', async (request, response) => {
           const parts = payload.split(':');
           autoId = parts[1] || '';
           commentId = parts[2] || '';
-        } else if (/send.*link/i.test(incomingText)) {
+        } else if (/send.*(link|access)/i.test(incomingText)) {
           action = 'SEND_LINK';
-        } else if (/follow/i.test(incomingText)) {
+        } else if (/(follow|following)/i.test(incomingText)) {
           action = 'CHECK_FOLLOW';
         }
 
@@ -1595,7 +1595,7 @@ app.post('/api/instagram/webhook', async (request, response) => {
         }
 
         const profileBtn = (flow.followGate?.profileBtnText || flow.followGate?.buttonText || "Visit Profile").trim().slice(0, 20);
-        const confirmBtn = (flow.followGate?.confirmBtnText || flow.followGate?.checkButtonText || "I've followed ✓").trim().slice(0, 20);
+        const confirmBtn = (flow.followGate?.confirmBtnText || flow.followGate?.checkButtonText || "I'm following ✅").trim().slice(0, 20);
         let profileUrl = flow.followGate?.profileUrl || `https://instagram.com/${creatorUsername}`;
         if (!profileUrl.startsWith('http')) {
           profileUrl = `https://instagram.com/${profileUrl.replace(/^@/, '')}`;
