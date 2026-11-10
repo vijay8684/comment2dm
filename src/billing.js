@@ -187,34 +187,43 @@ async function auth(req) {
 }
 
 async function entitlement(uid) {
-  const d = await store();
-  const user = await d.collection('users').findOne({ id: uid }, { projection: { email: 1 } });
-  if (isAdminEmail(user?.email)) {
+  try {
+    const d = await store();
+    const user = await d.collection('users').findOne({ id: uid }, { projection: { email: 1 } });
+    if (isAdminEmail(user?.email)) {
+      return {
+        plan: 'elite',
+        isAdmin: true,
+        limits: {
+          instagramAccounts: Infinity,
+          automations: Infinity,
+          dmMonthly: Infinity,
+          aiCreditsMonthly: Infinity,
+          allCommentsTrigger: true,
+          publicReplies: true,
+          followToUnlock: true,
+          whiteLabel: true
+        },
+        subscription: null
+      };
+    }
+
+    const s = await d.collection('subscriptions').findOne({ user_id: uid, status: 'active' }, { sort: { created_at: -1 } });
+    const rawPlan = s?.plan || 'free';
+    const plan = LIMITS[rawPlan] ? (rawPlan === 'creator' || rawPlan === 'growth' ? 'pro' : rawPlan === 'scale' ? 'elite' : rawPlan) : 'free';
     return {
-      plan: 'elite',
-      isAdmin: true,
-      limits: {
-        instagramAccounts: Infinity,
-        automations: Infinity,
-        dmMonthly: Infinity,
-        aiCreditsMonthly: Infinity,
-        allCommentsTrigger: true,
-        publicReplies: true,
-        followToUnlock: true,
-        whiteLabel: true
-      },
+      plan,
+      limits: LIMITS[plan] || LIMITS.free,
+      subscription: s
+    };
+  } catch (err) {
+    return {
+      plan: 'free',
+      isAdmin: false,
+      limits: LIMITS.free,
       subscription: null
     };
   }
-
-  const s = await d.collection('subscriptions').findOne({ user_id: uid, status: 'active' }, { sort: { created_at: -1 } });
-  const rawPlan = s?.plan || 'free';
-  const plan = LIMITS[rawPlan] ? (rawPlan === 'creator' || rawPlan === 'growth' ? 'pro' : rawPlan === 'scale' ? 'elite' : rawPlan) : 'free';
-  return {
-    plan,
-    limits: LIMITS[plan] || LIMITS.free,
-    subscription: s
-  };
 }
 
 async function counts(uid) {
@@ -454,16 +463,119 @@ async function cancel(req, res) {
   return res.json({ cancelled: true });
 }
 
+// In-memory fallback for local testing when MongoDB is offline
+const localCreditUsageMap = new Map();
+
+async function getAiCreditBalance(uid) {
+  try {
+    const e = await entitlement(uid);
+    if (e.isAdmin || e.limits.aiCreditsMonthly === Infinity) {
+      return {
+        plan: e.plan,
+        isAdmin: true,
+        limit: Infinity,
+        used: 0,
+        balance: Infinity
+      };
+    }
+
+    const start = new Date();
+    start.setUTCDate(1);
+    start.setUTCHours(0, 0, 0, 0);
+
+    let used = 0;
+    try {
+      const d = await store();
+      const records = await d.collection('ai_credit_usage').find({
+        user_id: String(uid),
+        created_at: { $gte: start.toISOString() }
+      }).toArray();
+      used = records.reduce((sum, r) => sum + (Number(r.credits) || 0), 0);
+    } catch (dbErr) {
+      // Memory fallback for local testing
+      const memList = localCreditUsageMap.get(String(uid)) || [];
+      used = memList
+        .filter(r => r.created_at >= start.toISOString())
+        .reduce((sum, r) => sum + (Number(r.credits) || 0), 0);
+    }
+
+    const limit = Number(e.limits.aiCreditsMonthly) || 100;
+    const balance = Math.max(0, limit - used);
+
+    return {
+      plan: e.plan,
+      isAdmin: false,
+      limit,
+      used,
+      balance
+    };
+  } catch (err) {
+    return {
+      plan: 'free',
+      isAdmin: false,
+      limit: 100,
+      used: 0,
+      balance: 100
+    };
+  }
+}
+
+async function deductAiCredits(uid, cost, tool = 'general') {
+  const numCost = Math.max(0, parseInt(cost, 10) || 0);
+  if (numCost === 0) {
+    const current = await getAiCreditBalance(uid);
+    return { success: true, remaining: current.balance, deducted: 0 };
+  }
+
+  const current = await getAiCreditBalance(uid);
+  if (!current.isAdmin && current.balance < numCost) {
+    const error = new Error(`Insufficient AI credits. You have ${current.balance} credits remaining, but this operation requires ${numCost} credits.`);
+    error.statusCode = 402;
+    error.balance = current.balance;
+    error.required = numCost;
+    throw error;
+  }
+
+  const record = {
+    user_id: String(uid),
+    tool: String(tool || 'ai_tool'),
+    credits: numCost,
+    created_at: new Date().toISOString()
+  };
+
+  try {
+    const d = await store();
+    await d.collection('ai_credit_usage').insertOne(record);
+  } catch (dbErr) {
+    // Memory fallback for local testing
+    const memList = localCreditUsageMap.get(String(uid)) || [];
+    memList.push(record);
+    localCreditUsageMap.set(String(uid), memList);
+  }
+
+  const remaining = current.isAdmin ? Infinity : Math.max(0, current.balance - numCost);
+  return {
+    success: true,
+    remaining,
+    deducted: numCost
+  };
+}
+
 async function status(req, res) {
   const u = await auth(req);
   if (!u) return res.status(401).json({ error: 'Authentication required.' });
-  const e = await entitlement(u.id);
-  const c = await counts(u.id);
+  const [e, c, aiStatus] = await Promise.all([
+    entitlement(u.id),
+    counts(u.id),
+    getAiCreditBalance(u.id)
+  ]);
 
   return res.json({
     plan: e.plan,
     isAdmin: !!e.isAdmin,
     subscription: e.subscription ? { status: e.subscription.status, billingCycle: e.subscription.billing_cycle, currentEnd: e.subscription.current_end } : null,
+    aiCreditsRemaining: aiStatus.balance,
+    aiCreditsUsed: aiStatus.used,
     limits: {
       instagramAccounts: e.limits.instagramAccounts,
       automations: Number.isFinite(e.limits.automations) ? e.limits.automations : null,
@@ -474,7 +586,8 @@ async function status(req, res) {
     usage: {
       instagramAccounts: c.accounts,
       automations: c.automations,
-      dmMonthly: c.dmMonthly
+      dmMonthly: c.dmMonthly,
+      aiCredits: aiStatus.used
     }
   });
 }
@@ -599,6 +712,8 @@ module.exports = {
   check,
   entitlement,
   counts,
+  getAiCreditBalance,
+  deductAiCredits,
   PLANS,
   LIMITS
 };

@@ -2097,14 +2097,21 @@ const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
 
 async function callGemini(prompt) {
   if (!GEMINI_KEY) return null;
-  try {
-    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${GEMINI_KEY}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-    });
-    const d = await r.json();
-    return d.candidates?.[0]?.content?.parts?.[0]?.text || null;
-  } catch { return null; }
+  // Cost-effective supported model hierarchy: flash-first with graceful fallback to pro
+  const models = ['gemini-1.5-flash', 'gemini-pro'];
+  for (const model of models) {
+    try {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      });
+      const d = await r.json().catch(() => ({}));
+      const text = d.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (text) return text;
+    } catch (_) {}
+  }
+  return null;
 }
 
 function creatorFallback(type, body) {
@@ -2136,9 +2143,35 @@ function creatorFallback(type, body) {
   return 'Generated content will appear here.';
 }
 
+const CREATOR_TOOL_CREDITS = {
+  hooks: 10,
+  dm_script: 15,
+  ideas: 20,
+  campaign: 25,
+  growth_recommendations: 15
+};
+
 app.post('/api/creator/generate', requireAuth, async (request, response) => {
   const { type: rawType, tool, topic, audience, tone = 'inspirational', count = 3, product, cta, niche, week } = request.body || {};
   const type = rawType || tool || 'hooks';
+  const requiredCredits = CREATOR_TOOL_CREDITS[type] || 10;
+
+  // 1. Mandatory server-side atomic credit balance validation
+  let creditStatus;
+  try {
+    creditStatus = await billing.getAiCreditBalance(request.user.id);
+  } catch (creditErr) {
+    creditStatus = { balance: 100, isAdmin: false };
+  }
+
+  if (!creditStatus.isAdmin && creditStatus.balance < requiredCredits) {
+    return response.status(402).json({
+      error: `Insufficient AI credits. You have ${creditStatus.balance} credits remaining, but this operation requires ${requiredCredits} credits. Please upgrade your plan in Billing.`,
+      balance: creditStatus.balance,
+      required: requiredCredits
+    });
+  }
+
   try {
     let result = null;
     if (GEMINI_KEY) {
@@ -2154,9 +2187,86 @@ app.post('/api/creator/generate', requireAuth, async (request, response) => {
       }
     }
     if (!result) result = creatorFallback(type, request.body);
-    return response.json({ success: true, result, output: result });
+
+    // 2. Atomic credit deduction ONLY upon successful generation (failed generations never deduct)
+    const deduction = await billing.deductAiCredits(request.user.id, requiredCredits, type);
+
+    return response.json({
+      success: true,
+      result,
+      output: result,
+      creditsRemaining: deduction.remaining,
+      creditsDeducted: requiredCredits
+    });
   } catch (err) {
+    console.error('[CREATOR_STUDIO] AI generation failed:', err.message);
     return response.status(500).json({ error: err.message || 'Generation failed' });
+  }
+});
+
+// ── Reel Performance Analyzer Endpoints ─────────────────────────────────────
+app.get('/api/creator/reels/performance', requireAuth, async (request, response) => {
+  const instagramUserId = String(request.query.instagram_user_id || '').trim();
+  if (!instagramUserId) {
+    return response.status(400).json({ error: 'instagram_user_id query parameter is required.' });
+  }
+
+  // Mandatory account ownership check: throws 404/403 if unowned by request.user.id
+  try {
+    await instagramService.getDecryptedTokenForAccount(request.user.id, instagramUserId);
+  } catch (authErr) {
+    return response.status(authErr.statusCode || 403).json({ error: authErr.message });
+  }
+
+  try {
+    const formula = request.query.formula || 'reach';
+    const forceRefresh = request.query.force === 'true';
+    const analysis = await instagramService.analyzeAccountReels(request.user.id, instagramUserId, { formula, forceRefresh });
+    return response.json({ success: true, ...analysis });
+  } catch (err) {
+    console.error('[CREATOR_STUDIO] Reel performance error:', err.message);
+    return response.status(err.statusCode || 500).json({ error: err.message || 'Failed to analyze Reels performance.' });
+  }
+});
+
+app.get('/api/creator/reels/:mediaId/insights', requireAuth, async (request, response) => {
+  const mediaId = String(request.params.mediaId || '').trim();
+  const instagramUserId = String(request.query.instagram_user_id || '').trim();
+  if (!instagramUserId) {
+    return response.status(400).json({ error: 'instagram_user_id query parameter is required.' });
+  }
+
+  // Mandatory account ownership check
+  try {
+    await instagramService.getDecryptedTokenForAccount(request.user.id, instagramUserId);
+  } catch (authErr) {
+    return response.status(authErr.statusCode || 403).json({ error: authErr.message });
+  }
+
+  try {
+    const forceRefresh = request.query.force === 'true';
+    const insights = await instagramService.getReelInsights(request.user.id, instagramUserId, mediaId, forceRefresh);
+    return response.json({ success: true, ...insights });
+  } catch (err) {
+    return response.status(err.statusCode || 500).json({ error: err.message || 'Failed to retrieve Reel insights.' });
+  }
+});
+
+app.post('/api/creator/reels/analyze-manual', requireAuth, (request, response) => {
+  try {
+    const analysis = instagramService.analyzeManualReel(request.body || {});
+    return response.json({ success: true, ...analysis });
+  } catch (err) {
+    return response.status(400).json({ error: err.message || 'Manual calculation failed.' });
+  }
+});
+
+app.get('/api/creator/credits', requireAuth, async (request, response) => {
+  try {
+    const credits = await billing.getAiCreditBalance(request.user.id);
+    return response.json({ success: true, ...credits });
+  } catch (err) {
+    return response.status(500).json({ error: err.message || 'Failed to fetch credits balance.' });
   }
 });
 

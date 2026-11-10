@@ -6,6 +6,8 @@ const requiredConfig = ['META_APP_ID', 'META_APP_SECRET', 'META_REDIRECT_URI', '
 
 // 5-minute cache for media/reels to prevent lag and Meta rate limits
 const reelsCache = new Map();
+// 10-minute cache for detailed reel insights to prevent exhausting Meta rate limits
+const reelInsightsCache = new Map();
 
 function ensureConfiguration() {
   const missing = requiredConfig.filter((key) => !process.env[key]);
@@ -358,6 +360,424 @@ async function resolveReelUrl(ownerUserId, instagramUserId, reelUrl) {
     return { id: null, permalink: raw };
   }
   return match;
+}
+
+// ── Engagement Calculations & Transparent Labeling ───────────────────────────
+function calculateReelEngagement(metrics, followersCount = null) {
+  const likes = metrics.likes?.value ?? (typeof metrics.likes === 'number' ? metrics.likes : null);
+  const comments = metrics.comments?.value ?? (typeof metrics.comments === 'number' ? metrics.comments : null);
+  const shares = metrics.shares?.value ?? (typeof metrics.shares === 'number' ? metrics.shares : null);
+  const saved = metrics.saved?.value ?? (typeof metrics.saved === 'number' ? metrics.saved : null);
+  const reach = metrics.reach?.value ?? (typeof metrics.reach === 'number' ? metrics.reach : null);
+  const views = metrics.views?.value ?? metrics.plays?.value ?? (typeof metrics.views === 'number' ? metrics.views : (typeof metrics.plays === 'number' ? metrics.plays : null));
+  const followers = followersCount ?? metrics.followers?.value ?? (typeof metrics.followers === 'number' ? metrics.followers : null);
+
+  let totalInteractions = null;
+  let totalInteractionsStatus = 'unavailable';
+  let totalInteractionsSource = 'none';
+
+  if (metrics.totalInteractions?.value !== undefined && metrics.totalInteractions?.value !== null) {
+    totalInteractions = Number(metrics.totalInteractions.value);
+    totalInteractionsStatus = metrics.totalInteractions.status || 'retrieved';
+    totalInteractionsSource = metrics.totalInteractions.source || 'meta_api';
+  } else if (likes !== null || comments !== null || shares !== null || saved !== null) {
+    totalInteractions = (likes || 0) + (comments || 0) + (shares || 0) + (saved || 0);
+    totalInteractionsStatus = metrics.likes?.status === 'manual' ? 'manual' : 'calculated';
+    totalInteractionsSource = metrics.likes?.status === 'manual' ? 'manual_entry' : 'meta_api_sum';
+  }
+
+  // Formula 1: Engagement by Reach: (Total Interactions / Reach) * 100
+  let byReach = {
+    formula: '(Total Interactions / Reach) × 100',
+    rate: null,
+    available: false,
+    reason: reach === null ? 'Reach metric is unavailable for this Reel from Meta API' : reach <= 0 ? 'Reach must be greater than zero' : totalInteractions === null ? 'Total interactions unavailable' : null,
+    explanation: 'Measures the percentage of unique accounts reached that engaged (liked, commented, shared, or saved) with this Reel.'
+  };
+  if (reach !== null && reach > 0 && totalInteractions !== null) {
+    byReach.rate = Number(((totalInteractions / reach) * 100).toFixed(2));
+    byReach.available = true;
+    byReach.reason = null;
+  }
+
+  // Formula 2: Engagement by Views (Plays): (Total Interactions / Views) * 100
+  let byViews = {
+    formula: '(Total Interactions / Views) × 100',
+    rate: null,
+    available: false,
+    reason: views === null ? 'Views/plays metric is unavailable for this Reel from Meta API' : views <= 0 ? 'Views must be greater than zero' : totalInteractions === null ? 'Total interactions unavailable' : null,
+    explanation: 'Measures the number of interactions generated per video play/view.'
+  };
+  if (views !== null && views > 0 && totalInteractions !== null) {
+    byViews.rate = Number(((totalInteractions / views) * 100).toFixed(2));
+    byViews.available = true;
+    byViews.reason = null;
+  }
+
+  // Formula 3: Engagement by Followers: (Total Interactions / Followers) * 100
+  let byFollowers = {
+    formula: '(Total Interactions / Followers) × 100',
+    rate: null,
+    available: false,
+    reason: followers === null ? 'Follower count is unavailable' : followers <= 0 ? 'Follower count must be greater than zero' : totalInteractions === null ? 'Total interactions unavailable' : null,
+    explanation: 'Measures engagement relative to total account audience size.'
+  };
+  if (followers !== null && followers > 0 && totalInteractions !== null) {
+    byFollowers.rate = Number(((totalInteractions / followers) * 100).toFixed(2));
+    byFollowers.available = true;
+    byFollowers.reason = null;
+  }
+
+  return {
+    totalInteractions: {
+      value: totalInteractions,
+      status: totalInteractionsStatus,
+      source: totalInteractionsSource,
+      components: {
+        likes: likes !== null ? { value: likes, status: metrics.likes?.status || 'retrieved' } : { value: null, status: 'unavailable' },
+        comments: comments !== null ? { value: comments, status: metrics.comments?.status || 'retrieved' } : { value: null, status: 'unavailable' },
+        shares: shares !== null ? { value: shares, status: metrics.shares?.status || 'retrieved' } : { value: null, status: 'unavailable' },
+        saved: saved !== null ? { value: saved, status: metrics.saved?.status || 'retrieved' } : { value: null, status: 'unavailable' }
+      }
+    },
+    byReach,
+    byViews,
+    byFollowers
+  };
+}
+
+// ── Reel Insights from Meta Graph API v21.0 ──────────────────────────────────
+async function getReelInsights(ownerUserId, instagramUserId, mediaId, forceRefresh = false) {
+  const cacheKey = `${instagramUserId}:${mediaId}`;
+  if (!forceRefresh) {
+    const cached = reelInsightsCache.get(cacheKey);
+    if (cached && cached.expires > Date.now()) {
+      return cached.data;
+    }
+  }
+
+  const accessToken = await getDecryptedTokenForAccount(ownerUserId, instagramUserId);
+  const account = await getAccount(ownerUserId, instagramUserId);
+  const followersCount = Number(account?.followers_count || account?.followersCount) || null;
+
+  // 1. Fetch media basic metadata
+  let media = null;
+  try {
+    const mediaUrl = new URL(`https://graph.instagram.com/${apiVersion}/${mediaId}`);
+    mediaUrl.searchParams.set('fields', 'id,caption,media_type,media_product_type,permalink,timestamp,thumbnail_url,media_url,comments_count,like_count');
+    mediaUrl.searchParams.set('access_token', accessToken);
+    let res = await fetch(mediaUrl);
+    let data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const fbUrl = new URL(`https://graph.facebook.com/${apiVersion}/${mediaId}`);
+      fbUrl.searchParams.set('fields', 'id,caption,media_type,media_product_type,permalink,timestamp,thumbnail_url,media_url,comments_count,like_count');
+      fbUrl.searchParams.set('access_token', accessToken);
+      const fbRes = await fetch(fbUrl);
+      const fbData = await fbRes.json().catch(() => ({}));
+      if (fbRes.ok && fbData.id) {
+        data = fbData;
+        res = fbRes;
+      }
+    }
+    if (data.id) {
+      media = {
+        id: String(data.id),
+        caption: String(data.caption || ''),
+        mediaType: data.media_product_type || data.media_type || 'REELS',
+        permalink: data.permalink || '',
+        timestamp: data.timestamp || null,
+        thumbnailUrl: data.thumbnail_url || data.media_url || null,
+        likeCount: data.like_count !== undefined ? Number(data.like_count) : null,
+        commentsCount: data.comments_count !== undefined ? Number(data.comments_count) : null
+      };
+    }
+  } catch (err) {
+    console.warn(`[REEL_INSIGHTS] Failed to fetch media object ${mediaId}:`, err.message);
+  }
+
+  if (!media) {
+    const error = new Error(`Reel or media object ${mediaId} could not be retrieved from Meta API.`);
+    error.statusCode = 404;
+    throw error;
+  }
+
+  // 2. Fetch insights from Meta Graph API
+  const metaMetrics = {};
+  let metaSupported = false;
+  let metaError = null;
+
+  try {
+    // Attempt standard Reels insight metrics
+    const insightsUrl = new URL(`https://graph.instagram.com/${apiVersion}/${mediaId}/insights`);
+    insightsUrl.searchParams.set('metric', 'reach,saved,shares,plays,total_interactions');
+    insightsUrl.searchParams.set('access_token', accessToken);
+    let inRes = await fetch(insightsUrl);
+    let inData = await inRes.json().catch(() => ({}));
+
+    if (!inRes.ok) {
+      // Fallback: try subset without plays (which can be rejected on some formats)
+      const subUrl = new URL(`https://graph.instagram.com/${apiVersion}/${mediaId}/insights`);
+      subUrl.searchParams.set('metric', 'reach,saved,shares');
+      subUrl.searchParams.set('access_token', accessToken);
+      const subRes = await fetch(subUrl);
+      const subData = await subRes.json().catch(() => ({}));
+      if (subRes.ok && Array.isArray(subData.data)) {
+        inData = subData;
+        inRes = subRes;
+      } else {
+        metaError = metaErrorMessage(inData, 'Reel insights not supported for this account type or media.');
+      }
+    }
+
+    if (inRes.ok && Array.isArray(inData.data)) {
+      metaSupported = true;
+      for (const item of inData.data) {
+        const val = item.values?.[0]?.value ?? item.value;
+        if (val !== undefined && val !== null) {
+          metaMetrics[item.name] = Number(val);
+        }
+      }
+    }
+  } catch (err) {
+    metaError = err.message;
+  }
+
+  // 3. Package metrics with status and source
+  const formattedMetrics = {
+    likes: {
+      value: media.likeCount,
+      status: media.likeCount !== null ? 'retrieved' : 'unavailable',
+      source: 'meta_api'
+    },
+    comments: {
+      value: media.commentsCount,
+      status: media.commentsCount !== null ? 'retrieved' : 'unavailable',
+      source: 'meta_api'
+    },
+    reach: {
+      value: metaMetrics.reach !== undefined ? metaMetrics.reach : null,
+      status: metaMetrics.reach !== undefined ? 'retrieved' : 'unavailable',
+      source: 'meta_api'
+    },
+    views: {
+      value: metaMetrics.plays !== undefined ? metaMetrics.plays : (metaMetrics.views !== undefined ? metaMetrics.views : null),
+      status: (metaMetrics.plays !== undefined || metaMetrics.views !== undefined) ? 'retrieved' : 'unavailable',
+      source: 'meta_api'
+    },
+    saved: {
+      value: metaMetrics.saved !== undefined ? metaMetrics.saved : null,
+      status: metaMetrics.saved !== undefined ? 'retrieved' : 'unavailable',
+      source: 'meta_api'
+    },
+    shares: {
+      value: metaMetrics.shares !== undefined ? metaMetrics.shares : null,
+      status: metaMetrics.shares !== undefined ? 'retrieved' : 'unavailable',
+      source: 'meta_api'
+    },
+    totalInteractions: metaMetrics.total_interactions !== undefined ? {
+      value: metaMetrics.total_interactions,
+      status: 'retrieved',
+      source: 'meta_api'
+    } : null
+  };
+
+  const calculations = calculateReelEngagement(formattedMetrics, followersCount);
+
+  const result = {
+    media,
+    metrics: formattedMetrics,
+    calculations,
+    followersCount,
+    metaSupported,
+    metaError,
+    cachedAt: new Date().toISOString()
+  };
+
+  reelInsightsCache.set(cacheKey, { data: result, expires: Date.now() + 10 * 60 * 1000 });
+  return result;
+}
+
+// ── Account-Wide Reel Performance Analysis ───────────────────────────────────
+async function analyzeAccountReels(ownerUserId, instagramUserId, options = {}) {
+  await getDecryptedTokenForAccount(ownerUserId, instagramUserId);
+  const account = await getAccount(ownerUserId, instagramUserId);
+  const followersCount = Number(account?.followers_count || account?.followersCount) || null;
+
+  const rawReels = await listReels(ownerUserId, instagramUserId, options.forceRefresh);
+  if (!rawReels || rawReels.length === 0) {
+    return {
+      account: {
+        id: instagramUserId,
+        username: account.username,
+        followersCount
+      },
+      reels: [],
+      summary: {
+        totalAnalyzed: 0,
+        averageEngagementRate: 0,
+        formulaUsed: 'By Followers',
+        topPerformer: null,
+        lowestPerformer: null
+      },
+      observations: ['No published Reels found on this connected Instagram account. Publish a Reel to begin analysis.'],
+      metaSupported: false
+    };
+  }
+
+  const requestedFormula = options.formula || 'reach'; // 'reach' | 'views' | 'followers'
+
+  // Analyze each reel with available metrics
+  const analyzedReels = rawReels.map((reel) => {
+    const metrics = {
+      likes: { value: reel.likeCount ?? null, status: reel.likeCount !== undefined ? 'retrieved' : 'unavailable', source: 'meta_api' },
+      comments: { value: reel.commentsCount ?? null, status: reel.commentsCount !== undefined ? 'retrieved' : 'unavailable', source: 'meta_api' },
+      reach: { value: null, status: 'unavailable', source: 'meta_api' },
+      views: { value: null, status: 'unavailable', source: 'meta_api' },
+      saved: { value: null, status: 'unavailable', source: 'meta_api' },
+      shares: { value: null, status: 'unavailable', source: 'meta_api' }
+    };
+
+    const calculations = calculateReelEngagement(metrics, followersCount);
+
+    // Pick active rate based on formula
+    let activeRate = null;
+    let activeFormulaName = 'Followers';
+    if (requestedFormula === 'reach' && calculations.byReach.available) {
+      activeRate = calculations.byReach.rate;
+      activeFormulaName = 'Reach';
+    } else if (requestedFormula === 'views' && calculations.byViews.available) {
+      activeRate = calculations.byViews.rate;
+      activeFormulaName = 'Views';
+    } else if (calculations.byFollowers.available) {
+      activeRate = calculations.byFollowers.rate;
+      activeFormulaName = 'Followers';
+    }
+
+    return {
+      id: reel.id,
+      caption: reel.caption,
+      permalink: reel.permalink,
+      timestamp: reel.timestamp,
+      thumbnailUrl: reel.thumbnailUrl,
+      mediaType: reel.mediaType,
+      metrics,
+      calculations,
+      activeRate,
+      activeFormulaName
+    };
+  });
+
+  // Calculate account benchmark average for valid rates
+  const validRates = analyzedReels.filter(r => typeof r.activeRate === 'number').map(r => r.activeRate);
+  const avgRate = validRates.length > 0 ? Number((validRates.reduce((a, b) => a + b, 0) / validRates.length).toFixed(2)) : 0;
+
+  // Rank reels descending
+  analyzedReels.sort((a, b) => (b.activeRate || 0) - (a.activeRate || 0));
+
+  analyzedReels.forEach((reel, index) => {
+    reel.rank = index + 1;
+    reel.totalRanked = analyzedReels.length;
+
+    // Deterministic transparent performance score out of 100
+    if (typeof reel.activeRate === 'number' && avgRate > 0) {
+      const ratio = reel.activeRate / avgRate;
+      reel.performanceScore = Math.min(100, Math.max(10, Math.round(50 * ratio)));
+      const diffPercent = Number((((reel.activeRate - avgRate) / avgRate) * 100).toFixed(1));
+      reel.diffFromAverage = diffPercent;
+      reel.scoreExplanation = `${diffPercent >= 0 ? '+' : ''}${diffPercent}% vs your account average (${avgRate}% by ${reel.activeFormulaName})`;
+      if (ratio >= 1.3) reel.performanceTier = 'Top Performer';
+      else if (ratio <= 0.7) reel.performanceTier = 'Needs Iteration';
+      else reel.performanceTier = 'Steady Performer';
+    } else {
+      reel.performanceScore = 50;
+      reel.diffFromAverage = 0;
+      reel.scoreExplanation = `Average baseline (Insufficient account comparison data)`;
+      reel.performanceTier = 'Unranked';
+    }
+  });
+
+  const topPerformer = analyzedReels[0] || null;
+  const lowestPerformer = analyzedReels.length > 1 ? analyzedReels[analyzedReels.length - 1] : null;
+
+  // Generate transparent data-driven observations
+  const observations = [];
+  if (topPerformer && typeof topPerformer.activeRate === 'number') {
+    observations.push(`Your top-performing Reel (#1) achieved ${topPerformer.activeRate}% engagement, which is ${topPerformer.diffFromAverage >= 0 ? '+' : ''}${topPerformer.diffFromAverage}% relative to your account average (${avgRate}%).`);
+  }
+  const avgComments = Math.round(analyzedReels.reduce((sum, r) => sum + (r.metrics.comments.value || 0), 0) / analyzedReels.length);
+  observations.push(`Your analyzed Reels average ${avgComments} comments per post. Reels with strong question hooks attract the highest comment volume.`);
+  if (lowestPerformer && topPerformer && topPerformer.id !== lowestPerformer.id) {
+    observations.push(`Performance variance: Top Reel generates ${topPerformer.metrics.comments.value || 0} comments vs ${lowestPerformer.metrics.comments.value || 0} on your lowest-ranked Reel.`);
+  }
+
+  return {
+    account: {
+      id: instagramUserId,
+      username: account.username,
+      followersCount
+    },
+    reels: analyzedReels,
+    summary: {
+      totalAnalyzed: analyzedReels.length,
+      averageEngagementRate: avgRate,
+      formulaUsed: `By ${analyzedReels[0]?.activeFormulaName || 'Followers'}`,
+      topPerformer: topPerformer ? { id: topPerformer.id, caption: topPerformer.caption, rate: topPerformer.activeRate, rank: topPerformer.rank } : null,
+      lowestPerformer: lowestPerformer ? { id: lowestPerformer.id, caption: lowestPerformer.caption, rate: lowestPerformer.activeRate, rank: lowestPerformer.rank } : null
+    },
+    observations,
+    metaSupported: true
+  };
+}
+
+// ── Manual Metric Analysis Fallback ──────────────────────────────────────────
+function analyzeManualReel(input = {}) {
+  const likes = typeof input.likes === 'number' ? input.likes : (input.likes ? Number(input.likes) : null);
+  const comments = typeof input.comments === 'number' ? input.comments : (input.comments ? Number(input.comments) : null);
+  const reach = typeof input.reach === 'number' ? input.reach : (input.reach ? Number(input.reach) : null);
+  const views = typeof input.views === 'number' ? input.views : (input.views ? Number(input.views) : null);
+  const shares = typeof input.shares === 'number' ? input.shares : (input.shares ? Number(input.shares) : null);
+  const saved = typeof input.saved === 'number' ? input.saved : (input.saved ? Number(input.saved) : null);
+  const followers = typeof input.followers === 'number' ? input.followers : (input.followers ? Number(input.followers) : null);
+
+  const formattedMetrics = {
+    likes: { value: likes, status: likes !== null ? 'manual' : 'unavailable', source: 'manual_entry' },
+    comments: { value: comments, status: comments !== null ? 'manual' : 'unavailable', source: 'manual_entry' },
+    reach: { value: reach, status: reach !== null ? 'manual' : 'unavailable', source: 'manual_entry' },
+    views: { value: views, status: views !== null ? 'manual' : 'unavailable', source: 'manual_entry' },
+    shares: { value: shares, status: shares !== null ? 'manual' : 'unavailable', source: 'manual_entry' },
+    saved: { value: saved, status: saved !== null ? 'manual' : 'unavailable', source: 'manual_entry' }
+  };
+
+  const calculations = calculateReelEngagement(formattedMetrics, followers);
+
+  // Compare to standard industry baseline (3.0%)
+  const benchmark = 3.0;
+  const chosenRate = calculations.byReach.available ? calculations.byReach.rate :
+                     calculations.byViews.available ? calculations.byViews.rate :
+                     calculations.byFollowers.available ? calculations.byFollowers.rate : null;
+
+  let score = 50;
+  let comparison = 'Industry comparison requires at least one valid engagement calculation';
+  let tier = 'Average';
+
+  if (chosenRate !== null) {
+    score = Math.min(100, Math.max(10, Math.round(50 * (chosenRate / benchmark))));
+    const diff = Number((((chosenRate - benchmark) / benchmark) * 100).toFixed(1));
+    comparison = diff >= 0 ? `${diff}% above industry baseline (3.0%)` : `${Math.abs(diff)}% below industry baseline (3.0%)`;
+    tier = score >= 70 ? 'Top Performer' : score <= 35 ? 'Needs Iteration' : 'Steady Performer';
+  }
+
+  return {
+    source: 'manual_entry',
+    caption: String(input.caption || 'Manual Reel Analysis'),
+    metrics: formattedMetrics,
+    followersCount: followers,
+    calculations,
+    performanceScore: score,
+    performanceTier: tier,
+    scoreExplanation: comparison,
+    benchmark
+  };
 }
 
 async function disconnect(userId, instagramUserId) {
@@ -739,5 +1159,9 @@ module.exports = {
   sendPrivateReply,
   sendDirectMessage,
   replyToComment,
-  checkFollowStatus
+  checkFollowStatus,
+  calculateReelEngagement,
+  getReelInsights,
+  analyzeAccountReels,
+  analyzeManualReel
 };

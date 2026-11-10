@@ -30,7 +30,8 @@ function collections() {
     subscriptions: database.collection('subscriptions'),
     otps: database.collection('otps'),
     conversationStates: database.collection('conversation_states'),
-    feedback: database.collection('feedback')
+    feedback: database.collection('feedback'),
+    aiCreditUsage: database.collection('ai_credit_usage')
   };
 }
 
@@ -146,7 +147,9 @@ async function initialize() {
     collections().otps.createIndex({ expires_at: 1 }, { expireAfterSeconds: 0, name: 'otps_expires_ttl' }),
     collections().otps.createIndex({ email: 1, type: 1 }, { name: 'otps_email_type' }),
     // User feedback:
-    collections().feedback.createIndex({ user_id: 1, created_at: -1 }, { name: 'feedback_user_created' })
+    collections().feedback.createIndex({ user_id: 1, created_at: -1 }, { name: 'feedback_user_created' }),
+    // AI credit usage:
+    collections().aiCreditUsage.createIndex({ user_id: 1, created_at: -1 }, { name: 'ai_credit_usage_user' })
   ]);
 
   await migrateJsonData().catch((err) => console.warn('JSON migration notice:', err.message));

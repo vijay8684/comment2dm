@@ -59,6 +59,40 @@
     /* Slider */
     input[type=range] { width:100%; accent-color:#6366f1; }
     .slider-val { display:inline-block; background:rgba(99,102,241,0.15); color:#818cf8; border-radius:6px; padding:2px 10px; font-size:0.82rem; font-weight:600; margin-left:8px; }
+  
+    /* Reel Performance Analyzer */
+    .reels-summary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px; margin-top:16px; margin-bottom:18px; }
+    .summary-card { background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.08); border-radius:14px; padding:16px; text-align:center; }
+    .summary-card .summary-value { font-size:1.8rem; font-weight:700; color:#f1f5f9; line-height:1.2; margin:6px 0 2px; }
+    .summary-card .summary-label { font-size:0.75rem; color:rgba(255,255,255,0.4); text-transform:uppercase; letter-spacing:0.05em; font-weight:600; }
+    .reels-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:16px; margin-top:16px; }
+    .reel-card { background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.08); border-radius:16px; padding:18px; display:flex; flex-direction:column; justify-content:space-between; transition:border-color 0.2s, transform 0.2s; position:relative; }
+    .reel-card:hover { border-color:rgba(99,102,241,0.35); transform:translateY(-2px); }
+    .reel-header { display:flex; gap:12px; align-items:flex-start; margin-bottom:12px; }
+    .reel-thumb-box { width:52px; height:52px; border-radius:10px; overflow:hidden; background:rgba(255,255,255,0.05); flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+    .reel-thumb-img { width:100%; height:100%; object-fit:cover; }
+    .reel-caption-text { font-size:0.84rem; color:#e2e8f0; line-height:1.4; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    .reel-metrics-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:12px 0; background:rgba(0,0,0,0.25); border-radius:10px; padding:10px; }
+    .metric-pill { font-size:0.76rem; color:rgba(255,255,255,0.6); display:flex; justify-content:space-between; align-items:center; }
+    .metric-pill strong { color:#fff; font-weight:600; }
+    .metric-status-tag { font-size:0.65rem; padding:2px 6px; border-radius:4px; font-weight:500; }
+    .status-retrieved { background:rgba(16,185,129,0.15); color:#10b981; }
+    .status-unavailable { background:rgba(255,255,255,0.06); color:rgba(255,255,255,0.4); }
+    .status-manual { background:rgba(245,158,11,0.15); color:#f59e0b; }
+    .tier-badge { display:inline-flex; align-items:center; gap:4px; padding:3px 8px; border-radius:6px; font-size:0.72rem; font-weight:600; }
+    .tier-top { background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); }
+    .tier-steady { background:rgba(99,102,241,0.15); color:#818cf8; border:1px solid rgba(99,102,241,0.3); }
+    .tier-needs-iteration { background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); }
+    .formula-banner { background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.2); border-radius:10px; padding:12px 16px; margin:14px 0; font-size:0.82rem; color:rgba(255,255,255,0.7); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+    .observations-box { background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:12px; padding:14px 18px; margin-bottom:18px; font-size:0.83rem; color:rgba(255,255,255,0.7); }
+    .observations-box li { margin-bottom:6px; }
+    .observations-box li:last-child { margin-bottom:0; }
+    .btn-secondary { background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); color:#e2e8f0; border-radius:10px; padding:7px 14px; font-size:0.82rem; font-weight:600; cursor:pointer; transition:all 0.2s; display:inline-flex; align-items:center; gap:6px; }
+    .btn-secondary:hover { background:rgba(255,255,255,0.1); border-color:rgba(255,255,255,0.2); }
+    .insights-modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.75); backdrop-filter:blur(8px); display:none; align-items:center; justify-content:center; z-index:9999; padding:20px; }
+    .insights-modal-overlay.show { display:flex; }
+    .insights-modal-card { background:#111116; border:1px solid rgba(255,255,255,0.1); border-radius:20px; width:100%; max-width:540px; max-height:90vh; overflow-y:auto; padding:24px; position:relative; box-shadow:0 24px 48px rgba(0,0,0,0.5); }
+
   </style>
 </head>
 <body class="app-body" data-page="creator-tools">
@@ -174,15 +208,177 @@
 
         <!-- Tabs -->
         <div class="studio-tabs" style="margin-top:20px;" id="studioTabs">
-          <button class="studio-tab active" data-panel="hooks">🎬 Hook Generator</button>
+          <button class="studio-tab active" data-panel="reels-analyzer" id="tabReelsAnalyzer">📊 Reel Performance Analyzer</button>
+          <button class="studio-tab" data-panel="hooks">🎬 Hook Generator</button>
           <button class="studio-tab" data-panel="dm-script">📝 DM Script Writer</button>
-          <button class="studio-tab" data-panel="rate">📊 Rate Calculator</button>
-          <button class="studio-tab" data-panel="utm">🔗 UTM Builder</button>
           <button class="studio-tab" data-panel="ideas">💡 Content Ideas</button>
+          <button class="studio-tab" data-panel="utm">🔗 UTM Builder</button>
         </div>
 
         <!-- Panel 1: Hook Generator -->
-        <div class="studio-panel active glass-card" id="panel-hooks">
+        
+        <!-- Panel: Reel Performance Analyzer -->
+        <div class="studio-panel active glass-card" id="panel-reels-analyzer">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
+            <div>
+              <div style="font-size:1.15rem;font-weight:700;color:#f1f5f9;display:flex;align-items:center;gap:8px;">
+                <span>📊 Reel Performance Analyzer</span>
+                <span style="font-size:0.72rem;background:rgba(99,102,241,0.15);color:#818cf8;border:1px solid rgba(99,102,241,0.25);border-radius:20px;padding:2px 8px;font-weight:600;">Meta Graph API v21.0</span>
+              </div>
+              <div style="font-size:0.82rem;color:rgba(255,255,255,0.4);margin-top:4px;">
+                Analyze your Instagram Reels performance using official Meta insights, transparent engagement formulas, and performance benchmarks.
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <button class="btn-secondary" id="refreshReelsBtn" title="Refresh Reels from Meta API">
+                <span id="refreshReelsIcon">🔄</span> <span>Refresh Insights</span>
+              </button>
+              <button class="btn-secondary" id="toggleManualFallbackBtn">
+                <span>📝</span> <span>Manual Entry Fallback</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Account & Formula Controls Bar -->
+          <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span style="font-size:0.8rem;color:rgba(255,255,255,0.45);font-weight:500;">Active Account:</span>
+              <div style="display:inline-flex;align-items:center;gap:6px;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.2);border-radius:20px;padding:4px 12px;font-size:0.82rem;color:#818cf8;font-weight:600;" id="activeReelsAccountBadge">
+                <span id="activeReelsAccountUsername">@mysterio_the_legend</span>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+              <div style="display:flex;align-items:center;gap:6px;">
+                <label style="font-size:0.8rem;color:rgba(255,255,255,0.45);font-weight:500;">Formula:</label>
+                <select class="form-input" id="formulaSelector" style="padding:6px 10px;font-size:0.82rem;width:auto;">
+                  <option value="reach" selected>By Reach: (Interactions / Reach) × 100</option>
+                  <option value="views">By Views: (Interactions / Views) × 100</option>
+                  <option value="followers">By Followers: (Interactions / Followers) × 100</option>
+                </select>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <label style="font-size:0.8rem;color:rgba(255,255,255,0.45);font-weight:500;">Sort:</label>
+                <select class="form-input" id="sortSelector" style="padding:6px 10px;font-size:0.82rem;width:auto;">
+                  <option value="engagement" selected>Highest Engagement</option>
+                  <option value="recent">Most Recent</option>
+                  <option value="comments">Most Comments</option>
+                  <option value="likes">Most Likes</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Formula Explainer Banner -->
+          <div class="formula-banner" id="formulaExplainerBanner">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-size:1.1rem;">📐</span>
+              <span id="formulaExplainerText"><strong>Active Formula: Engagement by Reach</strong> = (Total Interactions ÷ Reach) × 100. Measures the percentage of unique accounts reached that took an action.</span>
+            </div>
+            <span style="font-size:0.75rem;color:#818cf8;font-weight:600;">Transparent Math (0 AI Credits)</span>
+          </div>
+
+          <!-- Summary Metric Cards -->
+          <div class="reels-summary-grid" id="reelsSummaryGrid">
+            <div class="summary-card">
+              <div class="summary-label">Account Avg Engagement</div>
+              <div class="summary-value" id="summaryAvgRate" style="color:#818cf8;">—</div>
+              <div style="font-size:0.74rem;color:rgba(255,255,255,0.35);" id="summaryFormulaLabel">Based on Analyzed Reels</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">Top Performer Rate</div>
+              <div class="summary-value" id="summaryTopRate" style="color:#10b981;">—</div>
+              <div style="font-size:0.74rem;color:rgba(255,255,255,0.35);" id="summaryTopNote">Highest Engagement</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">Analyzed Reels</div>
+              <div class="summary-value" id="summaryReelsCount">0</div>
+              <div style="font-size:0.74rem;color:rgba(255,255,255,0.35);">Live Meta Media</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">Performance Benchmark</div>
+              <div class="summary-value" id="summaryBenchmarkTier" style="font-size:1.3rem;color:#f59e0b;">Evaluating…</div>
+              <div style="font-size:0.74rem;color:rgba(255,255,255,0.35);">Relative to Account Avg</div>
+            </div>
+          </div>
+
+          <!-- Observations Box -->
+          <div class="observations-box" id="observationsContainer">
+            <div style="font-size:0.86rem;font-weight:600;color:#f1f5f9;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+              <span>💡</span> <span>Performance Observations</span>
+            </div>
+            <ul id="observationsList" style="padding-left:18px;margin:0;">
+              <li>Loading Reels performance analysis from Meta Graph API…</li>
+            </ul>
+          </div>
+
+          <!-- Manual Fallback Card (Collapsible) -->
+          <div id="manualFallbackCard" style="display:none;background:rgba(245,158,11,0.03);border:1px solid rgba(245,158,11,0.25);border-radius:14px;padding:20px;margin-bottom:20px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+              <div style="font-size:0.95rem;font-weight:700;color:#f59e0b;display:flex;align-items:center;gap:6px;">
+                <span>📝</span> <span>Manual Fallback Entry Calculator</span>
+                <span class="metric-status-tag status-manual">Manual Fallback</span>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" id="closeManualFallbackBtn" style="padding:2px 8px;">✕ Close</button>
+            </div>
+            <p style="font-size:0.8rem;color:rgba(255,255,255,0.5);margin-bottom:16px;">
+              Use this fallback calculator when Meta API insights are unavailable for a Reel or to evaluate draft concepts before posting.
+            </p>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;">
+              <div class="form-row" style="margin-bottom:0;">
+                <label>Reel Title / Caption</label>
+                <input class="form-input" id="manualCaption" type="text" placeholder="e.g. 5 Mistakes Most Creators Make">
+              </div>
+              <div class="form-row" style="margin-bottom:0;">
+                <label>Follower Count</label>
+                <input class="form-input" id="manualFollowers" type="number" placeholder="e.g. 5000" min="0">
+              </div>
+              <div class="form-row" style="margin-bottom:0;">
+                <label>Reach</label>
+                <input class="form-input" id="manualReach" type="number" placeholder="e.g. 1200" min="0">
+              </div>
+              <div class="form-row" style="margin-bottom:0;">
+                <label>Views / Plays</label>
+                <input class="form-input" id="manualViews" type="number" placeholder="e.g. 2400" min="0">
+              </div>
+              <div class="form-row" style="margin-bottom:0;">
+                <label>Likes</label>
+                <input class="form-input" id="manualLikes" type="number" placeholder="e.g. 150" min="0">
+              </div>
+              <div class="form-row" style="margin-bottom:0;">
+                <label>Comments</label>
+                <input class="form-input" id="manualComments" type="number" placeholder="e.g. 25" min="0">
+              </div>
+              <div class="form-row" style="margin-bottom:0;">
+                <label>Shares</label>
+                <input class="form-input" id="manualShares" type="number" placeholder="e.g. 12" min="0">
+              </div>
+              <div class="form-row" style="margin-bottom:0;">
+                <label>Saves</label>
+                <input class="form-input" id="manualSaves" type="number" placeholder="e.g. 35" min="0">
+              </div>
+            </div>
+            <div style="margin-top:16px;display:flex;align-items:center;gap:12px;">
+              <button class="ai-btn" id="calculateManualBtn" style="padding:8px 18px;font-size:0.84rem;">📊 Calculate Manual Performance</button>
+              <span style="font-size:0.75rem;color:rgba(255,255,255,0.4);">No AI credits consumed (Deterministic math)</span>
+            </div>
+            <div id="manualResultBox" style="margin-top:16px;display:none;"></div>
+          </div>
+
+          <!-- Reels Grid Container -->
+          <div id="reelsLoadingSkeleton" style="text-align:center;padding:40px 16px;color:rgba(255,255,255,0.4);">
+            <div class="spinner" style="width:24px;height:24px;margin:0 auto 12px;border-width:3px;"></div>
+            <div>Retrieving Reels and official insights from Meta Graph API…</div>
+          </div>
+          <div class="reels-grid" id="reelsGrid" style="display:none;"></div>
+          <div id="reelsEmptyState" style="display:none;text-align:center;padding:48px 16px;color:rgba(255,255,255,0.4);">
+            <div style="font-size:2rem;margin-bottom:10px;">🎬</div>
+            <div style="font-size:1rem;font-weight:600;color:#f1f5f9;margin-bottom:4px;">No Reels Analyzed Yet</div>
+            <div style="font-size:0.84rem;max-width:440px;margin:0 auto 16px;">Connect your Instagram Professional account or use the Manual Fallback Calculator to analyze your content performance.</div>
+            <button class="btn-secondary" onclick="document.getElementById('toggleManualFallbackBtn').click();">Use Manual Fallback</button>
+          </div>
+        </div>
+
+        <div class="studio-panel glass-card" id="panel-hooks">
           <div style="font-size:1rem;font-weight:700;color:#f1f5f9;margin-bottom:4px;">🎬 Reel Hook Generator</div>
           <div style="font-size:0.82rem;color:rgba(255,255,255,0.35);margin-bottom:18px;">Generate scroll-stopping hooks for your reels. Each generation costs 10 AI credits.</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
@@ -251,29 +447,6 @@
           <div id="dmScriptResult" style="margin-top:16px;"></div>
         </div>
 
-        <!-- Panel 3: Rate Calculator -->
-        <div class="studio-panel glass-card" id="panel-rate">
-          <div style="font-size:1rem;font-weight:700;color:#f1f5f9;margin-bottom:4px;">📊 Engagement Rate Calculator</div>
-          <div style="font-size:0.82rem;color:rgba(255,255,255,0.35);margin-bottom:18px;">Calculate your Instagram engagement rate and get DM automation recommendations.</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-            <div class="form-row" style="margin-bottom:0;"><label>Follower Count</label><input class="form-input" id="calcFollowers" type="number" placeholder="e.g. 50000" min="0"></div>
-            <div class="form-row" style="margin-bottom:0;"><label>Avg Likes per Post</label><input class="form-input" id="calcLikes" type="number" placeholder="e.g. 1500" min="0"></div>
-            <div class="form-row" style="margin-bottom:0;"><label>Avg Comments per Reel</label><input class="form-input" id="calcComments" type="number" placeholder="e.g. 80" min="0"></div>
-            <div class="form-row" style="margin-bottom:0;">
-              <label>Account Type</label>
-              <select class="form-input" id="calcType">
-                <option value="nano">Nano (1K–10K)</option>
-                <option value="micro">Micro (10K–100K)</option>
-                <option value="mid">Mid-tier (100K–500K)</option>
-                <option value="macro">Macro (500K–1M)</option>
-                <option value="mega">Mega (1M+)</option>
-              </select>
-            </div>
-          </div>
-          <button class="ai-btn" style="margin-top:20px;" id="calcRateBtn">📊 Calculate Engagement Rate</button>
-          <div id="rateResult" style="margin-top:20px;"></div>
-        </div>
-
         <!-- Panel 4: UTM Builder -->
         <div class="studio-panel glass-card" id="panel-utm">
           <div style="font-size:1rem;font-weight:700;color:#f1f5f9;margin-bottom:4px;">🔗 UTM Link Builder</div>
@@ -322,5 +495,20 @@
   <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
   <script src="dashboard.js"></script>
   <script src="creator-tools.js"></script>
+
+  <!-- Single Reel Detailed Insights Modal -->
+  <div class="insights-modal-overlay" id="reelInsightsModal" role="dialog" aria-modal="true" aria-labelledby="reelInsightsTitle">
+    <div class="insights-modal-card">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px;">
+        <div>
+          <span style="font-size:0.75rem;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Meta Graph API Insights</span>
+          <h2 style="font-size:1.1rem;font-weight:700;color:#f1f5f9;margin:2px 0 0;" id="reelInsightsTitle">Reel Insights Breakdown</h2>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" id="closeReelInsightsModalBtn" style="padding:4px 8px;font-size:1.1rem;line-height:1;">✕</button>
+      </div>
+      <div id="reelInsightsModalContent">Loading…</div>
+    </div>
+  </div>
+
 </body>
 </html>
