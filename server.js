@@ -1122,12 +1122,14 @@ async function deliverFinalResource({ recipientIgUserId, senderIgsid, automation
     // Format delivery payload: interactive button if URL is valid, clean text fallback
     let deliveryPayload;
     if (resourceUrl && /^https?:\/\//i.test(resourceUrl)) {
+      // Ensure the text body contains the clickable URL for desktop web Instagram where Meta drops button templates
+      const textWithLink = deliveryText.includes(resourceUrl) ? deliveryText : `${deliveryText}\n\n🔗 ${resourceUrl}`;
       deliveryPayload = {
         attachment: {
           type: 'template',
           payload: {
             template_type: 'button',
-            text: deliveryText,
+            text: textWithLink,
             buttons: [
               {
                 type: 'web_url',
@@ -1523,9 +1525,9 @@ app.post('/api/instagram/webhook', async (request, response) => {
           const parts = payload.split(':');
           autoId = parts[1] || '';
           commentId = parts[2] || '';
-        } else if (/send.*(link|access)/i.test(incomingText)) {
+        } else if (/send.*(link|access)/i.test(incomingText) || /^(link|access|yes|send|send\s*link)$/i.test(incomingText)) {
           action = 'SEND_LINK';
-        } else if (/(follow|following)/i.test(incomingText)) {
+        } else if (/(follow|following|followed|done|checked)/i.test(incomingText)) {
           action = 'CHECK_FOLLOW';
         }
 
@@ -1838,25 +1840,67 @@ app.get('/api/analytics/overview', requireAuth, async (request, response, next) 
   try {
     const ownerId = request.user.id;
     const days = parseInt(request.query.days, 10) || 30;
+    const requestedIgUserId = String(request.query.instagram_user_id || '').trim();
 
-    let [accounts, activeAutomations, totals, recent, daily] = await Promise.all([
-      db.get('SELECT COUNT(*) AS count FROM instagram_accounts WHERE owner_user_id = ?', [ownerId]),
-      db.get('SELECT COUNT(*) AS count FROM automations WHERE owner_user_id = ? AND enabled = 1', [ownerId]),
-      db.get(`SELECT
-        SUM(CASE WHEN event_type = 'comment_received' THEN 1 ELSE 0 END) AS comments,
-        SUM(CASE WHEN event_type = 'private_reply' AND status = 'success' THEN 1 ELSE 0 END) AS messagesSent,
-        SUM(CASE WHEN event_type = 'private_reply' AND status = 'failed' THEN 1 ELSE 0 END) AS messagesFailed,
-        SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS successfulEvents
-        FROM automation_events WHERE owner_user_id = ?`, [ownerId]),
-      db.all(`SELECT event_type AS eventType, status, keyword, message_text AS messageText, error_message AS errorMessage, created_at AS createdAt
-        FROM automation_events WHERE owner_user_id = ? ORDER BY created_at DESC LIMIT 20`, [ownerId]),
-      db.all(`SELECT substr(created_at,1,10) AS date,
-        SUM(CASE WHEN event_type = 'comment_received' THEN 1 ELSE 0 END) AS comments,
-        SUM(CASE WHEN event_type = 'private_reply' AND status = 'success' THEN 1 ELSE 0 END) AS messagesSent,
-        SUM(CASE WHEN event_type = 'private_reply' AND status = 'failed' THEN 1 ELSE 0 END) AS messagesFailed
-        FROM automation_events WHERE owner_user_id = ? AND created_at >= datetime('now','-29 days')
-        GROUP BY substr(created_at,1,10) ORDER BY date ASC`, [ownerId])
-    ]);
+    let targetAccount = null;
+    if (requestedIgUserId) {
+      if (db.collections && db.collections().instagramAccounts) {
+        targetAccount = await db.collections().instagramAccounts.findOne({
+          owner_user_id: ownerId,
+          instagram_user_id: requestedIgUserId
+        });
+      } else {
+        targetAccount = await db.get(
+          'SELECT * FROM instagram_accounts WHERE owner_user_id = ? AND instagram_user_id = ?',
+          [ownerId, requestedIgUserId]
+        );
+      }
+      if (!targetAccount) {
+        return response.status(403).json({ error: 'Unauthorized: Instagram account does not belong to user.' });
+      }
+    }
+
+    let accounts, activeAutomations, totals, recent, daily;
+
+    if (requestedIgUserId) {
+      [accounts, activeAutomations, totals, recent, daily] = await Promise.all([
+        db.get('SELECT COUNT(*) AS count FROM instagram_accounts WHERE owner_user_id = ?', [ownerId]),
+        db.get('SELECT COUNT(*) AS count FROM automations WHERE owner_user_id = ? AND instagram_user_id = ? AND enabled = 1', [ownerId, requestedIgUserId]),
+        db.get(`SELECT
+          SUM(CASE WHEN event_type = 'comment_received' THEN 1 ELSE 0 END) AS comments,
+          SUM(CASE WHEN event_type = 'private_reply' AND status = 'success' THEN 1 ELSE 0 END) AS messagesSent,
+          SUM(CASE WHEN event_type = 'private_reply' AND status = 'failed' THEN 1 ELSE 0 END) AS messagesFailed,
+          SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS successfulEvents
+          FROM automation_events WHERE owner_user_id = ? AND instagram_user_id = ?`, [ownerId, requestedIgUserId]),
+        db.all(`SELECT event_type AS eventType, status, keyword, message_text AS messageText, error_message AS errorMessage, created_at AS createdAt
+          FROM automation_events WHERE owner_user_id = ? AND instagram_user_id = ? ORDER BY created_at DESC LIMIT 20`, [ownerId, requestedIgUserId]),
+        db.all(`SELECT substr(created_at,1,10) AS date,
+          SUM(CASE WHEN event_type = 'comment_received' THEN 1 ELSE 0 END) AS comments,
+          SUM(CASE WHEN event_type = 'private_reply' AND status = 'success' THEN 1 ELSE 0 END) AS messagesSent,
+          SUM(CASE WHEN event_type = 'private_reply' AND status = 'failed' THEN 1 ELSE 0 END) AS messagesFailed
+          FROM automation_events WHERE owner_user_id = ? AND instagram_user_id = ? AND created_at >= datetime('now','-29 days')
+          GROUP BY substr(created_at,1,10) ORDER BY date ASC`, [ownerId, requestedIgUserId])
+      ]);
+    } else {
+      [accounts, activeAutomations, totals, recent, daily] = await Promise.all([
+        db.get('SELECT COUNT(*) AS count FROM instagram_accounts WHERE owner_user_id = ?', [ownerId]),
+        db.get('SELECT COUNT(*) AS count FROM automations WHERE owner_user_id = ? AND enabled = 1', [ownerId]),
+        db.get(`SELECT
+          SUM(CASE WHEN event_type = 'comment_received' THEN 1 ELSE 0 END) AS comments,
+          SUM(CASE WHEN event_type = 'private_reply' AND status = 'success' THEN 1 ELSE 0 END) AS messagesSent,
+          SUM(CASE WHEN event_type = 'private_reply' AND status = 'failed' THEN 1 ELSE 0 END) AS messagesFailed,
+          SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS successfulEvents
+          FROM automation_events WHERE owner_user_id = ?`, [ownerId]),
+        db.all(`SELECT event_type AS eventType, status, keyword, message_text AS messageText, error_message AS errorMessage, created_at AS createdAt
+          FROM automation_events WHERE owner_user_id = ? ORDER BY created_at DESC LIMIT 20`, [ownerId]),
+        db.all(`SELECT substr(created_at,1,10) AS date,
+          SUM(CASE WHEN event_type = 'comment_received' THEN 1 ELSE 0 END) AS comments,
+          SUM(CASE WHEN event_type = 'private_reply' AND status = 'success' THEN 1 ELSE 0 END) AS messagesSent,
+          SUM(CASE WHEN event_type = 'private_reply' AND status = 'failed' THEN 1 ELSE 0 END) AS messagesFailed
+          FROM automation_events WHERE owner_user_id = ? AND created_at >= datetime('now','-29 days')
+          GROUP BY substr(created_at,1,10) ORDER BY date ASC`, [ownerId])
+      ]);
+    }
 
     let sent = Number(totals?.messagesSent || 0);
     let failed = Number(totals?.messagesFailed || 0);
@@ -1866,34 +1910,53 @@ app.get('/api/analytics/overview', requireAuth, async (request, response, next) 
     let leaderboard = [];
     if (db.collections && db.collections().automationEvents) {
       const col = db.collections().automationEvents;
-      const countSent = await col.countDocuments({ owner_user_id: ownerId, status: 'success' });
-      const countFailed = await col.countDocuments({ owner_user_id: ownerId, status: 'failed' });
-      const totalEvents = await col.countDocuments({ owner_user_id: ownerId });
-      
+      const baseFilter = { owner_user_id: ownerId };
+      if (requestedIgUserId) {
+        baseFilter.instagram_user_id = requestedIgUserId;
+      }
+
+      const countSent = await col.countDocuments({ ...baseFilter, event_type: 'private_reply', status: 'success' });
+      const countFailed = await col.countDocuments({ ...baseFilter, event_type: 'private_reply', status: 'failed' });
+      const countComments = await col.countDocuments({ ...baseFilter, event_type: 'comment_received' });
+
       sent = countSent;
       failed = countFailed;
-      commentsCount = totalEvents;
+      commentsCount = countComments;
 
       // Build automation leaderboard
       if (db.collections().automations) {
-        const userAutos = await db.collections().automations.find({ owner_user_id: ownerId }).toArray();
+        const autoFilter = { owner_user_id: ownerId };
+        if (requestedIgUserId) autoFilter.instagram_user_id = requestedIgUserId;
+        const userAutos = await db.collections().automations.find(autoFilter).toArray();
         for (const auto of userAutos) {
           const autoSent = await col.countDocuments({ automation_id: auto.id, status: 'success' });
           const autoFailed = await col.countDocuments({ automation_id: auto.id, status: 'failed' });
           leaderboard.push({
             id: auto.id,
             name: auto.keyword ? `Keyword: ${auto.keyword}` : 'All Comments',
-            account: auto.username || 'Connected Account',
+            account: auto.username || (targetAccount ? targetAccount.username : 'Connected Account'),
             sent: autoSent,
             total: autoSent + autoFailed,
             active: Boolean(auto.enabled)
           });
         }
       }
+
+      if (requestedIgUserId) {
+        const recentEvents = await col.find(baseFilter).sort({ created_at: -1 }).limit(20).toArray();
+        recent = recentEvents.map(e => ({
+          eventType: e.event_type,
+          status: e.status,
+          keyword: e.keyword,
+          messageText: e.message_text,
+          errorMessage: e.error_message,
+          createdAt: e.created_at
+        }));
+      }
     }
 
     const totalDMs = sent + failed;
-    const deliveryRate = totalDMs > 0 ? Math.round((sent / totalDMs) * 100) : 100;
+    const deliveryRate = totalDMs > 0 ? Math.round((sent / totalDMs) * 100) : 0;
 
     // Build daily array for bar chart ({ date, count })
     const dailyDms = (daily && daily.length > 0)
@@ -1901,10 +1964,11 @@ app.get('/api/analytics/overview', requireAuth, async (request, response, next) 
       : [];
 
     return response.json({
-      // Fields expected by analytics.js frontend
+      // Fields expected by analytics.js frontend & dashboard.js
       dmsSent: sent,
       commentsProcessed: commentsCount,
       failed,
+      totalDMs,
       deliveryRate,
       activeAutomations: activeAutomations?.count || 0,
       dailyDms,
@@ -1918,6 +1982,76 @@ app.get('/api/analytics/overview', requireAuth, async (request, response, next) 
       successfulEvents: sent,
       recent: recent || [],
       daily: daily || []
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// ==========================================
+// User Feedback & Feature Requests
+// ==========================================
+app.post('/api/feedback', requireAuth, async (request, response, next) => {
+  try {
+    const userId = request.user.id;
+    const userEmail = request.user.email || '';
+    const { category, subject, description } = request.body || {};
+
+    const validCategories = ['Bug Report', 'Feature Request', 'UI/UX Improvement', 'General Feedback'];
+    if (!category || !validCategories.includes(category)) {
+      return response.status(400).json({ error: 'Please select a valid feedback category.' });
+    }
+
+    const cleanSubject = String(subject || '').trim();
+    if (cleanSubject.length < 3 || cleanSubject.length > 150) {
+      return response.status(400).json({ error: 'Subject must be between 3 and 150 characters.' });
+    }
+
+    const cleanDesc = String(description || '').trim();
+    if (cleanDesc.length < 10 || cleanDesc.length > 2000) {
+      return response.status(400).json({ error: 'Description must be between 10 and 2000 characters.' });
+    }
+
+    // Rate limiting: max 5 submissions per 10 minutes per user
+    const col = db.collections ? db.collections().feedback : null;
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
+    if (col) {
+      const recentCount = await col.countDocuments({
+        user_id: userId,
+        created_at: { $gte: tenMinutesAgo }
+      });
+      if (recentCount >= 5) {
+        return response.status(429).json({ error: 'Feedback rate limit reached. Please wait a few minutes before submitting again.' });
+      }
+
+      // Duplicate prevention: check if identical subject submitted in last 2 minutes
+      const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+      const duplicate = await col.findOne({
+        user_id: userId,
+        category,
+        subject: cleanSubject,
+        created_at: { $gte: twoMinutesAgo }
+      });
+      if (duplicate) {
+        return response.status(409).json({ error: 'You already submitted this feedback recently. Thank you!' });
+      }
+
+      await col.insertOne({
+        id: crypto.randomUUID(),
+        user_id: userId,
+        user_email: userEmail,
+        category,
+        subject: cleanSubject,
+        description: cleanDesc,
+        status: 'new',
+        created_at: new Date().toISOString()
+      });
+    }
+
+    return response.json({
+      success: true,
+      message: 'Thank you for your feedback! Our team has received your submission.'
     });
   } catch (error) {
     return next(error);

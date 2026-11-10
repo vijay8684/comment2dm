@@ -29,7 +29,8 @@ function collections() {
     coupons: database.collection('coupons'),
     subscriptions: database.collection('subscriptions'),
     otps: database.collection('otps'),
-    conversationStates: database.collection('conversation_states')
+    conversationStates: database.collection('conversation_states'),
+    feedback: database.collection('feedback')
   };
 }
 
@@ -143,7 +144,9 @@ async function initialize() {
     sessions.createIndex({ expires_at: 1 }, { expireAfterSeconds: 0, name: 'sessions_expires_ttl' }),
     // OTPs auto-expire:
     collections().otps.createIndex({ expires_at: 1 }, { expireAfterSeconds: 0, name: 'otps_expires_ttl' }),
-    collections().otps.createIndex({ email: 1, type: 1 }, { name: 'otps_email_type' })
+    collections().otps.createIndex({ email: 1, type: 1 }, { name: 'otps_email_type' }),
+    // User feedback:
+    collections().feedback.createIndex({ user_id: 1, created_at: -1 }, { name: 'feedback_user_created' })
   ]);
 
   await migrateJsonData().catch((err) => console.warn('JSON migration notice:', err.message));
@@ -425,9 +428,13 @@ async function all(sql, params = []) {
     }));
   }
 
-  if (normalized.includes('from automation_events where owner_user_id = ? order by created_at desc limit')) {
-    const [ownerUserId] = params;
-    const events = await automationEvents.find({ owner_user_id: ownerUserId }).sort({ created_at: -1 }).limit(20).toArray();
+  if (normalized.includes('from automation_events where owner_user_id = ?')) {
+    const [ownerUserId, instagramUserId] = params;
+    const filter = { owner_user_id: ownerUserId };
+    if (instagramUserId && normalized.includes('instagram_user_id')) {
+      filter.instagram_user_id = instagramUserId;
+    }
+    const events = await automationEvents.find(filter).sort({ created_at: -1 }).limit(20).toArray();
     return events.map((e) => ({
       eventType: e.event_type,
       status: e.status,
@@ -477,14 +484,22 @@ async function get(sql, params = []) {
   }
 
   if (normalized.includes('count(*) as count from automations where owner_user_id')) {
-    const [ownerUserId] = params;
-    const count = await automations.countDocuments({ owner_user_id: ownerUserId, enabled: true });
+    const [ownerUserId, instagramUserId] = params;
+    const filter = { owner_user_id: ownerUserId, enabled: true };
+    if (instagramUserId && normalized.includes('instagram_user_id')) {
+      filter.instagram_user_id = instagramUserId;
+    }
+    const count = await automations.countDocuments(filter);
     return { count };
   }
 
   if (normalized.includes('sum(case when event_type = \'comment_received\'')) {
-    const [ownerUserId] = params;
-    const events = await automationEvents.find({ owner_user_id: ownerUserId }).toArray();
+    const [ownerUserId, instagramUserId] = params;
+    const filter = { owner_user_id: ownerUserId };
+    if (instagramUserId && normalized.includes('instagram_user_id')) {
+      filter.instagram_user_id = instagramUserId;
+    }
+    const events = await automationEvents.find(filter).toArray();
     let comments = 0;
     let messagesSent = 0;
     let messagesFailed = 0;
