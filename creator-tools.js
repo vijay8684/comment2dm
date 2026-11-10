@@ -5,6 +5,7 @@
   let aiCredits = 100;
   let activeInstagramAccount = null;
   let currentReelsData = null;
+  const selectedReelsToCompare = new Set();
 
   // ── Tab switching ──────────────────────────────────────────────────────────
   document.getElementById('studioTabs')?.addEventListener('click', (e) => {
@@ -204,9 +205,17 @@
       obsList.innerHTML = data.observations.map(obs => `<li style="margin-bottom:6px;">${obs}</li>`).join('');
     }
 
+    // Filter Reels by Date Range
+    const dateRangeVal = document.getElementById('dateRangeSelector')?.value || 'all';
+    const now = Date.now();
+    let filtered = [...reels];
+    if (dateRangeVal === '7d') filtered = filtered.filter(r => r.timestamp && (now - new Date(r.timestamp).getTime() <= 7 * 86400000));
+    else if (dateRangeVal === '30d') filtered = filtered.filter(r => r.timestamp && (now - new Date(r.timestamp).getTime() <= 30 * 86400000));
+    else if (dateRangeVal === '90d') filtered = filtered.filter(r => r.timestamp && (now - new Date(r.timestamp).getTime() <= 90 * 86400000));
+
     // Sort Reels
     const sortVal = document.getElementById('sortSelector')?.value || 'engagement';
-    const sorted = [...reels].sort((a, b) => {
+    const sorted = filtered.sort((a, b) => {
       if (sortVal === 'recent') return new Date(b.timestamp || 0) - new Date(a.timestamp || 0);
       if (sortVal === 'comments') return (b.metrics?.comments?.value || 0) - (a.metrics?.comments?.value || 0);
       if (sortVal === 'likes') return (b.metrics?.likes?.value || 0) - (a.metrics?.likes?.value || 0);
@@ -241,7 +250,12 @@
               <div style="flex:1;min-width:0;">
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:2px;">
                   <span class="tier-badge ${tierClass}">${tierIcon} ${reel.performanceTier || 'Reel'}</span>
-                  <span style="font-size:0.74rem;color:rgba(255,255,255,0.35);">${dateStr}</span>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:0.74rem;color:rgba(255,255,255,0.35);">${dateStr}</span>
+                    <label style="display:inline-flex;align-items:center;gap:4px;font-size:0.72rem;color:rgba(255,255,255,0.5);cursor:pointer;" title="Select to compare">
+                      <input type="checkbox" class="reel-compare-check" data-id="${reel.id}" ${selectedReelsToCompare.has(reel.id) ? 'checked' : ''}> Compare
+                    </label>
+                  </div>
                 </div>
                 <div class="reel-caption-text" title="${reel.caption || ''}">${reel.caption || 'No caption available'}</div>
               </div>
@@ -314,7 +328,116 @@
         }
       });
     });
+
+    // Checkbox listener for side-by-side comparison
+    grid.querySelectorAll('.reel-compare-check').forEach(cb => {
+      cb.addEventListener('change', () => {
+        if (cb.checked) selectedReelsToCompare.add(cb.dataset.id);
+        else selectedReelsToCompare.delete(cb.dataset.id);
+        updateCompareBar(reels);
+      });
+    });
   }
+
+  function updateCompareBar(reels) {
+    const bar = document.getElementById('compareActionBar');
+    const countEl = document.getElementById('compareCount');
+    if (!bar) return;
+    const count = selectedReelsToCompare.size;
+    if (count >= 2) {
+      bar.style.display = 'flex';
+      if (countEl) countEl.textContent = count;
+    } else {
+      bar.style.display = 'none';
+    }
+  }
+
+  document.getElementById('clearCompareBtn')?.addEventListener('click', () => {
+    selectedReelsToCompare.clear();
+    document.querySelectorAll('.reel-compare-check').forEach(cb => { cb.checked = false; });
+    const bar = document.getElementById('compareActionBar');
+    if (bar) bar.style.display = 'none';
+  });
+
+  document.getElementById('openCompareModalBtn')?.addEventListener('click', () => {
+    const modal = document.getElementById('compareModal');
+    const content = document.getElementById('compareModalContent');
+    if (!modal || !content || !currentReelsData) return;
+
+    const allReels = currentReelsData.reels || [];
+    const selected = allReels.filter(r => selectedReelsToCompare.has(r.id));
+    if (selected.length < 2) return;
+
+    modal.classList.add('show');
+
+    content.innerHTML = `
+      <table style="width:100%;border-collapse:collapse;font-size:0.83rem;color:#e2e8f0;text-align:left;">
+        <thead>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.1);">
+            <th style="padding:10px 14px;color:rgba(255,255,255,0.4);font-weight:600;">Metric</th>
+            ${selected.map(r => `
+              <th style="padding:10px 14px;min-width:180px;">
+                <div style="font-weight:700;color:#f1f5f9;margin-bottom:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">
+                  ${r.caption || 'Reel ' + r.id}
+                </div>
+                <span class="tier-badge ${r.performanceTier === 'Top Performer' ? 'tier-top' : r.performanceTier === 'Needs Iteration' ? 'tier-needs-iteration' : 'tier-steady'}">
+                  ${r.performanceTier || 'Reel'}
+                </span>
+              </th>
+            `).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);background:rgba(255,255,255,0.01);">
+            <td style="padding:10px 14px;color:rgba(255,255,255,0.5);">Engagement Rate (${selected[0]?.activeFormulaName || 'Formula'})</td>
+            ${selected.map(r => `<td style="padding:10px 14px;font-weight:700;font-size:1.05rem;color:#10b981;">${typeof r.activeRate === 'number' ? r.activeRate + '%' : '—'}</td>`).join('')}
+          </tr>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+            <td style="padding:10px 14px;color:rgba(255,255,255,0.5);">Performance Score</td>
+            ${selected.map(r => `<td style="padding:10px 14px;font-weight:600;color:#818cf8;">${r.performanceScore || 50} / 100</td>`).join('')}
+          </tr>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);background:rgba(255,255,255,0.01);">
+            <td style="padding:10px 14px;color:rgba(255,255,255,0.5);">Total Interactions</td>
+            ${selected.map(r => `<td style="padding:10px 14px;">${r.calculations?.totalInteractions?.value?.toLocaleString() || '—'}</td>`).join('')}
+          </tr>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+            <td style="padding:10px 14px;color:rgba(255,255,255,0.5);">Reach</td>
+            ${selected.map(r => `<td style="padding:10px 14px;">${r.metrics?.reach?.value !== null && r.metrics?.reach?.value !== undefined ? r.metrics.reach.value.toLocaleString() : '<span style="color:rgba(255,255,255,0.3);">Unavailable</span>'}</td>`).join('')}
+          </tr>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);background:rgba(255,255,255,0.01);">
+            <td style="padding:10px 14px;color:rgba(255,255,255,0.5);">Views / Plays</td>
+            ${selected.map(r => `<td style="padding:10px 14px;">${r.metrics?.views?.value !== null && r.metrics?.views?.value !== undefined ? r.metrics.views.value.toLocaleString() : '<span style="color:rgba(255,255,255,0.3);">Unavailable</span>'}</td>`).join('')}
+          </tr>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+            <td style="padding:10px 14px;color:rgba(255,255,255,0.5);">Likes</td>
+            ${selected.map(r => `<td style="padding:10px 14px;">${r.metrics?.likes?.value?.toLocaleString() || 0}</td>`).join('')}
+          </tr>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);background:rgba(255,255,255,0.01);">
+            <td style="padding:10px 14px;color:rgba(255,255,255,0.5);">Comments</td>
+            ${selected.map(r => `<td style="padding:10px 14px;">${r.metrics?.comments?.value?.toLocaleString() || 0}</td>`).join('')}
+          </tr>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+            <td style="padding:10px 14px;color:rgba(255,255,255,0.5);">Shares</td>
+            ${selected.map(r => `<td style="padding:10px 14px;">${r.metrics?.shares?.value !== null && r.metrics?.shares?.value !== undefined ? r.metrics.shares.value.toLocaleString() : '<span style="color:rgba(255,255,255,0.3);">Unavailable</span>'}</td>`).join('')}
+          </tr>
+          <tr>
+            <td style="padding:10px 14px;color:rgba(255,255,255,0.5);">Saves</td>
+            ${selected.map(r => `<td style="padding:10px 14px;">${r.metrics?.saved?.value !== null && r.metrics?.saved?.value !== undefined ? r.metrics.saved.value.toLocaleString() : '<span style="color:rgba(255,255,255,0.3);">Unavailable</span>'}</td>`).join('')}
+          </tr>
+        </tbody>
+      </table>
+    `;
+  });
+
+  document.getElementById('closeCompareModalBtn')?.addEventListener('click', () => {
+    document.getElementById('compareModal')?.classList.remove('show');
+  });
+
+  document.getElementById('compareModal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'compareModal') {
+      document.getElementById('compareModal').classList.remove('show');
+    }
+  });
 
   // ── Single Reel Detailed Insights Modal ────────────────────────────────────
   async function openReelInsightsModal(mediaId) {
@@ -495,6 +618,10 @@
       else if (val === 'followers') txt.innerHTML = '<strong>Active Formula: Engagement by Followers</strong> = (Total Interactions ÷ Followers) × 100. Measures engagement relative to your total follower base.';
     }
     loadReelPerformance(false);
+  });
+
+  document.getElementById('dateRangeSelector')?.addEventListener('change', () => {
+    if (currentReelsData) renderReelsPerformance(currentReelsData);
   });
 
   document.getElementById('sortSelector')?.addEventListener('change', () => {
