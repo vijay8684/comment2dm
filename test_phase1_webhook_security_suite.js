@@ -92,7 +92,8 @@ function createMockMongoDb() {
     },
     async findOneAndUpdate(filter, update, options) {
       for (const [key, doc] of jobs.entries()) {
-        if (doc.status === filter.status) {
+        const matchesStatus = filter.status ? doc.status === filter.status : (filter.$or ? filter.$or.some(c => c.status === doc.status) : doc.status === 'queued');
+        if (matchesStatus) {
           if (update.$set) Object.assign(doc, update.$set);
           if (update.$inc) {
             for (const k in update.$inc) {

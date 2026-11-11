@@ -1,6 +1,17 @@
 // src/jobs/webhookJobQueue.js
-// Durable Webhook Ingestion, Deduplication, and Queue Management
+// Durable Webhook Ingestion, Crash Recovery, Concurrency Control & Queue Management
 const crypto = require('crypto');
+const metaRateLimiter = require('../services/metaRateLimiter');
+
+// Configurable Queue Parameters (with conservative, documented defaults)
+const WORKER_POLL_INTERVAL_MS = Number(process.env.WORKER_POLL_INTERVAL_MS) || 1000; // 1s poll interval
+const JOB_LEASE_MS = Number(process.env.JOB_LEASE_MS) || 120000;                     // 120s / 2m lease duration
+const MAX_JOB_ATTEMPTS = Number(process.env.MAX_JOB_ATTEMPTS) || 5;                  // Max 5 attempts before dead-letter
+const WORKER_CONCURRENCY = Number(process.env.WORKER_CONCURRENCY) || 5;              // Max 5 concurrent jobs globally
+const ACCOUNT_CONCURRENCY = Number(process.env.ACCOUNT_CONCURRENCY) || 2;            // Max 2 concurrent jobs per creator
+const BASE_BACKOFF_MS = Number(process.env.BASE_BACKOFF_MS) || 2000;                 // 2s base backoff
+const MAX_BACKOFF_MS = Number(process.env.MAX_BACKOFF_MS) || 300000;                 // 5m max backoff
+const JITTER_MS = Number(process.env.JITTER_MS) || 1000;                             // 0-1000ms randomized jitter
 
 /**
  * Normalizes an incoming Meta webhook payload into standard job definitions.
@@ -63,10 +74,15 @@ function normalizeWebhookPayload(payload) {
         status: 'queued',
         attempts: 0,
         last_error: null,
+        failure_category: null,
+        attempt_history: [],
+        run_at: new Date(),
         received_at: new Date().toISOString(),
         created_at: new Date(),
         updated_at: new Date(),
-        locked_until: null
+        locked_until: null,
+        worker_id: null,
+        completed_at: null
       });
     }
 
@@ -136,10 +152,15 @@ function normalizeWebhookPayload(payload) {
         status: 'queued',
         attempts: 0,
         last_error: null,
+        failure_category: null,
+        attempt_history: [],
+        run_at: new Date(),
         received_at: new Date().toISOString(),
         created_at: new Date(),
         updated_at: new Date(),
-        locked_until: null
+        locked_until: null,
+        worker_id: null,
+        completed_at: null
       });
     }
   }
@@ -208,37 +229,80 @@ async function ingestWebhookPayload(payload, db) {
 }
 
 /**
- * Atomically claims the next queued job from the database for processing.
+ * Atomically claims the next eligible job from the database for processing.
+ * Handles:
+ * 1. Fresh 'queued' jobs whose run_at is due.
+ * 2. 'retrying' jobs whose backoff run_at has arrived.
+ * 3. Crash Recovery: 'processing' jobs whose lease expired (locked_until <= now).
+ * 4. Fair scheduling & per-account concurrency via excludedAccountIds filter.
  *
  * @param {object} db - Database module instance
+ * @param {object} [options] - Claim options
+ * @param {string} [options.workerId] - Worker ID claiming the job
+ * @param {number} [options.leaseMs] - Lease lock duration in milliseconds
+ * @param {Array<string>} [options.excludedAccountIds] - Account IDs to exclude from this claim tick
  * @returns {Promise<object|null>} - Claimed job document or null
  */
-async function claimNextJob(db) {
+async function claimNextJob(db, options = {}) {
   const isMongo = Boolean(db && db.collections && db.collections().webhookJobs);
+  const now = new Date();
+  const workerId = options.workerId || `worker_${process.pid}_${crypto.randomBytes(4).toString('hex')}`;
+  const leaseMs = Number(options.leaseMs) || JOB_LEASE_MS;
+  const lockExpiry = new Date(now.getTime() + leaseMs);
+  const excludedAccounts = Array.isArray(options.excludedAccountIds) ? options.excludedAccountIds : [];
 
   if (isMongo) {
     const col = db.collections().webhookJobs;
-    const now = new Date();
-    const lockExpiry = new Date(Date.now() + 60000); // 60s processing lock
+
+    const baseFilter = {
+      attempts: { $lt: MAX_JOB_ATTEMPTS },
+      $or: [
+        // Condition 1: 'queued' jobs whose run_at is due
+        {
+          status: 'queued',
+          $or: [
+            { run_at: null },
+            { run_at: { $exists: false } },
+            { run_at: { $lte: now } }
+          ]
+        },
+        // Condition 2: 'retrying' jobs whose run_at has arrived
+        {
+          status: 'retrying',
+          $or: [
+            { run_at: null },
+            { run_at: { $exists: false } },
+            { run_at: { $lte: now } }
+          ]
+        },
+        // Condition 3: Crash Recovery: 'processing' jobs whose lease expired
+        {
+          status: 'processing',
+          locked_until: { $lte: now }
+        }
+      ]
+    };
+
+    if (excludedAccounts.length > 0) {
+      baseFilter.instagram_account_id = { $nin: excludedAccounts };
+    }
+
+    const updateDoc = {
+      $set: {
+        status: 'processing',
+        locked_until: lockExpiry,
+        worker_id: workerId,
+        lease_extended_at: now,
+        updated_at: now
+      },
+      $inc: { attempts: 1 }
+    };
 
     const result = await col.findOneAndUpdate(
+      baseFilter,
+      updateDoc,
       {
-        status: 'queued',
-        $or: [
-          { locked_until: null },
-          { locked_until: { $lte: now } }
-        ]
-      },
-      {
-        $set: {
-          status: 'processing',
-          locked_until: lockExpiry,
-          updated_at: now
-        },
-        $inc: { attempts: 1 }
-      },
-      {
-        sort: { created_at: 1 },
+        sort: { run_at: 1, created_at: 1 },
         returnDocument: 'after'
       }
     );
@@ -246,11 +310,22 @@ async function claimNextJob(db) {
     if (!result) return null;
     return result.value !== undefined ? result.value : result;
   } else {
+    // In-memory fallback for testing
     for (const [key, job] of memoryJobsStore.entries()) {
-      if (job.status === 'queued') {
+      if (job.attempts >= MAX_JOB_ATTEMPTS) continue;
+      if (excludedAccounts.includes(job.instagram_account_id)) continue;
+
+      const isQueuedDue = (job.status === 'queued') && (!job.run_at || job.run_at <= now);
+      const isRetryingDue = (job.status === 'retrying') && (!job.run_at || job.run_at <= now);
+      const isExpiredProcessing = (job.status === 'processing') && (job.locked_until && job.locked_until <= now);
+
+      if (isQueuedDue || isRetryingDue || isExpiredProcessing) {
         job.status = 'processing';
         job.attempts = (job.attempts || 0) + 1;
-        job.updated_at = new Date();
+        job.worker_id = workerId;
+        job.locked_until = lockExpiry;
+        job.lease_extended_at = now;
+        job.updated_at = now;
         return job;
       }
     }
@@ -259,46 +334,282 @@ async function claimNextJob(db) {
 }
 
 /**
- * Updates a job's status and metadata upon completion or failure.
+ * Extends the lease lock of an actively processing job (heartbeat).
  *
  * @param {object} job - The job document
- * @param {string} status - New state ('sent', 'failed', 'retrying', 'ignored')
- * @param {object} details - Optional error or completion metadata
+ * @param {string} workerId - Worker ID extending lease
+ * @param {number} [extensionMs] - Milliseconds to extend
  * @param {object} db - Database module instance
+ * @returns {Promise<boolean>} - True if lease was extended
  */
-async function updateJobStatus(job, status, details = {}, db) {
+async function extendLease(job, workerId, extensionMs = JOB_LEASE_MS, db) {
   const isMongo = Boolean(db && db.collections && db.collections().webhookJobs);
   const now = new Date();
+  const newLockExpiry = new Date(now.getTime() + extensionMs);
+
+  if (isMongo) {
+    const col = db.collections().webhookJobs;
+    const filter = {
+      event_key: job.event_key,
+      status: 'processing'
+    };
+    if (workerId) filter.worker_id = workerId;
+
+    const res = await col.updateOne(filter, {
+      $set: {
+        locked_until: newLockExpiry,
+        lease_extended_at: now,
+        updated_at: now
+      }
+    });
+    return (res.modifiedCount || res.matchedCount) > 0;
+  } else {
+    const existing = memoryJobsStore.get(job.event_key);
+    if (existing && existing.status === 'processing') {
+      if (!workerId || existing.worker_id === workerId) {
+        existing.locked_until = newLockExpiry;
+        existing.lease_extended_at = now;
+        existing.updated_at = now;
+        return true;
+      }
+    }
+    return false;
+  }
+}
+
+/**
+ * Handles job failure with error classification, exponential backoff, jitter, and dead-letter logic.
+ *
+ * @param {object} job - The job document
+ * @param {Error|object} error - The error encountered
+ * @param {object} db - Database module instance
+ * @returns {Promise<{ status: string, classification: object }>}
+ */
+async function handleJobFailure(job, error, db) {
+  const isMongo = Boolean(db && db.collections && db.collections().webhookJobs);
+  const now = new Date();
+  const classification = metaRateLimiter.classifyMetaError(error);
+
+  const attemptRecord = {
+    attempt: job.attempts || 1,
+    timestamp: now.toISOString(),
+    error: classification.reason,
+    category: classification.category
+  };
+
+  // Determine if job should be retried or moved to dead-letter / failed
+  const isRetryable = classification.retryable === true;
+  const attempts = Number(job.attempts || 1);
+  const reachedMaxAttempts = attempts >= MAX_JOB_ATTEMPTS;
+
+  let newStatus;
+  let runAt = null;
+
+  if (isRetryable && !reachedMaxAttempts) {
+    newStatus = 'retrying';
+    const delay = classification.backoffMs || metaRateLimiter.calculateBackoffWithJitter(attempts);
+    runAt = new Date(now.getTime() + delay);
+
+    if (classification.category === 'RATE_LIMITED' && job.instagram_account_id) {
+      metaRateLimiter.pauseAccount(job.instagram_account_id, delay);
+    }
+  } else {
+    newStatus = reachedMaxAttempts ? 'dead_letter' : 'failed';
+    runAt = null;
+  }
+
+  const updateFields = {
+    status: newStatus,
+    last_error: classification.reason,
+    failure_category: classification.category,
+    locked_until: null,
+    run_at: runAt,
+    updated_at: now,
+    completed_at: newStatus === 'retrying' ? null : now
+  };
 
   if (isMongo) {
     const col = db.collections().webhookJobs;
     await col.updateOne(
       { event_key: job.event_key },
       {
-        $set: {
-          status,
-          last_error: details.error || null,
-          completed_at: status === 'sent' ? now : null,
-          locked_until: null,
-          updated_at: now
-        }
+        $set: updateFields,
+        $push: { attempt_history: attemptRecord }
       }
     );
   } else {
     const existing = memoryJobsStore.get(job.event_key);
     if (existing) {
-      existing.status = status;
-      existing.last_error = details.error || null;
-      existing.completed_at = status === 'sent' ? now : null;
-      existing.updated_at = now;
+      Object.assign(existing, updateFields);
+      if (!Array.isArray(existing.attempt_history)) existing.attempt_history = [];
+      existing.attempt_history.push(attemptRecord);
+    }
+  }
+
+  return { status: newStatus, classification };
+}
+
+/**
+ * Updates a job's status upon successful completion.
+ *
+ * @param {object} job - The job document
+ * @param {object} details - Optional metadata
+ * @param {object} db - Database module instance
+ */
+async function handleJobSuccess(job, details = {}, db) {
+  const isMongo = Boolean(db && db.collections && db.collections().webhookJobs);
+  const now = new Date();
+
+  const updateFields = {
+    status: 'sent',
+    last_error: null,
+    locked_until: null,
+    completed_at: now,
+    updated_at: now,
+    meta_message_id: details.meta_message_id || null
+  };
+
+  if (isMongo) {
+    const col = db.collections().webhookJobs;
+    await col.updateOne({ event_key: job.event_key }, { $set: updateFields });
+  } else {
+    const existing = memoryJobsStore.get(job.event_key);
+    if (existing) {
+      Object.assign(existing, updateFields);
     }
   }
 }
 
+/**
+ * Backward compatibility wrapper for Phase 1 tests.
+ */
+async function updateJobStatus(job, status, details = {}, db) {
+  if (status === 'sent') {
+    return await handleJobSuccess(job, details, db);
+  } else if (status === 'failed') {
+    return await handleJobFailure(job, new Error(details.error || 'Failed'), db);
+  } else {
+    const isMongo = Boolean(db && db.collections && db.collections().webhookJobs);
+    const now = new Date();
+    if (isMongo) {
+      await db.collections().webhookJobs.updateOne(
+        { event_key: job.event_key },
+        { $set: { status, last_error: details.error || null, updated_at: now, locked_until: null } }
+      );
+    } else {
+      const existing = memoryJobsStore.get(job.event_key);
+      if (existing) {
+        existing.status = status;
+        existing.last_error = details.error || null;
+        existing.updated_at = now;
+        existing.locked_until = null;
+      }
+    }
+  }
+}
+
+/**
+ * Returns comprehensive backend metrics for queue observability.
+ *
+ * @param {object} db - Database module instance
+ * @returns {Promise<object>} - Metrics snapshot
+ */
+async function getQueueMetrics(db) {
+  const isMongo = Boolean(db && db.collections && db.collections().webhookJobs);
+  const now = Date.now();
+
+  if (isMongo) {
+    const col = db.collections().webhookJobs;
+    const [queued, processing, retrying, failed, deadLetter, sent] = await Promise.all([
+      col.countDocuments({ status: 'queued' }),
+      col.countDocuments({ status: 'processing' }),
+      col.countDocuments({ status: 'retrying' }),
+      col.countDocuments({ status: 'failed' }),
+      col.countDocuments({ status: 'dead_letter' }),
+      col.countDocuments({ status: 'sent' })
+    ]);
+
+    // Oldest pending job
+    const oldestPending = await col.find(
+      { status: { $in: ['queued', 'retrying'] } }
+    ).sort({ created_at: 1 }).limit(1).toArray();
+
+    const oldestAgeMs = oldestPending.length > 0 && oldestPending[0].created_at
+      ? Math.max(0, now - new Date(oldestPending[0].created_at).getTime())
+      : 0;
+
+    // Per account pending depth
+    const perAccountAgg = await col.aggregate([
+      { $match: { status: { $in: ['queued', 'retrying', 'processing'] } } },
+      { $group: { _id: '$instagram_account_id', count: { $sum: 1 } } },
+      { $limit: 50 }
+    ]).toArray();
+
+    return {
+      queued_jobs: queued,
+      processing_jobs: processing,
+      retrying_jobs: retrying,
+      failed_jobs: failed,
+      dead_letter_jobs: deadLetter,
+      jobs_processed: sent,
+      jobs_failed: failed + deadLetter,
+      oldest_pending_job_age_ms: oldestAgeMs,
+      meta_rate_limit_events: metaRateLimiter.getRateLimitEventsCount(),
+      per_account_queue_depth: perAccountAgg.map(a => ({ account_id: a._id, depth: a.count }))
+    };
+  } else {
+    // In-memory fallback
+    let queued = 0, processing = 0, retrying = 0, failed = 0, deadLetter = 0, sent = 0;
+    let oldestTime = Infinity;
+    const accountCounts = {};
+
+    for (const job of memoryJobsStore.values()) {
+      if (job.status === 'queued') queued++;
+      else if (job.status === 'processing') processing++;
+      else if (job.status === 'retrying') retrying++;
+      else if (job.status === 'failed') failed++;
+      else if (job.status === 'dead_letter') deadLetter++;
+      else if (job.status === 'sent') sent++;
+
+      if (['queued', 'retrying'].includes(job.status)) {
+        const t = new Date(job.created_at || now).getTime();
+        if (t < oldestTime) oldestTime = t;
+        const acc = job.instagram_account_id || 'unknown';
+        accountCounts[acc] = (accountCounts[acc] || 0) + 1;
+      }
+    }
+
+    return {
+      queued_jobs: queued,
+      processing_jobs: processing,
+      retrying_jobs: retrying,
+      failed_jobs: failed,
+      dead_letter_jobs: deadLetter,
+      jobs_processed: sent,
+      jobs_failed: failed + deadLetter,
+      oldest_pending_job_age_ms: oldestTime === Infinity ? 0 : Math.max(0, now - oldestTime),
+      meta_rate_limit_events: metaRateLimiter.getRateLimitEventsCount(),
+      per_account_queue_depth: Object.entries(accountCounts).map(([account_id, depth]) => ({ account_id, depth }))
+    };
+  }
+}
+
 module.exports = {
+  WORKER_POLL_INTERVAL_MS,
+  JOB_LEASE_MS,
+  MAX_JOB_ATTEMPTS,
+  WORKER_CONCURRENCY,
+  ACCOUNT_CONCURRENCY,
+  BASE_BACKOFF_MS,
+  MAX_BACKOFF_MS,
+  JITTER_MS,
   normalizeWebhookPayload,
   ingestWebhookPayload,
   claimNextJob,
+  extendLease,
+  handleJobFailure,
+  handleJobSuccess,
   updateJobStatus,
+  getQueueMetrics,
   memoryJobsStore
 };

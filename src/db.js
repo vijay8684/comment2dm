@@ -154,11 +154,14 @@ async function initialize() {
     // Durable Webhook Ingestion Queue:
     collections().webhookJobs.createIndex({ event_key: 1 }, { unique: true, name: 'webhook_jobs_event_key_unique' }),
     collections().webhookJobs.createIndex({ status: 1, created_at: 1 }, { name: 'webhook_jobs_status_created' }),
+    collections().webhookJobs.createIndex({ status: 1, run_at: 1, created_at: 1 }, { name: 'webhook_jobs_status_run_created' }),
+    collections().webhookJobs.createIndex({ status: 1, locked_until: 1 }, { name: 'webhook_jobs_status_locked' }),
     collections().webhookJobs.createIndex({ instagram_account_id: 1, created_at: -1 }, { name: 'webhook_jobs_account_created' }),
     collections().webhookJobs.createIndex({ comment_id: 1 }, { sparse: true, name: 'webhook_jobs_comment_id' }),
     // Conversation states index for fast lookup:
     collections().conversationStates.createIndex({ key: 1 }, { unique: true, sparse: true, name: 'conversation_states_key_unique' }),
-    collections().conversationStates.createIndex({ automation_id: 1, sender_igsid: 1 }, { name: 'conversation_states_auto_sender' })
+    collections().conversationStates.createIndex({ automation_id: 1, sender_igsid: 1 }, { name: 'conversation_states_auto_sender' }),
+    collections().conversationStates.createIndex({ delivery_state: 1 }, { sparse: true, name: 'conversation_states_delivery_state' })
   ]);
 
   await migrateJsonData().catch((err) => console.warn('JSON migration notice:', err.message));

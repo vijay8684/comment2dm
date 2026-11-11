@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const db = require('../db');
+const metaRateLimiter = require('../services/metaRateLimiter');
 
 const apiVersion = process.env.META_API_VERSION || 'v21.0';
 const requiredConfig = ['META_APP_ID', 'META_APP_SECRET', 'META_REDIRECT_URI', 'META_TOKEN_ENCRYPTION_KEY'];
@@ -912,10 +913,25 @@ async function sendPrivateReply(instagramUserId, commentId, messageContent, acce
   let data = await response.json().catch(() => ({}));
   console.log(`[META PRIVATE REPLY RESPONSE 1] Status: ${response.status} ${response.statusText}, Body: ${JSON.stringify(data)}`);
 
+  metaRateLimiter.inspectMetaHeaders(response.headers, instagramUserId);
+
   if (response.ok && (data.message_id || data.id || data.recipient_id)) {
     console.log(`[META SUCCESS] Private DM sent successfully via graph.instagram.com to comment ${commentId}. Message ID: ${data.message_id || data.id}`);
     console.log(`[INBOX PLACEMENT NOTE] Meta routes proactive comment private replies to non-followers into the recipient's "Message Requests" or "Hidden Requests" tab. On Instagram mobile apps, quick reply buttons become interactive once the recipient views or accepts the chat request.`);
     return data;
+  }
+
+  // Check if rate limited - DO NOT use fallback endpoints on rate limits!
+  const isPrivateReplyRateLimited = response.status === 429 ||
+    data?.error?.code === 4 || data?.error?.code === 17 ||
+    data?.error?.code === 32 || data?.error?.code === 613;
+
+  if (isPrivateReplyRateLimited) {
+    const err = new Error(`Meta Rate Limit: ${metaErrorMessage(data, 'Rate limit exceeded')}`);
+    err.statusCode = 429;
+    err.metaError = data?.error;
+    err.retryAfterSeconds = Number(response.headers?.get?.('retry-after') || 0);
+    throw err;
   }
 
   // If Button Template on comment_id failed, try fallback to quick_replies
@@ -1004,9 +1020,24 @@ async function sendDirectMessage(instagramUserId, recipientIgsid, messageContent
   let data = await response.json().catch(() => ({}));
   console.log(`[META DIRECT DM RESPONSE 1] Status: ${response.status} ${response.statusText}, Body: ${JSON.stringify(data)}`);
 
+  metaRateLimiter.inspectMetaHeaders(response.headers, instagramUserId);
+
   if (response.ok && (data.message_id || data.id || data.recipient_id)) {
     console.log(`[META SUCCESS] Direct DM sent successfully via graph.instagram.com to recipient ${recipientIgsid}`);
     return data;
+  }
+
+  // Check if rate limited - DO NOT use fallback endpoints on rate limits!
+  const isDirectRateLimited = response.status === 429 ||
+    data?.error?.code === 4 || data?.error?.code === 17 ||
+    data?.error?.code === 32 || data?.error?.code === 613;
+
+  if (isDirectRateLimited) {
+    const err = new Error(`Meta Rate Limit: ${metaErrorMessage(data, 'Rate limit exceeded')}`);
+    err.statusCode = 429;
+    err.metaError = data?.error;
+    err.retryAfterSeconds = Number(response.headers?.get?.('retry-after') || 0);
+    throw err;
   }
 
   // Attempt 2: /me/messages fallback
@@ -1058,6 +1089,16 @@ async function replyToComment(commentId, messageText, accessToken) {
     body: JSON.stringify(bodyData)
   });
   let data = await response.json().catch(() => ({}));
+
+  metaRateLimiter.inspectMetaHeaders(response.headers);
+  const isReplyRateLimited = response.status === 429 ||
+    data?.error?.code === 4 || data?.error?.code === 17 ||
+    data?.error?.code === 32 || data?.error?.code === 613;
+
+  if (isReplyRateLimited) {
+    console.warn(`[META RATE LIMIT] Public comment reply rate limited for comment ${commentId}. Skipping fallback.`);
+    return data;
+  }
 
   if (!response.ok && (response.status === 404 || data.error?.code === 100 || data.error?.type === 'OAuthException')) {
     const fallbackUrl = `https://graph.facebook.com/${apiVersion}/${commentId}/replies`;

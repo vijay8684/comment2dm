@@ -12,6 +12,8 @@ const instagramService = require('./src/instagram/instagramService');
 const billing = require('./src/billing');
 const { verifyWebhookSignature, verifyGetChallenge } = require('./src/services/webhookSecurity');
 const webhookJobQueue = require('./src/jobs/webhookJobQueue');
+const webhookWorker = require('./src/jobs/webhookWorker');
+const metaRateLimiter = require('./src/services/metaRateLimiter');
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
@@ -1075,6 +1077,7 @@ async function deliverFinalResource({ recipientIgUserId, senderIgsid, automation
             instagram_user_id: recipientIgUserId,
             sender_igsid: senderIgsid,
             resource_delivered: false,
+            delivery_state: 'not_started',
             state: 'INIT',
             created_at: new Date().toISOString()
           }
@@ -1082,21 +1085,26 @@ async function deliverFinalResource({ recipientIgUserId, senderIgsid, automation
         { upsert: true }
       );
 
-      // Atomic transition: only proceed if resource_delivered is not true
+      const existingState = await db.collections().conversationStates.findOne({ key: stateKey });
+      if (existingState && (existingState.delivery_state === 'sent' || existingState.resource_delivered === true)) {
+        console.log(`[IDEMPOTENCY] Resource already delivered for ${senderIgsid} on automation ${automation.id}. Skipping.`);
+        return;
+      }
+
+      // Atomic transition to "sending" (not "sent" yet!)
       const claim = await db.collections().conversationStates.updateOne(
-        { key: stateKey, resource_delivered: { $ne: true } },
+        { key: stateKey, delivery_state: { $nin: ['sending', 'sent'] }, resource_delivered: { $ne: true } },
         {
           $set: {
-            resource_delivered: true,
-            state: 'RESOURCE_DELIVERED',
-            delivered_at: new Date().toISOString(),
+            delivery_state: 'sending',
+            sending_started_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           }
         }
       );
 
-      if (claim.matchedCount === 0 || claim.modifiedCount === 0) {
-        console.log(`[IDEMPOTENCY] Resource already claimed/delivered for ${senderIgsid} on automation ${automation.id}. Skipping.`);
+      if (claim.matchedCount === 0 && claim.modifiedCount === 0) {
+        console.log(`[IDEMPOTENCY] Resource delivery already in progress or completed for ${stateKey}. Skipping.`);
         return;
       }
     }
@@ -1146,29 +1154,65 @@ async function deliverFinalResource({ recipientIgUserId, senderIgsid, automation
       deliveryPayload = { text: deliveryText };
     }
 
+    let metaSendResult;
     try {
-      await instagramService.sendDirectMessage(
+      metaSendResult = await instagramService.sendDirectMessage(
         recipientIgUserId,
         senderIgsid,
         deliveryPayload,
         tokenData.accessToken
       );
     } catch (dmErr) {
+      // Do NOT perform immediate fallback on rate-limit errors!
+      if (dmErr.statusCode === 429 || dmErr?.metaError?.code === 4 || dmErr?.metaError?.code === 17 || dmErr?.metaError?.code === 32 || dmErr?.metaError?.code === 613) {
+        if (db.collections && db.collections().conversationStates) {
+          await db.collections().conversationStates.updateOne(
+            { key: stateKey },
+            { $set: { delivery_state: 'failed', last_delivery_error: dmErr.message, updated_at: new Date().toISOString() } }
+          );
+        }
+        throw dmErr;
+      }
+
       // Graceful fallback to text if template rejected by client
       if (deliveryPayload.attachment) {
         let fallbackText = deliveryText;
         if (resourceUrl && !fallbackText.includes(resourceUrl)) {
           fallbackText += `\n\n🔗 ${buttonText}: ${resourceUrl}`;
         }
-        await instagramService.sendDirectMessage(
+        metaSendResult = await instagramService.sendDirectMessage(
           recipientIgUserId,
           senderIgsid,
           { text: fallbackText },
           tokenData.accessToken
         );
       } else {
+        if (db.collections && db.collections().conversationStates) {
+          await db.collections().conversationStates.updateOne(
+            { key: stateKey },
+            { $set: { delivery_state: 'failed', last_delivery_error: dmErr.message, updated_at: new Date().toISOString() } }
+          );
+        }
         throw dmErr;
       }
+    }
+
+    // Only mark "sent" and resource_delivered=true AFTER Meta confirms acceptance!
+    const metaMsgId = metaSendResult?.message_id || metaSendResult?.id || null;
+    if (db.collections && db.collections().conversationStates) {
+      await db.collections().conversationStates.updateOne(
+        { key: stateKey },
+        {
+          $set: {
+            delivery_state: 'sent',
+            resource_delivered: true,
+            state: 'RESOURCE_DELIVERED',
+            meta_message_id: metaMsgId,
+            delivered_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }
+        }
+      );
     }
 
     // Log in automation_events
@@ -2600,6 +2644,22 @@ app.post('/api/admin/config/coupon', requireAdmin, async (request, response) => 
   } catch (err) { return response.status(500).json({ error: err.message }); }
 });
 
+// ── Queue & Worker Observability Metrics ─────────────────────────────────
+app.get('/api/admin/queue/metrics', requireAuth, requireAdmin, async (request, response) => {
+  try {
+    const metrics = await webhookJobQueue.getQueueMetrics(db);
+    const workerStatus = webhookWorker.getWorkerStatus();
+    return response.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      ...metrics,
+      worker: workerStatus
+    });
+  } catch (err) {
+    return response.status(500).json({ error: 'Failed to retrieve queue metrics: ' + err.message });
+  }
+});
+
 app.delete('/api/admin/config/coupon/:code', requireAdmin, async (request, response) => {
   try {
     if (db.collections) {
@@ -2647,7 +2707,25 @@ db.initialize().then(async () => {
   app.listen(port, '0.0.0.0', () => {
     console.log(`Comment2DM server is live on port ${port} (HTTPS ready)`);
   });
+
+  // Start persistent background worker after database initialization
+  if (process.env.NODE_ENV !== 'test') {
+    webhookWorker.startWorker(db, executeWebhookJob);
+  }
 }).catch((error) => {
   console.error('Database initialization failed:', error);
   process.exitCode = 1;
 });
+
+// Graceful shutdown handling for container termination
+async function handleGracefulShutdown(signal) {
+  console.log(`[SHUTDOWN] Received ${signal}. Draining queue worker...`);
+  try {
+    await webhookWorker.stopWorker(10000);
+  } catch (err) {
+    console.error('Error during worker shutdown:', err.message);
+  }
+  process.exit(0);
+}
+process.on('SIGTERM', () => handleGracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => handleGracefulShutdown('SIGINT'));
