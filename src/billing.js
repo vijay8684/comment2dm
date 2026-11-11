@@ -134,15 +134,19 @@ let db;
 let mongo;
 let rz;
 const cache = new Map();
-const ADMIN_EMAILS = new Set([
-  'jayvardhanreddy2008@gmail.com',
-  'vijayakrishnareddy910@gmail.com',
-  ...(process.env.ADMIN_EMAIL ? process.env.ADMIN_EMAIL.split(',').map(e => e.trim().toLowerCase()) : [])
-]);
+function getAdminEmails() {
+  const raw = process.env.ADMIN_EMAIL;
+  if (!raw || typeof raw !== 'string') return new Set();
+  const list = raw
+    .split(',')
+    .map(e => e.trim().toLowerCase())
+    .filter(Boolean);
+  return new Set(list);
+}
 
 function isAdminEmail(email) {
   if (!email || typeof email !== 'string') return false;
-  return ADMIN_EMAILS.has(email.trim().toLowerCase());
+  return getAdminEmails().has(email.trim().toLowerCase());
 }
 
 async function store() {
@@ -715,5 +719,7 @@ module.exports = {
   getAiCreditBalance,
   deductAiCredits,
   PLANS,
-  LIMITS
+  LIMITS,
+  isAdminEmail,
+  getAdminEmails
 };
