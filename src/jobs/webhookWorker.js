@@ -133,11 +133,49 @@ async function processClaimedJob(job, jobExecutor, db) {
   activeHeartbeats.set(jobId, heartbeatTimer);
 
   try {
-    // 1. Pacing Guard: respects global and account rate limits (including shared MongoDB pauses)
+    // 1. Non-blocking Account Rate Limit Guard:
+    // If account is currently paused across instances, reschedule immediately to pause expiry
+    // without occupying a worker concurrency slot with a blocking sleep.
+    if (accId) {
+      const pauseExpiryMs = await metaRateLimiter.getAccountPauseExpiry(accId, db);
+      if (pauseExpiryMs > Date.now()) {
+        const pauseExpiryDate = new Date(pauseExpiryMs);
+        const targetWorkerId = job?.worker_id || workerId;
+        console.log(`[WORKER NON-BLOCKING] Account ${accId} is paused until ${pauseExpiryDate.toISOString()}. Rescheduling job ${jobId} immediately without blocking worker slot.`);
+        const reschedRes = await webhookJobQueue.rescheduleJobForPause(job, targetWorkerId, pauseExpiryDate, db);
+        if (reschedRes && reschedRes.success === false) {
+          console.warn(`[WORKER LEASE LOSS] Worker ${targetWorkerId} could not reschedule job ${jobId}: ${reschedRes.reason}`);
+        }
+        return; // Exits cleanly and immediately frees the worker slot
+      }
+    }
+
+    // 2. Pacing Guard: respects global and account micro-pacing
     await metaRateLimiter.paceRequest(accId, db);
 
-    // 2. Execute business logic
-    await jobExecutor(job);
+    // 3. Execute business logic
+    const execRes = await jobExecutor(job);
+
+    // Guard against marking skipped unknown or permanent failures as successful delivery:
+    if (execRes && execRes.skipped) {
+      if (execRes.status === 'unknown' || execRes.reason === 'UNKNOWN_OUTCOME') {
+        const unknownErr = new Error(execRes.error || `Opening DM outcome is unknown for job ${jobId}. Never blindly resending.`);
+        unknownErr.category = 'UNKNOWN_OUTCOME';
+        unknownErr.retryable = false;
+        unknownErr.isUnknownOutcome = true;
+        throw unknownErr;
+      }
+      if (execRes.status === 'failed_permanent' || execRes.reason === 'FAILED_PERMANENT') {
+        const permErr = new Error(execRes.error || `Opening DM delivery failed permanently for job ${jobId}.`);
+        permErr.category = 'PERMISSION_OR_AUTH';
+        permErr.retryable = false;
+        throw permErr;
+      }
+      if (execRes.status === 'concurrent_claim' || execRes.reason === 'IN_PROGRESS') {
+        console.log(`[WORKER] Job ${jobId} was skipped due to active concurrent worker. Releasing slot.`);
+        return;
+      }
+    }
 
     // 3. Mark success with explicit worker_id ownership and lease verification
     const successRes = await webhookJobQueue.handleJobSuccess(job, { worker_id: workerId }, db);
@@ -234,5 +272,6 @@ module.exports = {
   startWorker,
   stopWorker,
   getWorkerStatus,
+  _processClaimedJobForTesting: processClaimedJob,
   _resetWorkerForTesting
 };

@@ -552,6 +552,69 @@ async function handleJobSuccess(job, details = {}, db) {
 }
 
 /**
+ * Reschedules a job immediately when its associated account is paused,
+ * freeing the worker concurrency slot without a blocking sleep.
+ * Verifies that the requesting worker currently owns the job and holds an unexpired lease.
+ *
+ * @param {object} job - The job document
+ * @param {string} workerId - Current worker token
+ * @param {Date|number} pauseUntil - Timestamp when pause expires
+ * @param {object} db - Database module instance
+ * @returns {Promise<{ success: boolean, status: string, reason?: string, run_at?: Date }>}
+ */
+async function rescheduleJobForPause(job, workerId, pauseUntil, db) {
+  const isMongo = Boolean(db && db.collections && db.collections().webhookJobs);
+  const now = new Date();
+  const runAt = (pauseUntil instanceof Date) ? pauseUntil : new Date(pauseUntil);
+  const targetWorkerId = workerId || job.worker_id;
+
+  if (!targetWorkerId) {
+    console.warn(`[LEASE LOSS] Cannot reschedule job ${job.event_key} without explicit worker_id`);
+    return { success: false, reason: 'MISSING_WORKER_ID', status: 'stale_worker' };
+  }
+
+  const updateFields = {
+    status: 'retrying',
+    run_at: runAt,
+    locked_until: null,
+    worker_id: null,
+    last_error: `Account ${job.instagram_account_id} paused until ${runAt.toISOString()}`,
+    failure_category: 'RATE_LIMITED',
+    updated_at: now
+  };
+
+  if (isMongo) {
+    const col = db.collections().webhookJobs;
+    const filter = {
+      event_key: job.event_key,
+      worker_id: targetWorkerId,
+      status: 'processing',
+      locked_until: { $gt: now } // Strictly requires unexpired lease
+    };
+    const res = await col.updateOne(filter, { $set: updateFields });
+    if (res.matchedCount === 0) {
+      console.warn(`[LEASE LOSS] Worker ${targetWorkerId} could not reschedule job ${job.event_key}: lease lost or expired.`);
+      return { success: false, reason: 'LEASE_LOST', status: 'stale_worker' };
+    }
+    return { success: true, status: 'retrying', run_at: runAt };
+  } else {
+    const existing = memoryJobsStore.get(job.event_key);
+    if (existing) {
+      const isOwner = existing.worker_id === targetWorkerId;
+      const isProcessing = existing.status === 'processing';
+      const isUnexpired = existing.locked_until && new Date(existing.locked_until) > now;
+      if (!isOwner || !isProcessing || !isUnexpired) {
+        console.warn(`[LEASE LOSS] Worker ${targetWorkerId} could not reschedule job ${job.event_key}: lease lost.`);
+        return { success: false, reason: 'LEASE_LOST', status: 'stale_worker' };
+      }
+      Object.assign(existing, updateFields);
+      return { success: true, status: 'retrying', run_at: runAt };
+    }
+    return { success: false, reason: 'JOB_NOT_FOUND', status: 'not_found' };
+  }
+}
+
+/**
  * Backward compatibility wrapper for Phase 1 tests.
  */
 async function updateJobStatus(job, status, details = {}, db) {
@@ -686,6 +749,7 @@ module.exports = {
   extendLease,
   handleJobFailure,
   handleJobSuccess,
+  rescheduleJobForPause,
   updateJobStatus,
   getQueueMetrics,
   memoryJobsStore

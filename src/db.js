@@ -160,17 +160,24 @@ async function initialize() {
     collections().webhookJobs.createIndex({ status: 1, locked_until: 1 }, { name: 'webhook_jobs_status_locked' }),
     collections().webhookJobs.createIndex({ instagram_account_id: 1, created_at: -1 }, { name: 'webhook_jobs_account_created' }),
     collections().webhookJobs.createIndex({ comment_id: 1 }, { sparse: true, name: 'webhook_jobs_comment_id' }),
+    collections().webhookJobs.createIndex({ run_at: 1, created_at: 1 }, { name: 'webhook_jobs_poll_sort' }),
+    // Safe TTL retention: Only terminal/completed jobs are purged after 7 days (preserves active queued/retrying/processing jobs)
+    collections().webhookJobs.createIndex({ completed_at: 1 }, { expireAfterSeconds: 7 * 86400, sparse: true, name: 'webhook_jobs_completed_ttl' }),
     // Conversation states index for fast lookup:
     collections().conversationStates.createIndex({ key: 1 }, { unique: true, sparse: true, name: 'conversation_states_key_unique' }),
     collections().conversationStates.createIndex({ automation_id: 1, sender_igsid: 1 }, { name: 'conversation_states_auto_sender' }),
     collections().conversationStates.createIndex({ delivery_state: 1 }, { sparse: true, name: 'conversation_states_delivery_state' }),
+    // Retention for conversation states: 90 days after last interaction
+    collections().conversationStates.createIndex({ updated_at: 1 }, { expireAfterSeconds: 90 * 86400, name: 'conversation_states_ttl' }),
     // Distributed account rate limits:
     collections().accountRateLimits.createIndex({ account_id: 1 }, { unique: true, name: 'account_rate_limits_account' }),
     collections().accountRateLimits.createIndex({ paused_until: 1 }, { expireAfterSeconds: 0, name: 'account_rate_limits_ttl' }),
     // Durable Opening DM Idempotency Claims:
     collections().openingDmClaims.createIndex({ claim_key: 1 }, { unique: true, name: 'opening_dm_claims_key_unique' }),
     collections().openingDmClaims.createIndex({ status: 1, locked_until: 1 }, { name: 'opening_dm_claims_status_locked' }),
-    collections().openingDmClaims.createIndex({ instagram_account_id: 1, created_at: -1 }, { name: 'opening_dm_claims_account_created' })
+    collections().openingDmClaims.createIndex({ instagram_account_id: 1, created_at: -1 }, { name: 'opening_dm_claims_account_created' }),
+    // Retention for opening DM claims: 30 days protects against delayed retries past Meta's 7-day comment reply limit
+    collections().openingDmClaims.createIndex({ created_at: 1 }, { expireAfterSeconds: 30 * 86400, name: 'opening_dm_claims_ttl' })
   ]);
 
   await migrateJsonData().catch((err) => console.warn('JSON migration notice:', err.message));

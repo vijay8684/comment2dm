@@ -1143,18 +1143,19 @@ async function deliverFinalResource({
       );
 
       // Atomic lease claim: only claim if not already delivered (neither sent nor delivered=true)
-      // AND eligible: either not_started/failed/null OR previously sending but lease expired
-      // Notice: 'unknown' outcome is NOT in the eligible list to prevent blind resends
+      // AND eligible: either not_started/failed/null OR previously sending with expired lease AND undispatched
+      // CRITICAL: An expired lease where delivery_request_dispatched is true must transition to 'unknown' and never be automatically resent!
       const claimResult = await db.collections().conversationStates.findOneAndUpdate(
         {
           key: stateKey,
           resource_delivered: { $ne: true },
-          delivery_state: { $ne: 'sent' },
+          delivery_state: { $nin: ['sent', 'unknown'] },
           $or: [
             { delivery_state: { $in: ['not_started', 'failed', null] } },
             {
               delivery_state: 'sending',
-              delivery_locked_until: { $lt: now }
+              delivery_locked_until: { $lt: now },
+              delivery_request_dispatched: { $ne: true }
             }
           ]
         },
@@ -1163,6 +1164,7 @@ async function deliverFinalResource({
             delivery_state: 'sending',
             delivery_worker_id: workerToken,
             delivery_locked_until: leaseExpiresAt,
+            delivery_request_dispatched: false,
             sending_started_at: now.toISOString(),
             updated_at: now.toISOString()
           }
@@ -1172,8 +1174,32 @@ async function deliverFinalResource({
 
       const claimedDoc = claimResult?.value || claimResult;
       if (!claimedDoc || claimedDoc.delivery_worker_id !== workerToken) {
+        // Inspect existing state for crash recovery of in-flight dispatches:
+        const checkDoc = await db.collections().conversationStates.findOne({ key: stateKey });
+        if (checkDoc && checkDoc.delivery_state === 'sending' && checkDoc.delivery_request_dispatched === true && new Date(checkDoc.delivery_locked_until) < now) {
+          // Worker crashed or lease expired after Meta dispatch! Outcome is uncertain!
+          await db.collections().conversationStates.updateOne(
+            { key: stateKey, delivery_state: 'sending', delivery_worker_id: checkDoc.delivery_worker_id },
+            {
+              $set: {
+                delivery_state: 'unknown',
+                delivery_locked_until: null,
+                last_delivery_error: 'Worker crashed or lease expired after Meta delivery request was dispatched',
+                updated_at: new Date().toISOString()
+              }
+            }
+          );
+          console.warn(`[DELIVERY UNCERTAIN] Marked ${stateKey} as unknown: previous worker lease expired after request was dispatched.`);
+          return { success: false, reason: 'UNKNOWN_OUTCOME' };
+        }
+
+        if (checkDoc && (checkDoc.delivery_state === 'unknown' || checkDoc.delivery_state === 'sent' || checkDoc.resource_delivered === true)) {
+          console.log(`[IDEMPOTENCY] Resource delivery ${checkDoc.delivery_state} for ${stateKey}. Skipping.`);
+          return { success: checkDoc.delivery_state === 'sent', reason: checkDoc.delivery_state };
+        }
+
         console.log(`[IDEMPOTENCY] Resource delivery already claimed, in progress or completed for ${stateKey}. Skipping.`);
-        return;
+        return { success: false, reason: 'IN_PROGRESS' };
       }
     }
 
@@ -1224,6 +1250,20 @@ async function deliverFinalResource({
       deliveryPayload = { text: deliveryText };
     }
 
+    // Mark delivery request as dispatched immediately before initiating outbound socket write
+    if (db.collections && db.collections().conversationStates) {
+      await db.collections().conversationStates.updateOne(
+        { key: stateKey, delivery_worker_id: workerToken, delivery_state: 'sending' },
+        {
+          $set: {
+            delivery_request_dispatched: true,
+            delivery_dispatched_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }
+        }
+      );
+    }
+
     let metaSendResult;
     try {
       metaSendResult = await instagramService.sendDirectMessage(
@@ -1244,9 +1284,11 @@ async function deliverFinalResource({
         throw dmErr;
       }
 
-      // 2. Unknown outcome (network timeout while awaiting response, socket hangup)
+      // 2. Unknown outcome (network timeout while awaiting response, socket hangup, connection drop)
       const isUnknownOutcome = dmErr?.uncertainDelivery === true ||
-        /timeout|socket hang up|econnreset/i.test(dmErr.message || '');
+        dmErr?.requestDispatched === true ||
+        /timeout|socket hang up|econnreset|esockettimedout|network timeout|fetch failed/i.test(dmErr.message || '') ||
+        dmErr.statusCode === 504 || dmErr.status === 504;
 
       if (isUnknownOutcome) {
         console.warn(`[DELIVERY UNCERTAIN] Meta send outcome uncertain for ${stateKey}: ${dmErr.message}`);
@@ -1266,7 +1308,7 @@ async function deliverFinalResource({
         throw dmErr;
       }
 
-      // 3. Graceful fallback to text ONLY if template was definitely rejected by format error
+      // 3. Graceful fallback to text ONLY if template was definitely rejected by format error (400)
       const isTemplateFormatRejection = (dmErr.statusCode === 400 || dmErr?.metaError?.code === 100) &&
         deliveryPayload.attachment &&
         (/template|button|attachment|format/i.test(dmErr.message || '') || /template|button|attachment|format/i.test(dmErr?.metaError?.message || ''));
@@ -1276,12 +1318,34 @@ async function deliverFinalResource({
         if (resourceUrl && !fallbackText.includes(resourceUrl)) {
           fallbackText += `\n\n🔗 ${buttonText}: ${resourceUrl}`;
         }
-        metaSendResult = await instagramService.sendDirectMessage(
-          recipientIgUserId,
-          senderIgsid,
-          { text: fallbackText },
-          tokenData.accessToken
-        );
+        try {
+          metaSendResult = await instagramService.sendDirectMessage(
+            recipientIgUserId,
+            senderIgsid,
+            { text: fallbackText },
+            tokenData.accessToken
+          );
+        } catch (fallbackErr) {
+          const isFallbackUnknown = fallbackErr?.uncertainDelivery === true ||
+            fallbackErr?.requestDispatched === true ||
+            /timeout|socket hang up|econnreset|esockettimedout|network timeout|fetch failed/i.test(fallbackErr.message || '') ||
+            fallbackErr.statusCode === 504 || fallbackErr.status === 504;
+
+          if (db.collections && db.collections().conversationStates) {
+            await db.collections().conversationStates.updateOne(
+              { key: stateKey, delivery_worker_id: workerToken },
+              {
+                $set: {
+                  delivery_state: isFallbackUnknown ? 'unknown' : 'failed',
+                  delivery_locked_until: null,
+                  last_delivery_error: fallbackErr.message,
+                  updated_at: new Date().toISOString()
+                }
+              }
+            );
+          }
+          throw fallbackErr;
+        }
       } else {
         if (db.collections && db.collections().conversationStates) {
           await db.collections().conversationStates.updateOne(
@@ -1371,7 +1435,7 @@ async function deliverFinalResource({
 async function executeCommentJob(job) {
   const recipientIgUserId = job.instagram_account_id;
   const commentId = job.comment_id;
-  const commentText = job.comment_text;
+  const commentText = job.comment_text || job.text || '';
   const fromId = job.from_id;
   const fromUsername = job.from_username;
   const commentMediaId = job.media_id || '';
@@ -1440,6 +1504,7 @@ async function executeCommentJob(job) {
   const workerToken = job?.worker_id || `comment_worker_${process.pid}_${crypto.randomBytes(4).toString('hex')}`;
   const now = new Date();
   const claimLeaseExpiry = new Date(now.getTime() + 60000); // 60s lease
+  let requestDispatched = false;
 
   if (db.collections && db.collections().openingDmClaims) {
     const claimsCol = db.collections().openingDmClaims;
@@ -1449,15 +1514,27 @@ async function executeCommentJob(job) {
     if (existingClaim) {
       if (existingClaim.status === 'sent') {
         console.log(`[DEDUP] Opening DM already sent for comment ${commentId} on automation ${selectedAuto.id}. Skipping.`);
-        return;
+        return { success: true, skipped: true, reason: 'ALREADY_SENT', meta_message_id: existingClaim.meta_message_id };
       }
       if (existingClaim.status === 'unknown') {
         console.warn(`[IDEMPOTENCY] Opening DM for comment ${commentId} has unknown delivery outcome. Never blindly resending.`);
-        return;
+        return {
+          success: false,
+          skipped: true,
+          status: 'unknown',
+          reason: 'UNKNOWN_OUTCOME',
+          error: `Opening DM delivery outcome unknown for comment ${commentId} (${claimKey}). Never blindly resending.`
+        };
       }
-      if (existingClaim.status === 'failed' && existingClaim.retryable === false) {
+      if (existingClaim.status === 'failed_permanent' || (existingClaim.status === 'failed' && existingClaim.retryable === false)) {
         console.log(`[IDEMPOTENCY] Opening DM for comment ${commentId} previously failed permanently. Skipping.`);
-        return;
+        return {
+          success: false,
+          skipped: true,
+          status: 'failed_permanent',
+          reason: 'FAILED_PERMANENT',
+          error: `Opening DM delivery previously failed permanently for comment ${commentId}: ${existingClaim.last_error || 'Permanent failure'}`
+        };
       }
     }
 
@@ -1486,7 +1563,7 @@ async function executeCommentJob(job) {
     const claimRes = await claimsCol.findOneAndUpdate(
       {
         claim_key: claimKey,
-        status: { $nin: ['sent', 'unknown'] },
+        status: { $nin: ['sent', 'unknown', 'failed_permanent'] },
         $or: [
           { status: { $in: ['pending', 'failed_retryable'] } },
           {
@@ -1513,10 +1590,10 @@ async function executeCommentJob(job) {
     if (!claimedDoc || claimedDoc.worker_id !== workerToken) {
       // Check if this was an expired lease where request_dispatched was true:
       const checkDoc = await claimsCol.findOne({ claim_key: claimKey });
-      if (checkDoc && checkDoc.status === 'processing' && checkDoc.request_dispatched === true && checkDoc.locked_until < now) {
+      if (checkDoc && checkDoc.status === 'processing' && checkDoc.request_dispatched === true && new Date(checkDoc.locked_until) < now) {
         // Outcome uncertain because request was dispatched before crash! Mark unknown!
         await claimsCol.updateOne(
-          { claim_key: claimKey, status: 'processing' },
+          { claim_key: claimKey, status: 'processing', worker_id: checkDoc.worker_id },
           {
             $set: {
               status: 'unknown',
@@ -1527,67 +1604,99 @@ async function executeCommentJob(job) {
           }
         );
         console.warn(`[IDEMPOTENCY UNCERTAIN] Marked ${claimKey} as unknown: previous worker lease expired after request dispatch.`);
+        return {
+          success: false,
+          skipped: true,
+          status: 'unknown',
+          reason: 'UNKNOWN_OUTCOME',
+          error: `Opening DM delivery outcome unknown: previous worker lease expired after request was dispatched (${claimKey}).`
+        };
       }
-      console.log(`[IDEMPOTENCY] Opening DM delivery already in progress or completed for ${claimKey}. Skipping.`);
-      return;
+
+      if (checkDoc && checkDoc.status === 'sent') {
+        console.log(`[DEDUP] Opening DM already sent for comment ${commentId}. Skipping.`);
+        return { success: true, skipped: true, reason: 'ALREADY_SENT' };
+      }
+      if (checkDoc && checkDoc.status === 'unknown') {
+        return {
+          success: false,
+          skipped: true,
+          status: 'unknown',
+          reason: 'UNKNOWN_OUTCOME',
+          error: `Opening DM outcome unknown for comment ${commentId}. Never blindly resending.`
+        };
+      }
+      if (checkDoc && (checkDoc.status === 'failed_permanent' || (checkDoc.status === 'failed' && checkDoc.retryable === false))) {
+        return {
+          success: false,
+          skipped: true,
+          status: 'failed_permanent',
+          reason: 'FAILED_PERMANENT',
+          error: `Opening DM failed permanently for comment ${commentId}.`
+        };
+      }
+
+      console.log(`[IDEMPOTENCY] Opening DM delivery already in progress or claimed by another worker for ${claimKey}. Skipping.`);
+      return { success: false, skipped: true, status: 'concurrent_claim', reason: 'IN_PROGRESS' };
     }
   }
 
   console.log(`[TRIGGER] Matched automation ${selectedAuto.id} for comment "${commentText}" (ID: ${commentId}). Sending interactive opening DM...`);
 
-  // Ensure flow is loaded
-  if (!selectedAuto.flow && db.collections && db.collections().automations) {
-    const raw = await db.collections().automations.findOne({ id: selectedAuto.id });
-    if (raw && raw.flow) {
-      selectedAuto.flow = raw.flow;
-    }
-  }
-
-  const tokenData = await instagramService.getDecryptedTokenByInstagramUserId(recipientIgUserId, selectedAuto.owner_user_id);
-  const flow = selectedAuto.flow || {};
-  const isFollowGateEnabled = Boolean(flow.followGate?.enabled);
-
-  // Prepare opening message text
-  let messageToSend = flow.openingMessage || selectedAuto.dm_message || "Hey! I'm so glad you're here — thanks for your interest 😊\n\nTap below and I'll send you the link in just a moment ✨";
-
-  if (fromUsername) {
-    messageToSend = messageToSend.replace(/\{username\}/gi, `@${fromUsername}`);
-    messageToSend = messageToSend.replace(/\{name\}/gi, fromUsername);
-    messageToSend = messageToSend.replace(/\{first_name\}/gi, fromUsername);
-  }
-
-  // Plan-based Free Branding Attribution
   try {
-    const userEntitlement = await billing.entitlement(selectedAuto.owner_user_id);
-    if (!userEntitlement?.limits?.whiteLabel) {
-      if (!messageToSend.includes('Powered by Comment2DM')) {
-        messageToSend += '\n\n⚡ Powered by Comment2DM';
+    // Ensure flow is loaded
+    if (!selectedAuto.flow && db.collections && db.collections().automations) {
+      const raw = await db.collections().automations.findOne({ id: selectedAuto.id });
+      if (raw && raw.flow) {
+        selectedAuto.flow = raw.flow;
       }
     }
-  } catch (bErr) {
-    console.warn('Billing entitlement check note:', bErr.message);
-  }
 
-  const openingBtnTitle = (flow.openingButtonText || 'Send me the link').trim().slice(0, 20);
-  const msgPayload = {
-    attachment: {
-      type: 'template',
-      payload: {
-        template_type: 'button',
-        text: messageToSend,
-        buttons: [
-          {
-            type: 'postback',
-            title: openingBtnTitle,
-            payload: `SEND_LINK:${selectedAuto.id}:${commentId}`
-          }
-        ]
-      }
+    const tokenData = await instagramService.getDecryptedTokenByInstagramUserId(recipientIgUserId, selectedAuto.owner_user_id);
+    const flow = selectedAuto.flow || {};
+    const isFollowGateEnabled = Boolean(flow.followGate?.enabled);
+
+    // Prepare opening message text
+    let messageToSend = flow.openingMessage || selectedAuto.dm_message || "Hey! I'm so glad you're here — thanks for your interest 😊\n\nTap below and I'll send you the link in just a moment ✨";
+
+    if (fromUsername) {
+      messageToSend = messageToSend.replace(/\{username\}/gi, `@${fromUsername}`);
+      messageToSend = messageToSend.replace(/\{name\}/gi, fromUsername);
+      messageToSend = messageToSend.replace(/\{first_name\}/gi, fromUsername);
     }
-  };
 
-  try {
+    // Plan-based Free Branding Attribution
+    try {
+      const userEntitlement = await billing.entitlement(selectedAuto.owner_user_id);
+      if (!userEntitlement?.limits?.whiteLabel) {
+        if (!messageToSend.includes('Powered by Comment2DM')) {
+          messageToSend += '\n\n⚡ Powered by Comment2DM';
+        }
+      }
+    } catch (bErr) {
+      console.warn('Billing entitlement check note:', bErr.message);
+    }
+
+    const openingBtnTitle = (flow.openingButtonText || 'Send me the link').trim().slice(0, 20);
+    const msgPayload = {
+      attachment: {
+        type: 'template',
+        payload: {
+          template_type: 'button',
+          text: messageToSend,
+          buttons: [
+            {
+              type: 'postback',
+              title: openingBtnTitle,
+              payload: `SEND_LINK:${selectedAuto.id}:${commentId}`
+            }
+          ]
+        }
+      }
+    };
+
     // Record request dispatch state before network call
+    requestDispatched = true;
     if (db.collections && db.collections().openingDmClaims) {
       await db.collections().openingDmClaims.updateOne(
         { claim_key: claimKey, worker_id: workerToken },
@@ -1620,7 +1729,10 @@ async function executeCommentJob(job) {
           }
         );
       }
-      return;
+      const unconfirmedErr = new Error(`Meta response missing message_id confirmation for opening DM on ${claimKey}`);
+      unconfirmedErr.category = 'UNKNOWN_OUTCOME';
+      unconfirmedErr.retryable = false;
+      throw unconfirmedErr;
     }
 
     // Persist claim as confirmed 'sent'
@@ -1750,47 +1862,62 @@ async function executeCommentJob(job) {
   } catch (apiErr) {
     const classification = metaRateLimiter.classifyMetaError(apiErr);
 
-    if (db.collections && db.collections().openingDmClaims) {
-      if (classification.category === 'UNKNOWN_OUTCOME') {
-        await db.collections().openingDmClaims.updateOne(
-          { claim_key: claimKey, worker_id: workerToken },
-          {
-            $set: {
-              status: 'unknown',
-              locked_until: null,
-              last_error: apiErr.message,
-              updated_at: new Date()
-            }
-          }
-        );
-      } else if (classification.category === 'RATE_LIMITED') {
-        await db.collections().openingDmClaims.updateOne(
-          { claim_key: claimKey, worker_id: workerToken },
-          {
-            $set: {
-              status: 'failed_retryable',
-              locked_until: null,
-              last_error: apiErr.message,
-              retryable: true,
-              retry_after: classification.backoffMs,
-              updated_at: new Date()
-            }
-          }
-        );
+    let targetClaimStatus;
+    let isRetryableClaim;
+
+    if (requestDispatched) {
+      // POST-DISPATCH: Request was transmitted to Meta.
+      if (classification.category === 'RATE_LIMITED') {
+        targetClaimStatus = 'failed_retryable';
+        isRetryableClaim = true;
+      } else if (classification.category === 'UNKNOWN_OUTCOME') {
+        targetClaimStatus = 'unknown';
+        isRetryableClaim = false;
+        apiErr.category = 'UNKNOWN_OUTCOME';
+        apiErr.retryable = false;
+      } else if (classification.category === 'PERMISSION_OR_AUTH' ||
+                 classification.category === 'INVALID_RECIPIENT' ||
+                 classification.category === 'INVALID_REQUEST' ||
+                 classification.category === 'MESSAGING_WINDOW') {
+        targetClaimStatus = 'failed_permanent';
+        isRetryableClaim = false;
       } else {
-        await db.collections().openingDmClaims.updateOne(
-          { claim_key: claimKey, worker_id: workerToken },
-          {
-            $set: {
-              status: 'failed',
-              locked_until: null,
-              last_error: apiErr.message,
-              retryable: false,
-              updated_at: new Date()
-            }
-          }
-        );
+        // Any timeout, ECONNRESET, socket drop, lost response, 5xx, or unconfirmed outcome post-dispatch:
+        // Must become unknown and NEVER automatically resent!
+        targetClaimStatus = 'unknown';
+        isRetryableClaim = false;
+        apiErr.category = 'UNKNOWN_OUTCOME';
+        apiErr.retryable = false;
       }
+    } else {
+      // PRE-DISPATCH: Known to have failed before sending across the wire to Meta.
+      if (classification.category === 'PERMISSION_OR_AUTH' ||
+          classification.category === 'INVALID_RECIPIENT' ||
+          classification.category === 'INVALID_REQUEST' ||
+          classification.retryable === false) {
+        targetClaimStatus = 'failed_permanent';
+        isRetryableClaim = false;
+      } else {
+        // Temporary network or DB glitch before dispatch: safe to retry!
+        targetClaimStatus = 'failed_retryable';
+        isRetryableClaim = true;
+      }
+    }
+
+    if (db.collections && db.collections().openingDmClaims) {
+      await db.collections().openingDmClaims.updateOne(
+        { claim_key: claimKey, worker_id: workerToken },
+        {
+          $set: {
+            status: targetClaimStatus,
+            locked_until: null,
+            last_error: apiErr.message,
+            retryable: isRetryableClaim,
+            retry_after: isRetryableClaim ? (classification.backoffMs || 2000) : null,
+            updated_at: new Date()
+          }
+        }
+      );
     }
 
     if (db.collections && db.collections().automationEvents) {
@@ -2103,25 +2230,8 @@ async function executeWebhookJob(job) {
 
 let isDrainingQueue = false;
 async function drainJobQueue() {
-  if (isDrainingQueue) return;
-  isDrainingQueue = true;
-  try {
-    let job = await webhookJobQueue.claimNextJob(db);
-    while (job) {
-      try {
-        await executeWebhookJob(job);
-        await webhookJobQueue.updateJobStatus(job, 'sent', {}, db);
-      } catch (err) {
-        console.error(`[QUEUE ERROR] Failed to process job ${job.job_id}:`, err.message);
-        await webhookJobQueue.updateJobStatus(job, 'failed', { error: err.message }, db);
-      }
-      job = await webhookJobQueue.claimNextJob(db);
-    }
-  } catch (err) {
-    console.error('Queue draining loop error:', err.message);
-  } finally {
-    isDrainingQueue = false;
-  }
+  console.warn('[DEPRECATED] drainJobQueue() is deprecated. The persistent webhookWorker is the sole consumer of webhook_jobs.');
+  return 0;
 }
 
 app.locals.drainJobQueue = drainJobQueue;
@@ -2158,18 +2268,13 @@ app.post('/api/instagram/webhook', async (request, response) => {
     const ingestResult = await webhookJobQueue.ingestWebhookPayload(payload, db);
 
     // 4. Return HTTP 200 ONLY after durable persistence succeeds
-    response.status(200).json({
+    // Ingestion is strictly decoupled from execution: the persistent webhookWorker
+    // is the single consumer that claims and executes webhook_jobs.
+    return response.status(200).json({
       status: 'ok',
       enqueued: ingestResult.count,
       duplicates: ingestResult.duplicates
     });
-
-    // 5. Asynchronous queue processing (completely decoupled from HTTP webhook response)
-    if (process.env.NODE_ENV !== 'test' && ingestResult.count > 0) {
-      setImmediate(() => {
-        drainJobQueue().catch(err => console.error('[QUEUE ERROR] Failed to drain jobs:', err.message));
-      });
-    }
   } catch (err) {
     console.error('[INGEST ERROR] Webhook persistence failed:', err.message);
     // Non-2xx response so Meta knows to retry!

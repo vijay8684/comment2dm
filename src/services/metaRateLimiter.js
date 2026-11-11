@@ -61,7 +61,8 @@ function sanitizeString(text) {
  * @returns {{ category: string, retryable: boolean, backoffMs: number, reason: string }}
  */
 function classifyMetaError(err, statusCode) {
-  const code = Number(err?.metaError?.code || err?.code || 0);
+  const code = Number(err?.metaError?.code || (typeof err?.code === 'number' ? err?.code : 0));
+  const errCode = String(err?.code || '').toLowerCase();
   const subcode = Number(err?.metaError?.error_subcode || err?.error_subcode || 0);
   const message = String(err?.message || err?.metaError?.message || '').toLowerCase();
   const status = Number(statusCode || err?.statusCode || err?.status || 0);
@@ -158,30 +159,65 @@ function classifyMetaError(err, statusCode) {
     };
   }
 
-  // 6. Unknown Outcome (Network timeout or socket hangup after request was dispatched)
+  // 6. Unknown Outcome (Network timeout, socket hangup, connection drop or unconfirmed outcome post-dispatch)
   // CRITICAL: If the request was in flight, Meta may have already delivered the message!
-  // Never automatically resend an uncertain delivery!
-  const isUnknown = err?.uncertainDelivery === true ||
-    err?.requestDispatched === true ||
+  // Once dispatched, any timeout, reset, or lost response has an ambiguous outcome and must NEVER be automatically resent!
+  const isDispatched = err?.requestDispatched === true || err?.uncertainDelivery === true;
+  const isTimeoutOrSocketDrop = errCode === 'etimedout' ||
+    errCode === 'esockettimedout' ||
+    errCode === 'econnreset' ||
+    errCode === 'econnaborted' ||
+    errCode.includes('timeout') ||
     message.includes('network timeout') ||
     message.includes('socket hang up') ||
     message.includes('esockettimedout') ||
+    message.includes('econnreset') ||
+    message.includes('etimedout') ||
+    message.includes('fetch failed') ||
     status === 504;
 
-  if (isUnknown) {
+  if (isDispatched && isTimeoutOrSocketDrop) {
     return {
       category: 'UNKNOWN_OUTCOME',
       retryable: false, // Never automatically retry uncertain outcomes
       backoffMs: 0,
-      reason: sanitizeString(err?.message || 'Network timeout or socket drop after request dispatch; delivery outcome unknown.')
+      reason: sanitizeString(err?.message || 'Network timeout or connection reset after request dispatch; delivery outcome unknown.')
     };
   }
 
-  // 7. Temporary Network / Meta 5xx Server Error (Safe to retry only if NOT in unknown category)
+  // Explicit unknown outcome markers
+  if (err?.uncertainDelivery === true || message.includes('delivery outcome unknown') || message.includes('outcome unknown')) {
+    return {
+      category: 'UNKNOWN_OUTCOME',
+      retryable: false,
+      backoffMs: 0,
+      reason: sanitizeString(err?.message || 'Delivery outcome unknown; request was in-flight.')
+    };
+  }
+
+  // 504 Gateway Timeout or explicit socket hangup
+  if (status === 504 || message.includes('network timeout') || message.includes('socket hang up') || message.includes('esockettimedout')) {
+    return {
+      category: 'UNKNOWN_OUTCOME',
+      retryable: false,
+      backoffMs: 0,
+      reason: sanitizeString(err?.message || 'Gateway or network timeout; outcome unknown.')
+    };
+  }
+
+  // 7. Temporary Network / Meta 5xx Server Error (Safe to retry only if known pre-dispatch or definite temporary error)
   const isNetworkError = status >= 500 ||
+    errCode === 'etimedout' ||
+    errCode === 'econnreset' ||
+    errCode === 'econnrefused' ||
+    errCode === 'ehostunreach' ||
+    errCode === 'enotfound' ||
+    errCode === 'eai_again' ||
+    errCode.includes('timeout') ||
     message.includes('etimedout') ||
     message.includes('econnreset') ||
     message.includes('econnrefused') ||
+    message.includes('connection reset') ||
     message.includes('eai_again') ||
     message.includes('fetch failed');
 
@@ -190,7 +226,7 @@ function classifyMetaError(err, statusCode) {
       category: 'TEMPORARY_NETWORK',
       retryable: true,
       backoffMs: calculateBackoffWithJitter(1),
-      reason: sanitizeString(err?.message || 'Temporary network or Meta 5xx server error.')
+      reason: sanitizeString(err?.message || 'Temporary network or server error before dispatch.')
     };
   }
 
@@ -354,6 +390,48 @@ function isAccountPaused(instagramAccountId) {
 }
 
 /**
+ * Returns the exact pause expiry timestamp (in ms) for an account, or 0 if not paused.
+ *
+ * @param {string} instagramAccountId - Account ID
+ * @param {object} [db] - Database module
+ * @returns {Promise<number>} - Expiry timestamp in ms
+ */
+async function getAccountPauseExpiry(instagramAccountId, db = null) {
+  const now = Date.now();
+  if (!instagramAccountId) return 0;
+  if (globalRateLimitPauseUntil > now) return globalRateLimitPauseUntil;
+
+  // 1. Fast local in-memory check
+  const localExpiry = accountPausedUntil.get(instagramAccountId) || 0;
+  if (localExpiry > now) return localExpiry;
+
+  // 2. Check cached MongoDB state
+  const cached = sharedPauseCache.get(instagramAccountId);
+  if (cached && (now - cached.lastCheckedAtMs) < SHARED_PAUSE_CACHE_TTL_MS) {
+    return (cached.pausedUntilMs > now) ? cached.pausedUntilMs : 0;
+  }
+
+  // 3. Query MongoDB account_rate_limits collection
+  if (db && db.collections && db.collections().accountRateLimits) {
+    try {
+      const record = await db.collections().accountRateLimits.findOne({ account_id: instagramAccountId });
+      if (record && record.paused_until) {
+        const pausedUntilMs = new Date(record.paused_until).getTime();
+        sharedPauseCache.set(instagramAccountId, { pausedUntilMs, lastCheckedAtMs: now });
+        if (pausedUntilMs > now) {
+          accountPausedUntil.set(instagramAccountId, pausedUntilMs);
+          return pausedUntilMs;
+        }
+      } else {
+        sharedPauseCache.set(instagramAccountId, { pausedUntilMs: 0, lastCheckedAtMs: now });
+      }
+    } catch (_) {}
+  }
+
+  return 0;
+}
+
+/**
  * Coordinates request pacing for both global rate limits and per-account rate limits.
  * Checks shared MongoDB pause state before pacing.
  *
@@ -367,22 +445,22 @@ async function paceRequest(instagramAccountId, db = null) {
   // 1. Check Global Pause
   if (globalRateLimitPauseUntil > now) {
     const waitTime = globalRateLimitPauseUntil - now;
-    console.warn(`[META PACER] Global rate limit pause active. Waiting ${waitTime}ms...`);
-    await new Promise(r => setTimeout(r, waitTime));
+    if (waitTime <= 500) {
+      await new Promise(r => setTimeout(r, waitTime));
+    } else {
+      console.warn(`[META PACER] Global rate limit pause active (${waitTime}ms).`);
+    }
   }
 
-  // 2. Check Shared Account Pause (checks MongoDB + local cache)
+  // 2. Check Shared Account Pause (only short micro-pacing, never blocking worker slot for long pauses)
   if (instagramAccountId) {
-    const isPaused = await isAccountPausedAsync(instagramAccountId, db);
-    if (isPaused) {
-      const expiry = Math.max(
-        accountPausedUntil.get(instagramAccountId) || 0,
-        sharedPauseCache.get(instagramAccountId)?.pausedUntilMs || 0
-      );
-      const waitTime = Math.max(0, expiry - Date.now());
-      if (waitTime > 0) {
-        console.warn(`[META PACER] Account ${instagramAccountId} shared pause active. Waiting ${waitTime}ms...`);
+    const pauseExpiry = await getAccountPauseExpiry(instagramAccountId, db);
+    if (pauseExpiry > now) {
+      const waitTime = pauseExpiry - now;
+      if (waitTime <= 500) {
         await new Promise(r => setTimeout(r, waitTime));
+      } else {
+        console.warn(`[META PACER] Account ${instagramAccountId} shared pause active (${waitTime}ms remaining). Job should be rescheduled non-blockingly.`);
       }
     }
   }
@@ -466,6 +544,7 @@ module.exports = {
   paceRequest,
   isAccountPaused,
   isAccountPausedAsync,
+  getAccountPauseExpiry,
   pauseAccount,
   getRateLimitEventsCount: () => rateLimitEventsCount,
   _resetForTesting
