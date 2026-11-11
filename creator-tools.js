@@ -47,7 +47,7 @@
     if (el) el.textContent = aiCredits === Infinity ? 'Unlimited' : aiCredits.toLocaleString();
   }
 
-  // ── Generic AI call ────────────────────────────────────────────────────────
+  // ── Generic AI call (Safe under-development handler) ───────────────────────
   async function callAI(payload) {
     const res = await fetch('/api/creator/generate', {
       method: 'POST',
@@ -56,6 +56,9 @@
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Generation failed');
+    if (data.underDevelopment) {
+      return '🛠️ Creator Studio AI is currently under active development.\n\nExternal AI generation is paused while we fine-tune creator tools for future release. Zero AI credits were deducted.\n\nYour Comment-to-DM automations and follower verification remain 100% operational!';
+    }
     if (typeof data.creditsRemaining === 'number') {
       aiCredits = data.creditsRemaining;
       updateCreditsDisplay();

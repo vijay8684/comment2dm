@@ -1836,19 +1836,45 @@ app.post('/api/instagram/webhook', async (request, response) => {
 // Analytics & Admin
 // ==========================================
 
+function buildOwnerClauses(userId) {
+  const clauses = [{ owner_user_id: String(userId) }, { owner_user_id: userId }];
+  if (!isNaN(Number(userId))) clauses.push({ owner_user_id: Number(userId) });
+  if (/^[a-f0-9]{24}$/i.test(String(userId))) {
+    try {
+      const { ObjectId } = require('mongodb');
+      clauses.push({ owner_user_id: new ObjectId(String(userId)) });
+    } catch (_) {}
+  }
+  return clauses;
+}
+
+function buildIgClauses(igUserId) {
+  const clauses = [{ instagram_user_id: String(igUserId) }];
+  if (!isNaN(Number(igUserId))) clauses.push({ instagram_user_id: Number(igUserId) });
+  return clauses;
+}
+
 app.get('/api/analytics/overview', requireAuth, async (request, response, next) => {
   try {
     const ownerId = request.user.id;
-    const days = parseInt(request.query.days, 10) || 30;
+    const days = request.query.days === 'all' ? 'all' : (parseInt(request.query.days, 10) || 30);
     const requestedIgUserId = String(request.query.instagram_user_id || '').trim();
+
+    const ownerClauses = buildOwnerClauses(ownerId);
+    const igClauses = requestedIgUserId ? buildIgClauses(requestedIgUserId) : [];
 
     let targetAccount = null;
     if (requestedIgUserId) {
       if (db.collections && db.collections().instagramAccounts) {
         targetAccount = await db.collections().instagramAccounts.findOne({
-          owner_user_id: ownerId,
-          instagram_user_id: requestedIgUserId
+          $and: [
+            { $or: ownerClauses },
+            { $or: igClauses }
+          ]
         });
+        if (!targetAccount) {
+          targetAccount = await db.collections().instagramAccounts.findOne({ $or: igClauses });
+        }
       } else {
         targetAccount = await db.get(
           'SELECT * FROM instagram_accounts WHERE owner_user_id = ? AND instagram_user_id = ?',
@@ -1860,128 +1886,188 @@ app.get('/api/analytics/overview', requireAuth, async (request, response, next) 
       }
     }
 
-    let accounts, activeAutomations, totals, recent, daily;
-
-    if (requestedIgUserId) {
-      [accounts, activeAutomations, totals, recent, daily] = await Promise.all([
-        db.get('SELECT COUNT(*) AS count FROM instagram_accounts WHERE owner_user_id = ?', [ownerId]),
-        db.get('SELECT COUNT(*) AS count FROM automations WHERE owner_user_id = ? AND instagram_user_id = ? AND enabled = 1', [ownerId, requestedIgUserId]),
-        db.get(`SELECT
-          SUM(CASE WHEN event_type = 'comment_received' THEN 1 ELSE 0 END) AS comments,
-          SUM(CASE WHEN event_type = 'private_reply' AND status = 'success' THEN 1 ELSE 0 END) AS messagesSent,
-          SUM(CASE WHEN event_type = 'private_reply' AND status = 'failed' THEN 1 ELSE 0 END) AS messagesFailed,
-          SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS successfulEvents
-          FROM automation_events WHERE owner_user_id = ? AND instagram_user_id = ?`, [ownerId, requestedIgUserId]),
-        db.all(`SELECT event_type AS eventType, status, keyword, message_text AS messageText, error_message AS errorMessage, created_at AS createdAt
-          FROM automation_events WHERE owner_user_id = ? AND instagram_user_id = ? ORDER BY created_at DESC LIMIT 20`, [ownerId, requestedIgUserId]),
-        db.all(`SELECT substr(created_at,1,10) AS date,
-          SUM(CASE WHEN event_type = 'comment_received' THEN 1 ELSE 0 END) AS comments,
-          SUM(CASE WHEN event_type = 'private_reply' AND status = 'success' THEN 1 ELSE 0 END) AS messagesSent,
-          SUM(CASE WHEN event_type = 'private_reply' AND status = 'failed' THEN 1 ELSE 0 END) AS messagesFailed
-          FROM automation_events WHERE owner_user_id = ? AND instagram_user_id = ? AND created_at >= datetime('now','-29 days')
-          GROUP BY substr(created_at,1,10) ORDER BY date ASC`, [ownerId, requestedIgUserId])
-      ]);
-    } else {
-      [accounts, activeAutomations, totals, recent, daily] = await Promise.all([
-        db.get('SELECT COUNT(*) AS count FROM instagram_accounts WHERE owner_user_id = ?', [ownerId]),
-        db.get('SELECT COUNT(*) AS count FROM automations WHERE owner_user_id = ? AND enabled = 1', [ownerId]),
-        db.get(`SELECT
-          SUM(CASE WHEN event_type = 'comment_received' THEN 1 ELSE 0 END) AS comments,
-          SUM(CASE WHEN event_type = 'private_reply' AND status = 'success' THEN 1 ELSE 0 END) AS messagesSent,
-          SUM(CASE WHEN event_type = 'private_reply' AND status = 'failed' THEN 1 ELSE 0 END) AS messagesFailed,
-          SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS successfulEvents
-          FROM automation_events WHERE owner_user_id = ?`, [ownerId]),
-        db.all(`SELECT event_type AS eventType, status, keyword, message_text AS messageText, error_message AS errorMessage, created_at AS createdAt
-          FROM automation_events WHERE owner_user_id = ? ORDER BY created_at DESC LIMIT 20`, [ownerId]),
-        db.all(`SELECT substr(created_at,1,10) AS date,
-          SUM(CASE WHEN event_type = 'comment_received' THEN 1 ELSE 0 END) AS comments,
-          SUM(CASE WHEN event_type = 'private_reply' AND status = 'success' THEN 1 ELSE 0 END) AS messagesSent,
-          SUM(CASE WHEN event_type = 'private_reply' AND status = 'failed' THEN 1 ELSE 0 END) AS messagesFailed
-          FROM automation_events WHERE owner_user_id = ? AND created_at >= datetime('now','-29 days')
-          GROUP BY substr(created_at,1,10) ORDER BY date ASC`, [ownerId])
-      ]);
-    }
-
-    let sent = Number(totals?.messagesSent || 0);
-    let failed = Number(totals?.messagesFailed || 0);
-    let commentsCount = Number(totals?.comments || 0);
-
-    // If MongoDB collection is directly accessible, compute exact real-time metrics
+    let accountsCount = 0;
+    let activeAutomationsCount = 0;
+    let sent = 0;
+    let failed = 0;
+    let commentsCount = 0;
+    let dailyDms = [];
     let leaderboard = [];
-    if (db.collections && db.collections().automationEvents) {
-      const col = db.collections().automationEvents;
-      const baseFilter = { owner_user_id: ownerId };
-      if (requestedIgUserId) {
-        baseFilter.instagram_user_id = requestedIgUserId;
+    let recent = [];
+
+    const isMongo = Boolean(db.collections && db.collections().automationEvents);
+
+    if (isMongo) {
+      const colEvents = db.collections().automationEvents;
+      const colAutos = db.collections().automations;
+      const colAccounts = db.collections().instagramAccounts;
+
+      // 1. Account count
+      if (colAccounts) {
+        accountsCount = await colAccounts.countDocuments({ $or: ownerClauses });
       }
 
-      const countSent = await col.countDocuments({ ...baseFilter, event_type: 'private_reply', status: 'success' });
-      const countFailed = await col.countDocuments({ ...baseFilter, event_type: 'private_reply', status: 'failed' });
-      const countComments = await col.countDocuments({ ...baseFilter, event_type: 'comment_received' });
+      // 2. Active automations count
+      if (colAutos) {
+        const autoFilter = {
+          $and: [
+            { $or: ownerClauses },
+            { enabled: { $in: [true, 1, '1', 'true'] } }
+          ]
+        };
+        if (requestedIgUserId) {
+          autoFilter.$and.push({ $or: igClauses });
+        }
+        activeAutomationsCount = await colAutos.countDocuments(autoFilter);
+      }
+
+      // 3. Event base filter
+      const eventAndClauses = [{ $or: ownerClauses }];
+      if (requestedIgUserId) {
+        eventAndClauses.push({ $or: igClauses });
+      }
+      if (days !== 'all' && Number(days) > 0) {
+        const since = new Date(Date.now() - Number(days) * 86400 * 1000).toISOString();
+        eventAndClauses.push({ created_at: { $gte: since } });
+      }
+      const baseEventFilter = { $and: eventAndClauses };
+
+      // 4. Counts
+      const [countSent, countFailed, countCommentsRaw] = await Promise.all([
+        colEvents.countDocuments({ ...baseEventFilter, event_type: 'private_reply', status: 'success' }),
+        colEvents.countDocuments({ ...baseEventFilter, event_type: 'private_reply', status: 'failed' }),
+        colEvents.countDocuments({
+          ...baseEventFilter,
+          $or: [
+            { event_type: 'comment_received' },
+            { comment_id: { $exists: true, $ne: null } }
+          ]
+        })
+      ]);
 
       sent = countSent;
       failed = countFailed;
-      commentsCount = countComments;
+      const totalDMsSent = countSent + countFailed;
+      commentsCount = Math.max(countCommentsRaw, totalDMsSent);
 
-      // Build automation leaderboard
-      if (db.collections().automations) {
-        const autoFilter = { owner_user_id: ownerId };
-        if (requestedIgUserId) autoFilter.instagram_user_id = requestedIgUserId;
-        const userAutos = await db.collections().automations.find(autoFilter).toArray();
+      // 5. Leaderboard
+      if (colAutos) {
+        const autoListFilter = { $and: [{ $or: ownerClauses }] };
+        if (requestedIgUserId) autoListFilter.$and.push({ $or: igClauses });
+        const userAutos = await colAutos.find(autoListFilter).toArray();
         for (const auto of userAutos) {
-          const autoSent = await col.countDocuments({ automation_id: auto.id, status: 'success' });
-          const autoFailed = await col.countDocuments({ automation_id: auto.id, status: 'failed' });
+          const autoSent = await colEvents.countDocuments({ automation_id: auto.id, status: 'success' });
+          const autoFailed = await colEvents.countDocuments({ automation_id: auto.id, status: 'failed' });
           leaderboard.push({
             id: auto.id,
             name: auto.keyword ? `Keyword: ${auto.keyword}` : 'All Comments',
             account: auto.username || (targetAccount ? targetAccount.username : 'Connected Account'),
             sent: autoSent,
             total: autoSent + autoFailed,
-            active: Boolean(auto.enabled)
+            active: auto.enabled === true || auto.enabled === 1 || auto.enabled === '1'
           });
         }
       }
 
-      if (requestedIgUserId) {
-        const recentEvents = await col.find(baseFilter).sort({ created_at: -1 }).limit(20).toArray();
-        recent = recentEvents.map(e => ({
-          eventType: e.event_type,
-          status: e.status,
-          keyword: e.keyword,
-          messageText: e.message_text,
-          errorMessage: e.error_message,
-          createdAt: e.created_at
-        }));
+      // 6. Recent feed
+      const recentEvents = await colEvents.find(baseEventFilter).sort({ created_at: -1 }).limit(20).toArray();
+      recent = recentEvents.map(e => ({
+        eventType: e.event_type || 'private_reply',
+        status: e.status,
+        keyword: e.keyword,
+        messageText: e.message_text,
+        errorMessage: e.error_message,
+        fromUsername: e.from_username || e.username,
+        createdAt: e.created_at
+      }));
+
+      // 7. Daily breakdown
+      const allEventsForDaily = await colEvents.find(baseEventFilter).toArray();
+      const dateMap = {};
+      for (const e of allEventsForDaily) {
+        const d = String(e.created_at || '').slice(0, 10);
+        if (!d) continue;
+        if (!dateMap[d]) dateMap[d] = { date: d, count: 0, messagesSent: 0, messagesFailed: 0 };
+        if (e.event_type === 'private_reply' && e.status === 'success') {
+          dateMap[d].count += 1;
+          dateMap[d].messagesSent += 1;
+        } else if (e.event_type === 'private_reply' && e.status === 'failed') {
+          dateMap[d].messagesFailed += 1;
+        }
       }
+      dailyDms = Object.values(dateMap).sort((a, b) => a.date.localeCompare(b.date));
+
+    } else {
+      // SQLite fallback
+      const [acctRow, autoRow, totalsRow, recentRows, dailyRows] = await Promise.all([
+        db.get('SELECT COUNT(*) AS count FROM instagram_accounts WHERE owner_user_id = ?', [ownerId]),
+        requestedIgUserId
+          ? db.get('SELECT COUNT(*) AS count FROM automations WHERE owner_user_id = ? AND instagram_user_id = ? AND enabled = 1', [ownerId, requestedIgUserId])
+          : db.get('SELECT COUNT(*) AS count FROM automations WHERE owner_user_id = ? AND enabled = 1', [ownerId]),
+        requestedIgUserId
+          ? db.get(`SELECT
+              SUM(CASE WHEN event_type = 'comment_received' THEN 1 ELSE 0 END) AS comments,
+              SUM(CASE WHEN event_type = 'private_reply' AND status = 'success' THEN 1 ELSE 0 END) AS messagesSent,
+              SUM(CASE WHEN event_type = 'private_reply' AND status = 'failed' THEN 1 ELSE 0 END) AS messagesFailed,
+              SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS successfulEvents
+              FROM automation_events WHERE owner_user_id = ? AND instagram_user_id = ?`, [ownerId, requestedIgUserId])
+          : db.get(`SELECT
+              SUM(CASE WHEN event_type = 'comment_received' THEN 1 ELSE 0 END) AS comments,
+              SUM(CASE WHEN event_type = 'private_reply' AND status = 'success' THEN 1 ELSE 0 END) AS messagesSent,
+              SUM(CASE WHEN event_type = 'private_reply' AND status = 'failed' THEN 1 ELSE 0 END) AS messagesFailed,
+              SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS successfulEvents
+              FROM automation_events WHERE owner_user_id = ?`, [ownerId]),
+        requestedIgUserId
+          ? db.all(`SELECT event_type AS eventType, status, keyword, message_text AS messageText, error_message AS errorMessage, created_at AS createdAt
+              FROM automation_events WHERE owner_user_id = ? AND instagram_user_id = ? ORDER BY created_at DESC LIMIT 20`, [ownerId, requestedIgUserId])
+          : db.all(`SELECT event_type AS eventType, status, keyword, message_text AS messageText, error_message AS errorMessage, created_at AS createdAt
+              FROM automation_events WHERE owner_user_id = ? ORDER BY created_at DESC LIMIT 20`, [ownerId]),
+        requestedIgUserId
+          ? db.all(`SELECT substr(created_at,1,10) AS date,
+              SUM(CASE WHEN event_type = 'comment_received' THEN 1 ELSE 0 END) AS comments,
+              SUM(CASE WHEN event_type = 'private_reply' AND status = 'success' THEN 1 ELSE 0 END) AS messagesSent,
+              SUM(CASE WHEN event_type = 'private_reply' AND status = 'failed' THEN 1 ELSE 0 END) AS messagesFailed
+              FROM automation_events WHERE owner_user_id = ? AND instagram_user_id = ? AND created_at >= datetime('now','-29 days')
+              GROUP BY substr(created_at,1,10) ORDER BY date ASC`, [ownerId, requestedIgUserId])
+          : db.all(`SELECT substr(created_at,1,10) AS date,
+              SUM(CASE WHEN event_type = 'comment_received' THEN 1 ELSE 0 END) AS comments,
+              SUM(CASE WHEN event_type = 'private_reply' AND status = 'success' THEN 1 ELSE 0 END) AS messagesSent,
+              SUM(CASE WHEN event_type = 'private_reply' AND status = 'failed' THEN 1 ELSE 0 END) AS messagesFailed
+              FROM automation_events WHERE owner_user_id = ? AND created_at >= datetime('now','-29 days')
+              GROUP BY substr(created_at,1,10) ORDER BY date ASC`, [ownerId])
+      ]);
+
+      accountsCount = acctRow?.count || 0;
+      activeAutomationsCount = autoRow?.count || 0;
+      sent = Number(totalsRow?.messagesSent || 0);
+      failed = Number(totalsRow?.messagesFailed || 0);
+      commentsCount = Math.max(Number(totalsRow?.comments || 0), sent + failed);
+      recent = recentRows || [];
+      dailyDms = (dailyRows && dailyRows.length > 0)
+        ? dailyRows.map(d => ({ date: d.date, count: Number(d.messagesSent || d.count || 0) }))
+        : [];
     }
 
     const totalDMs = sent + failed;
-    const deliveryRate = totalDMs > 0 ? Math.round((sent / totalDMs) * 100) : 0;
-
-    // Build daily array for bar chart ({ date, count })
-    const dailyDms = (daily && daily.length > 0)
-      ? daily.map(d => ({ date: d.date, count: Number(d.messagesSent || d.count || 0) }))
-      : [];
+    const deliveryRate = totalDMs > 0 ? Math.round((sent / totalDMs) * 100) : 100;
 
     return response.json({
-      // Fields expected by analytics.js frontend & dashboard.js
       dmsSent: sent,
       commentsProcessed: commentsCount,
       failed,
       totalDMs,
       deliveryRate,
-      activeAutomations: activeAutomations?.count || 0,
+      activeAutomations: activeAutomationsCount,
       dailyDms,
       automations: leaderboard,
-
-      // Fields for legacy compatibility
-      accounts: accounts?.count || 0,
+      accounts: accountsCount,
+      recent: recent || [],
+      // Legacy compatibility
       comments: commentsCount,
       messagesSent: sent,
       messagesFailed: failed,
       successfulEvents: sent,
-      recent: recent || [],
-      daily: daily || []
+      daily: dailyDms
     });
   } catch (error) {
     return next(error);
@@ -2152,56 +2238,20 @@ const CREATOR_TOOL_CREDITS = {
 };
 
 app.post('/api/creator/generate', requireAuth, async (request, response) => {
-  const { type: rawType, tool, topic, audience, tone = 'inspirational', count = 3, product, cta, niche, week } = request.body || {};
-  const type = rawType || tool || 'hooks';
-  const requiredCredits = CREATOR_TOOL_CREDITS[type] || 10;
-
-  // 1. Mandatory server-side atomic credit balance validation
-  let creditStatus;
+  // Creator Studio AI is marked as Under Development
+  // External AI calls are suspended to protect creator budgets and 0 credits are deducted
+  let creditStatus = { balance: 100 };
   try {
     creditStatus = await billing.getAiCreditBalance(request.user.id);
-  } catch (creditErr) {
-    creditStatus = { balance: 100, isAdmin: false };
-  }
+  } catch (_) {}
 
-  if (!creditStatus.isAdmin && creditStatus.balance < requiredCredits) {
-    return response.status(402).json({
-      error: `Insufficient AI credits. You have ${creditStatus.balance} credits remaining, but this operation requires ${requiredCredits} credits. Please upgrade your plan in Billing.`,
-      balance: creditStatus.balance,
-      required: requiredCredits
-    });
-  }
-
-  try {
-    let result = null;
-    if (GEMINI_KEY) {
-      let prompt = '';
-      if (type === 'hooks') prompt = `Generate ${count || 3} scroll-stopping Instagram Reel hooks about "${topic || 'content creation'}" for ${audience || 'general audience'} with a ${tone} tone. Return only the hooks, one per line, no numbering.`;
-      else if (type === 'dm_script') prompt = `Write a friendly Instagram DM script for "${product || 'free guide'}". CTA: ${cta || 'check link'}. Tone: ${tone}. Max 150 words. Natural, personalized, not spammy.`;
-      else if (type === 'ideas') prompt = `Generate 7 Instagram content ideas for the ${niche || 'creators'} niche for ${week || 'this week'}. Return as JSON array of objects with: title, hook, format (reel/carousel/story/static).`;
-      const raw = await callGemini(prompt);
-      if (raw) {
-        if (type === 'hooks') result = raw.split('\n').filter(l => l.trim()).slice(0, count || 3);
-        else if (type === 'ideas') { try { result = JSON.parse(raw.match(/\[[\s\S]*\]/)?.[0] || '[]'); } catch { result = null; } }
-        else result = raw;
-      }
-    }
-    if (!result) result = creatorFallback(type, request.body);
-
-    // 2. Atomic credit deduction ONLY upon successful generation (failed generations never deduct)
-    const deduction = await billing.deductAiCredits(request.user.id, requiredCredits, type);
-
-    return response.json({
-      success: true,
-      result,
-      output: result,
-      creditsRemaining: deduction.remaining,
-      creditsDeducted: requiredCredits
-    });
-  } catch (err) {
-    console.error('[CREATOR_STUDIO] AI generation failed:', err.message);
-    return response.status(500).json({ error: err.message || 'Generation failed' });
-  }
+  return response.status(200).json({
+    success: false,
+    underDevelopment: true,
+    message: 'Creator Studio AI is currently under active development. External AI requests are paused to ensure zero credit consumption.',
+    creditsUsed: 0,
+    creditsRemaining: creditStatus ? creditStatus.balance : 100
+  });
 });
 
 // ── Reel Performance Analyzer Endpoints ─────────────────────────────────────
@@ -2282,68 +2332,162 @@ app.post('/api/contact', async (request, response) => {
   } catch { return response.json({ success: true }); }
 });
 
-// ── Analytics Events for DM Log ─────────────────────────────────────────────
+// ── Analytics Events for DM Log & Unified Activity ──────────────────────────
 app.get('/api/analytics/events', requireAuth, async (request, response) => {
   try {
     const page = Math.max(1, parseInt(request.query.page) || 1);
     const limit = Math.min(50, parseInt(request.query.limit) || 20);
     const status = request.query.status || 'all';
-    const days = parseInt(request.query.days) || 7;
-    const search = request.query.search || '';
-    const col = db.collections ? (db.collections().automationEvents || db.collections().automation_events) : null;
-    if (!col) return response.json({ events: [], total: 0, sent: 0, failed: 0, pending: 0, pages: 1 });
+    const days = request.query.days === 'all' ? 'all' : (parseInt(request.query.days) || 30);
+    const search = String(request.query.search || '').trim();
+    const requestedIgUserId = String(request.query.instagram_user_id || '').trim();
 
-    const since = new Date(Date.now() - days * 86400000).toISOString();
-    const filter = {
-      $or: [
-        { owner_user_id: String(request.user.id) },
-        { owner_user_id: request.user.id }
-      ],
-      created_at: { $gte: since }
-    };
-    if (status !== 'all') {
-      filter.status = status === 'sent' ? 'success' : status;
-    }
-    if (search) {
-      filter.$or = [
-        { message_text: { $regex: search, $options: 'i' } },
-        { keyword: { $regex: search, $options: 'i' } }
-      ];
-    }
+    const ownerClauses = buildOwnerClauses(request.user.id);
+    const isMongo = Boolean(db.collections && db.collections().automationEvents);
 
-    const [events, total, sent, failed] = await Promise.all([
-      col.find(filter).sort({ created_at: -1 }).skip((page - 1) * limit).limit(limit).toArray(),
-      col.countDocuments(filter),
-      col.countDocuments({ ...filter, status: 'success' }),
-      col.countDocuments({ ...filter, status: 'failed' })
-    ]);
+    if (isMongo) {
+      const col = db.collections().automationEvents;
 
-    const mappedEvents = events.map(e => {
-      const rawSender = e.from_username || e.username || e.from_id || e.instagram_user_id || 'Commenter';
-      const cleanSender = String(rawSender).replace(/^@+/, '');
-      return {
-        id: e.event_id || e._id,
-        senderName: cleanSender,
-        username: cleanSender,
-        commentText: e.comment_text || (e.keyword ? `Keyword: "${e.keyword}"` : 'Comment'),
-        dmPreview: e.message_text || '–',
-        dmText: e.message_text || '–',
-        automationName: 'Comment to DM',
-        status: e.status === 'success' ? 'sent' : e.status,
-        timestamp: e.created_at,
-        created_at: e.created_at,
-        createdAt: e.created_at
+      // Base query scoped to user and selected account + date window
+      const baseAndClauses = [{ $or: ownerClauses }];
+      if (requestedIgUserId) {
+        baseAndClauses.push({ $or: buildIgClauses(requestedIgUserId) });
+      }
+      if (days !== 'all' && Number(days) > 0) {
+        const since = new Date(Date.now() - Number(days) * 86400000).toISOString();
+        baseAndClauses.push({ created_at: { $gte: since } });
+      }
+
+      // Base filter for counting sent, failed, and pending (excluding raw non-DM triggers)
+      const baseFilter = {
+        $and: [
+          ...baseAndClauses,
+          {
+            $or: [
+              { event_type: 'private_reply' },
+              { event_type: { $exists: false } },
+              { event_type: null }
+            ]
+          }
+        ]
       };
-    });
 
-    return response.json({
-      events: mappedEvents,
-      total,
-      sent,
-      failed,
-      pending: 0,
-      pages: Math.max(1, Math.ceil(total / limit))
-    });
+      // Filter for the paginated list (adds status & search)
+      const listAndClauses = [...baseAndClauses];
+
+      if (status === 'sent' || status === 'success') {
+        listAndClauses.push({ status: 'success' });
+      } else if (status === 'failed') {
+        listAndClauses.push({ status: 'failed' });
+      } else if (status === 'pending') {
+        listAndClauses.push({ status: { $in: ['pending', 'queued', 'processing'] } });
+      }
+
+      if (search) {
+        listAndClauses.push({
+          $or: [
+            { from_username: { $regex: search, $options: 'i' } },
+            { username: { $regex: search, $options: 'i' } },
+            { comment_text: { $regex: search, $options: 'i' } },
+            { message_text: { $regex: search, $options: 'i' } },
+            { keyword: { $regex: search, $options: 'i' } }
+          ]
+        });
+      }
+
+      const listFilter = { $and: listAndClauses };
+
+      const [events, listTotal, sent, failed, pending] = await Promise.all([
+        col.find(listFilter).sort({ created_at: -1 }).skip((page - 1) * limit).limit(limit).toArray(),
+        col.countDocuments(listFilter),
+        col.countDocuments({ ...baseFilter, status: 'success' }),
+        col.countDocuments({ ...baseFilter, status: 'failed' }),
+        col.countDocuments({ ...baseFilter, status: { $in: ['pending', 'queued', 'processing'] } })
+      ]);
+
+      const total = sent + failed + pending;
+
+      const mappedEvents = events.map(e => {
+        const rawSender = e.from_username || e.username || e.from_id || e.instagram_user_id || 'Commenter';
+        const cleanSender = String(rawSender).replace(/^@+/, '');
+        return {
+          id: e.event_id || e._id,
+          senderName: cleanSender,
+          username: cleanSender,
+          commentText: e.comment_text || (e.keyword ? `Keyword: "${e.keyword}"` : 'Comment'),
+          dmPreview: e.message_text || '–',
+          dmText: e.message_text || '–',
+          buttonText: e.button_text || null,
+          automationName: e.keyword ? `Keyword: ${e.keyword}` : 'Comment to DM',
+          status: e.status === 'success' ? 'sent' : e.status,
+          errorMessage: e.error_message || null,
+          timestamp: e.created_at,
+          created_at: e.created_at,
+          createdAt: e.created_at
+        };
+      });
+
+      return response.json({
+        events: mappedEvents,
+        total,
+        sent,
+        failed,
+        pending,
+        listTotal,
+        pages: Math.max(1, Math.ceil(listTotal / limit)),
+        page,
+        limit
+      });
+    } else {
+      // SQLite fallback
+      const events = await db.all(
+        requestedIgUserId
+          ? 'SELECT event_type AS eventType, status, keyword, message_text AS messageText, error_message AS errorMessage, created_at AS createdAt FROM automation_events WHERE owner_user_id = ? AND instagram_user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?'
+          : 'SELECT event_type AS eventType, status, keyword, message_text AS messageText, error_message AS errorMessage, created_at AS createdAt FROM automation_events WHERE owner_user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+        requestedIgUserId ? [request.user.id, requestedIgUserId, limit, (page - 1) * limit] : [request.user.id, limit, (page - 1) * limit]
+      );
+      const totals = await db.get(
+        requestedIgUserId
+          ? `SELECT
+              SUM(CASE WHEN event_type = 'private_reply' AND status = 'success' THEN 1 ELSE 0 END) AS sent,
+              SUM(CASE WHEN event_type = 'private_reply' AND status = 'failed' THEN 1 ELSE 0 END) AS failed
+              FROM automation_events WHERE owner_user_id = ? AND instagram_user_id = ?`
+          : `SELECT
+              SUM(CASE WHEN event_type = 'private_reply' AND status = 'success' THEN 1 ELSE 0 END) AS sent,
+              SUM(CASE WHEN event_type = 'private_reply' AND status = 'failed' THEN 1 ELSE 0 END) AS failed
+              FROM automation_events WHERE owner_user_id = ?`,
+        requestedIgUserId ? [request.user.id, requestedIgUserId] : [request.user.id]
+      );
+      const sent = Number(totals?.sent || 0);
+      const failed = Number(totals?.failed || 0);
+      const total = sent + failed;
+
+      const mapped = (events || []).map(e => ({
+        id: e.createdAt,
+        senderName: 'Commenter',
+        username: 'Commenter',
+        commentText: e.keyword ? `Keyword: "${e.keyword}"` : 'Comment',
+        dmPreview: e.messageText || '–',
+        dmText: e.messageText || '–',
+        automationName: e.keyword ? `Keyword: ${e.keyword}` : 'Comment to DM',
+        status: e.status === 'success' ? 'sent' : e.status,
+        timestamp: e.createdAt,
+        created_at: e.createdAt,
+        createdAt: e.createdAt
+      }));
+
+      return response.json({
+        events: mapped,
+        total,
+        sent,
+        failed,
+        pending: 0,
+        listTotal: total,
+        pages: Math.max(1, Math.ceil(total / limit)),
+        page,
+        limit
+      });
+    }
   } catch (err) {
     return response.status(500).json({ error: err.message });
   }

@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Activity & Analytics — Comment2DM</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="app-body" data-page="activity">
+  <div class="app-shell">
+    <!-- Sidebar Navigation -->
+    <aside class="app-sidebar" id="appSidebar">
+      <div class="sidebar-top">
+        <a href="dashboard.html" class="logo">
+          <span class="logo-mark">⚡</span>
+          <span>Comment<span style="color:var(--accent-light);">2</span>DM</span>
+        </a>
+        <button class="sidebar-toggle-btn" id="sidebarToggleBtn" title="Toggle Sidebar">
+          <span id="collapseIcon">«</span>
+        </button>
+      </div>
+
+      <!-- Connected Account Switcher -->
+      <div class="sidebar-account" id="sidebarAccountArea">
+        <button class="account-selector" id="accountSwitcherBtn" type="button" aria-haspopup="true" aria-expanded="false" title="Active Instagram Account">
+          <div class="account-pill">
+            <div class="account-avatar-img" id="sidebarIgAvatar" style="display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:0.75rem;">IG</div>
+            <div class="account-meta">
+              <span class="account-username" id="sidebarIgUsername">No Account</span>
+              <span class="account-status" id="sidebarIgStatus">Connect now</span>
+            </div>
+          </div>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </button>
+      </div>
+
+      <nav class="app-nav" aria-label="Main Navigation">
+        <a href="dashboard.html" data-nav="dashboard" title="Home Dashboard">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+          </span>
+          <span>Home</span>
+        </a>
+
+        <a href="instagram-accounts.html" data-nav="instagram" title="Instagram Accounts">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"></rect><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"></line></svg>
+          </span>
+          <span>Instagram Accounts</span>
+        </a>
+
+        <a href="automations.html" data-nav="automations" title="Automations">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+          </span>
+          <span>Automations</span>
+        </a>
+
+        <a href="creator-tools.html" data-nav="creator-tools" title="Creator Studio AI">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path></svg>
+          </span>
+          <span>Creator Studio AI</span>
+          <span class="badge-dev">Under Dev</span>
+        </a>
+
+        <a href="activity.html" data-nav="activity" class="active" title="Activity & Analytics">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+          </span>
+          <span>Activity</span>
+        </a>
+
+        <a href="settings.html" data-nav="settings" title="Account Settings">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          </span>
+          <span>Settings</span>
+        </a>
+
+        <a href="help.html" data-nav="help" title="Help Desk & Support">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          </span>
+          <span>Help Desk</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="dm-limit-card" id="dmLimitCard">
+          <div class="dm-limit-header"><span>Monthly DMs</span><strong id="dmLimitText">0 / 300</strong></div>
+          <div class="dm-progress-track"><div class="dm-progress-fill" id="dmProgressFill" style="width:0%;"></div></div>
+          <a href="billing.html" class="btn btn-ghost btn-sm btn-block" style="font-size:0.78rem;padding:5px;">Upgrade Plan ↗</a>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="app-main">
+      <header class="app-header">
+        <div class="app-header-left">
+          <span class="breadcrumb" style="font-size:0.75rem; color:var(--ink-secondary); text-transform:uppercase; letter-spacing:0.06em;">Analytics & Logs</span>
+          <h2 style="margin-top:2px;">Activity & Analytics</h2>
+        </div>
+
+        <div class="app-header-right">
+          <button class="icon-btn" id="themeToggleBtn" title="Toggle Theme">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+          </button>
+          <div class="user-avatar" id="headerUserAvatar" title="Your Profile">U</div>
+        </div>
+      </header>
+
+      <div class="app-content">
+        <!-- Controls Bar: Time Range & Refresh -->
+        <div class="activity-controls-bar">
+          <div>
+            <p style="font-size:0.86rem; color:var(--ink-secondary); margin:0;">
+              Real-time delivery performance and interactive DM log for <strong id="activeAccountLabel" style="color:var(--ink);">All Accounts</strong>.
+            </p>
+          </div>
+
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <div class="activity-range-tabs" id="rangeTabs">
+              <button class="activity-range-tab active" data-days="7" type="button">Last 7 Days</button>
+              <button class="activity-range-tab" data-days="30" type="button">Last 30 Days</button>
+              <button class="activity-range-tab" data-days="90" type="button">Last 90 Days</button>
+              <button class="activity-range-tab" data-days="all" type="button">All Time</button>
+            </div>
+
+            <button class="btn btn-secondary btn-sm" id="refreshActivityBtn" type="button" title="Refresh metrics and log">
+              <svg id="refreshIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="transition:transform 0.4s var(--ease-apple);"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"></path></svg>
+              <span>Refresh</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- SECTION 1: Performance KPIs (4 Overview Cards) -->
+        <section class="activity-kpi-grid">
+          <!-- Card 1: Total DMs Sent -->
+          <div class="activity-kpi-card">
+            <div class="activity-kpi-header">
+              <span class="activity-kpi-label">Total DMs Sent</span>
+              <div class="activity-kpi-icon" style="background:var(--accent-tint); color:var(--accent-light);">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4Z"></path><path d="M22 2 11 13"></path></svg>
+              </div>
+            </div>
+            <div class="activity-kpi-value" id="kpiDmsSent">0</div>
+            <div class="activity-kpi-subtext" id="kpiDmsTrend">
+              <span style="color:var(--emerald);">● Live Meta Webhook</span>
+            </div>
+          </div>
+
+          <!-- Card 2: Successful Deliveries -->
+          <div class="activity-kpi-card">
+            <div class="activity-kpi-header">
+              <span class="activity-kpi-label">Successful Deliveries</span>
+              <div class="activity-kpi-icon" style="background:var(--emerald-tint); color:var(--emerald);">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+              </div>
+            </div>
+            <div class="activity-kpi-value" id="kpiSuccessDeliveries">0</div>
+            <div class="activity-kpi-subtext">
+              <span id="kpiDeliveryRate" style="color:var(--emerald); font-weight:600;">100% Delivery Rate</span>
+            </div>
+          </div>
+
+          <!-- Card 3: Failed Deliveries -->
+          <div class="activity-kpi-card">
+            <div class="activity-kpi-header">
+              <span class="activity-kpi-label">Failed Deliveries</span>
+              <div class="activity-kpi-icon" style="background:var(--rose-tint); color:var(--rose);">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+              </div>
+            </div>
+            <div class="activity-kpi-value" id="kpiFailedDeliveries">0</div>
+            <div class="activity-kpi-subtext" id="kpiFailedSubtext">
+              <span>0 issues recorded</span>
+            </div>
+          </div>
+
+          <!-- Card 4: Active Automations -->
+          <div class="activity-kpi-card">
+            <div class="activity-kpi-header">
+              <span class="activity-kpi-label">Active Automations</span>
+              <div class="activity-kpi-icon" style="background:rgba(245,158,11,0.12); color:#f59e0b;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+              </div>
+            </div>
+            <div class="activity-kpi-value" id="kpiActiveAutomations">0</div>
+            <div class="activity-kpi-subtext">
+              <a href="automations.html" style="color:var(--accent-light); font-weight:500; text-decoration:none;">Manage automations →</a>
+            </div>
+          </div>
+        </section>
+
+        <!-- SECTION 2: Analytics & Conversion Funnel -->
+        <section class="activity-analytics-grid">
+          <!-- Daily Performance Chart -->
+          <div class="activity-chart-box">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+              <div>
+                <h3 style="font-size:1rem; font-weight:600; color:var(--ink); margin:0;">Daily Delivery Trend</h3>
+                <small style="font-size:0.78rem; color:var(--ink-secondary);">Direct message volume over selected timeframe</small>
+              </div>
+              <span id="chartRangeBadge" style="font-size:0.75rem; color:var(--accent-light); background:rgba(99,102,241,0.15); padding:3px 10px; border-radius:12px; font-weight:500;">Last 7 Days</span>
+            </div>
+
+            <div class="activity-chart-container" id="dailyChartContainer">
+              <!-- Dynamically populated bars -->
+            </div>
+          </div>
+
+          <!-- Comment-to-DM Conversion Funnel -->
+          <div class="activity-chart-box">
+            <div style="margin-bottom:14px;">
+              <h3 style="font-size:1rem; font-weight:600; color:var(--ink); margin:0;">Engagement & Conversion</h3>
+              <small style="font-size:0.78rem; color:var(--ink-secondary);">Comment trigger to successful DM completion</small>
+            </div>
+
+            <div class="activity-funnel-row">
+              <!-- Step 1: Comments Processed -->
+              <div class="activity-funnel-step">
+                <div class="activity-funnel-info">
+                  <div class="activity-funnel-icon" style="background:rgba(99,102,241,0.15); color:var(--accent-light);">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path></svg>
+                  </div>
+                  <div>
+                    <div class="activity-funnel-title">Comments Processed</div>
+                    <div class="activity-funnel-sub">Official Meta Webhook</div>
+                  </div>
+                </div>
+                <div class="activity-funnel-metrics">
+                  <div class="activity-funnel-num" id="funnelComments">0</div>
+                  <div class="activity-funnel-pct" style="color:var(--ink-secondary);">100% Top of Funnel</div>
+                </div>
+              </div>
+
+              <!-- Step 2: DMs Triggered -->
+              <div class="activity-funnel-step">
+                <div class="activity-funnel-info">
+                  <div class="activity-funnel-icon" style="background:rgba(245,158,11,0.15); color:#f59e0b;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                  </div>
+                  <div>
+                    <div class="activity-funnel-title">DMs Triggered</div>
+                    <div class="activity-funnel-sub">Keyword & Rule Matches</div>
+                  </div>
+                </div>
+                <div class="activity-funnel-metrics">
+                  <div class="activity-funnel-num" id="funnelTriggered">0</div>
+                  <div class="activity-funnel-pct" id="funnelTriggerPct">100% Rate</div>
+                </div>
+              </div>
+
+              <!-- Step 3: DMs Delivered -->
+              <div class="activity-funnel-step">
+                <div class="activity-funnel-info">
+                  <div class="activity-funnel-icon" style="background:var(--emerald-tint); color:var(--emerald);">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4Z"></path></svg>
+                  </div>
+                  <div>
+                    <div class="activity-funnel-title">Delivered to Inbox</div>
+                    <div class="activity-funnel-sub">Private Reply Confirmed</div>
+                  </div>
+                </div>
+                <div class="activity-funnel-metrics">
+                  <div class="activity-funnel-num" id="funnelDelivered">0</div>
+                  <div class="activity-funnel-pct" id="funnelDeliverPct" style="color:var(--emerald);">100% Delivery</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- SECTION 3: DM Activity Log & Event Table -->
+        <section class="activity-log-section">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
+            <div>
+              <h3 style="font-size:1.1rem; font-weight:700; color:var(--ink); margin:0;">Direct Message Activity Log</h3>
+              <p style="font-size:0.82rem; color:var(--ink-secondary); margin:2px 0 0;">Inspect live comment triggers, sent messages, follow verification, and Meta API statuses.</p>
+            </div>
+            <div style="font-size:0.82rem; color:var(--ink-secondary);">
+              Showing <span id="logCountSummary" style="color:var(--ink); font-weight:600;">0 total events</span>
+            </div>
+          </div>
+
+          <!-- Filter Toolbar -->
+          <div class="activity-filter-bar">
+            <!-- Search Box -->
+            <div class="activity-search-box">
+              <span class="activity-search-icon">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              </span>
+              <input type="text" id="eventSearchInput" placeholder="Search by commenter @handle, keyword, or message..." />
+            </div>
+
+            <!-- Status Filter -->
+            <select class="activity-select" id="eventStatusFilter">
+              <option value="all">All Delivery Statuses</option>
+              <option value="sent">✅ Successfully Delivered</option>
+              <option value="failed">❌ Failed Delivery</option>
+              <option value="pending">⏳ Processing</option>
+            </select>
+          </div>
+
+          <!-- Table Container -->
+          <div class="activity-table-wrap">
+            <table class="activity-table">
+              <thead>
+                <tr>
+                  <th style="padding-left:18px;">Commenter</th>
+                  <th>Comment Trigger</th>
+                  <th>DM Sent</th>
+                  <th>Automation Rule</th>
+                  <th>Delivery Status</th>
+                  <th>Date & Time</th>
+                  <th style="text-align:right; padding-right:18px;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="activityTableBody">
+                <tr>
+                  <td colspan="7" style="text-align:center; padding:40px; color:var(--ink-secondary);">
+                    Loading activity events...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Pagination Bar -->
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-top:18px; padding-top:14px; border-top:1px solid var(--glass-border); flex-wrap:wrap; gap:10px;">
+            <div style="font-size:0.82rem; color:var(--ink-secondary);" id="paginationInfo">
+              Page 1 of 1
+            </div>
+
+            <div style="display:flex; align-items:center; gap:8px;">
+              <button class="btn btn-secondary btn-sm" id="prevPageBtn" disabled type="button">
+                ← Previous
+              </button>
+              <button class="btn btn-secondary btn-sm" id="nextPageBtn" disabled type="button">
+                Next →
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- Event Details Modal -->
+  <div class="activity-modal-overlay" id="eventDetailModal" aria-hidden="true">
+    <div class="activity-modal-card">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; border-bottom:1px solid var(--glass-border); padding-bottom:14px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:36px; height:36px; border-radius:50%; background:linear-gradient(135deg,var(--accent),#ec4899); display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:0.85rem;" id="modalAvatar">@</div>
+          <div>
+            <h4 style="font-size:1rem; font-weight:600; color:var(--ink); margin:0;" id="modalUsername">@user</h4>
+            <small style="color:var(--ink-secondary); font-size:0.78rem;" id="modalTime">Timestamp</small>
+          </div>
+        </div>
+        <button class="icon-btn" id="closeDetailModalBtn" type="button" title="Close Modal">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:16px;">
+        <!-- Triggering Comment -->
+        <div style="background:var(--surface-hover); border:1px solid var(--glass-border); border-radius:12px; padding:14px;">
+          <div style="font-size:0.75rem; font-weight:600; color:var(--ink-secondary); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">Triggering Instagram Comment</div>
+          <div style="font-size:0.9rem; color:var(--ink); line-height:1.5;" id="modalCommentText">—</div>
+        </div>
+
+        <!-- Direct Message Sent -->
+        <div style="background:var(--surface-hover); border:1px solid var(--glass-border); border-radius:12px; padding:14px;">
+          <div style="font-size:0.75rem; font-weight:600; color:var(--ink-secondary); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">Automated Direct Message</div>
+          <div style="font-size:0.9rem; color:var(--ink); line-height:1.5; white-space:pre-wrap;" id="modalDmText">—</div>
+          <div id="modalBtnWrap" style="margin-top:10px; display:none;">
+            <span style="font-size:0.75rem; color:var(--ink-secondary);">Interactive Button:</span>
+            <span class="automation-pill" id="modalBtnTitle" style="margin-left:6px;">Button Title</span>
+          </div>
+        </div>
+
+        <!-- Meta API & Delivery Status -->
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div style="background:var(--surface-hover); border:1px solid var(--glass-border); border-radius:10px; padding:12px;">
+            <div style="font-size:0.72rem; color:var(--ink-secondary); text-transform:uppercase;">Status</div>
+            <div style="font-size:0.9rem; font-weight:600; margin-top:4px;" id="modalStatusBadge">Delivered</div>
+          </div>
+
+          <div style="background:var(--surface-hover); border:1px solid var(--glass-border); border-radius:10px; padding:12px;">
+            <div style="font-size:0.72rem; color:var(--ink-secondary); text-transform:uppercase;">Automation Rule</div>
+            <div style="font-size:0.9rem; font-weight:600; margin-top:4px; color:var(--accent-light);" id="modalAutoName">Comment to DM</div>
+          </div>
+        </div>
+
+        <!-- Error Message (if any) -->
+        <div id="modalErrorWrap" style="display:none; background:var(--rose-tint); border:1px solid rgba(244,63,94,0.3); border-radius:10px; padding:12px; color:var(--rose); font-size:0.84rem;">
+          <strong style="display:block; margin-bottom:2px;">Meta API Error:</strong>
+          <span id="modalErrorText">Error details</span>
+        </div>
+      </div>
+
+      <div style="margin-top:20px; text-align:right;">
+        <button class="btn btn-secondary btn-sm" id="dismissModalBtn" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="dashboard.js"></script>
+  <script src="activity.js"></script>
+</body>
+</html>

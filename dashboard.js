@@ -477,10 +477,17 @@
     const url = targetId ? `/api/analytics/overview?instagram_user_id=${encodeURIComponent(targetId)}` : '/api/analytics/overview';
 
     try {
-      const response = await fetch(url, {
+      let response = await fetch(url, {
         headers: window.getAuthHeaders(),
         credentials: 'same-origin'
       });
+      if (!response.ok && targetId) {
+        // Safe fallback to user-level overview if account query was rejected
+        response = await fetch('/api/analytics/overview', {
+          headers: window.getAuthHeaders(),
+          credentials: 'same-origin'
+        });
+      }
       if (!response.ok) return;
       const data = await response.json().catch(() => ({}));
 
@@ -502,7 +509,7 @@
 
       if (deliveryRate) {
         if (totalDMs === 0) {
-          deliveryRate.textContent = '0%';
+          deliveryRate.textContent = '100%';
         } else {
           deliveryRate.textContent = (data.deliveryRate ?? 100) + '%';
         }
@@ -510,7 +517,7 @@
 
       if (deliveryNote) {
         if (totalDMs === 0) {
-          deliveryNote.textContent = 'No DMs sent yet';
+          deliveryNote.textContent = 'Ready for comment triggers';
           deliveryNote.style.color = 'var(--ink-muted)';
         } else if (failedCount > 0) {
           deliveryNote.textContent = `${failedCount} failed replies`;

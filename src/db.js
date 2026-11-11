@@ -156,6 +156,21 @@ async function initialize() {
   console.log(`MongoDB connected successfully to database "${databaseName}". Free-tier TTL cleanup active.`);
 }
 
+function makeOwnerClauses(ownerUserId) {
+  const clauses = [{ owner_user_id: String(ownerUserId) }, { owner_user_id: ownerUserId }];
+  if (!isNaN(Number(ownerUserId))) clauses.push({ owner_user_id: Number(ownerUserId) });
+  if (/^[a-f0-9]{24}$/i.test(String(ownerUserId))) {
+    try { clauses.push({ owner_user_id: new ObjectId(String(ownerUserId)) }); } catch (_) {}
+  }
+  return clauses;
+}
+
+function makeIgClauses(igUserId) {
+  const clauses = [{ instagram_user_id: String(igUserId) }];
+  if (!isNaN(Number(igUserId))) clauses.push({ instagram_user_id: Number(igUserId) });
+  return clauses;
+}
+
 function automationIdFilter(value, ownerUserId) {
   const raw = String(value ?? '').trim();
   const idClauses = [{ id: raw }];
@@ -165,14 +180,10 @@ function automationIdFilter(value, ownerUserId) {
   if (!ownerUserId) {
     return idClauses.length > 1 ? { $or: idClauses } : idClauses[0];
   }
-  const ownerClauses = [{ owner_user_id: String(ownerUserId) }];
-  if (/^[a-f0-9]{24}$/i.test(String(ownerUserId))) {
-    try { ownerClauses.push({ owner_user_id: new ObjectId(String(ownerUserId)) }); } catch (_) {}
-  }
   return {
     $and: [
       { $or: idClauses },
-      { $or: ownerClauses }
+      { $or: makeOwnerClauses(ownerUserId) }
     ]
   };
 }
@@ -371,9 +382,9 @@ async function all(sql, params = []) {
   if (normalized.startsWith('select * from automations where owner_user_id') ||
       normalized.includes('from automations a') && normalized.includes('where a.owner_user_id = ?')) {
     const [ownerUserId] = params;
-    const list = await automations.find({ owner_user_id: ownerUserId }).sort({ created_at: -1 }).toArray();
+    const list = await automations.find({ $or: makeOwnerClauses(ownerUserId) }).sort({ created_at: -1 }).toArray();
     // Join with instagram accounts for username
-    const accounts = await instagramAccounts.find({ owner_user_id: ownerUserId }).toArray();
+    const accounts = await instagramAccounts.find({ $or: makeOwnerClauses(ownerUserId) }).toArray();
     const acctMap = new Map(accounts.map((a) => [a.instagram_user_id, a.username]));
     return list.map((a) => ({
       id: a.id || a._id.toString(),
@@ -433,11 +444,11 @@ async function all(sql, params = []) {
 
   if (normalized.includes('from automation_events where owner_user_id = ?')) {
     const [ownerUserId, instagramUserId] = params;
-    const filter = { owner_user_id: ownerUserId };
+    const andClauses = [{ $or: makeOwnerClauses(ownerUserId) }];
     if (instagramUserId && normalized.includes('instagram_user_id')) {
-      filter.instagram_user_id = instagramUserId;
+      andClauses.push({ $or: makeIgClauses(instagramUserId) });
     }
-    const events = await automationEvents.find(filter).sort({ created_at: -1 }).limit(20).toArray();
+    const events = await automationEvents.find({ $and: andClauses }).sort({ created_at: -1 }).limit(20).toArray();
     return events.map((e) => ({
       eventType: e.event_type,
       status: e.status,
@@ -449,14 +460,18 @@ async function all(sql, params = []) {
   }
 
   if (normalized.includes('group by substr(created_at,1,10)')) {
-    const [ownerUserId] = params;
+    const [ownerUserId, instagramUserId] = params;
     const since = new Date(Date.now() - 30 * 86400 * 1000).toISOString();
-    const events = await automationEvents.find({ owner_user_id: ownerUserId, created_at: { $gte: since } }).toArray();
+    const andClauses = [{ $or: makeOwnerClauses(ownerUserId) }, { created_at: { $gte: since } }];
+    if (instagramUserId && normalized.includes('instagram_user_id')) {
+      andClauses.push({ $or: makeIgClauses(instagramUserId) });
+    }
+    const events = await automationEvents.find({ $and: andClauses }).toArray();
     const dateMap = {};
     for (const e of events) {
       const d = String(e.created_at || '').slice(0, 10);
       if (!dateMap[d]) dateMap[d] = { date: d, comments: 0, messagesSent: 0, messagesFailed: 0 };
-      if (e.event_type === 'comment_received') dateMap[d].comments += 1;
+      if (e.event_type === 'comment_received' || e.comment_id) dateMap[d].comments += 1;
       if (e.event_type === 'private_reply' && e.status === 'success') dateMap[d].messagesSent += 1;
       if (e.event_type === 'private_reply' && e.status === 'failed') dateMap[d].messagesFailed += 1;
     }
@@ -465,7 +480,7 @@ async function all(sql, params = []) {
 
   if (normalized.startsWith('select * from instagram_accounts where owner_user_id')) {
     const [ownerUserId] = params;
-    return instagramAccounts.find({ owner_user_id: ownerUserId }).sort({ connected_at: -1 }).toArray();
+    return instagramAccounts.find({ $or: makeOwnerClauses(ownerUserId) }).sort({ connected_at: -1 }).toArray();
   }
 
   if (normalized.startsWith('select id, name, email, created_at as createdat from users')) {
@@ -482,54 +497,50 @@ async function get(sql, params = []) {
 
   if (normalized.includes('count(*) as count from instagram_accounts where owner_user_id')) {
     const [ownerUserId] = params;
-    const count = await instagramAccounts.countDocuments({ owner_user_id: ownerUserId });
+    const count = await instagramAccounts.countDocuments({ $or: makeOwnerClauses(ownerUserId) });
     return { count };
   }
 
   if (normalized.includes('count(*) as count from automations where owner_user_id')) {
     const [ownerUserId, instagramUserId] = params;
-    const filter = { owner_user_id: ownerUserId, enabled: true };
+    const andClauses = [
+      { $or: makeOwnerClauses(ownerUserId) },
+      { enabled: { $in: [true, 1, '1', 'true'] } }
+    ];
     if (instagramUserId && normalized.includes('instagram_user_id')) {
-      filter.instagram_user_id = instagramUserId;
+      andClauses.push({ $or: makeIgClauses(instagramUserId) });
     }
-    const count = await automations.countDocuments(filter);
+    const count = await automations.countDocuments({ $and: andClauses });
     return { count };
   }
 
   if (normalized.includes('sum(case when event_type = \'comment_received\'')) {
     const [ownerUserId, instagramUserId] = params;
-    const filter = { owner_user_id: ownerUserId };
+    const andClauses = [{ $or: makeOwnerClauses(ownerUserId) }];
     if (instagramUserId && normalized.includes('instagram_user_id')) {
-      filter.instagram_user_id = instagramUserId;
+      andClauses.push({ $or: makeIgClauses(instagramUserId) });
     }
-    const events = await automationEvents.find(filter).toArray();
+    const events = await automationEvents.find({ $and: andClauses }).toArray();
     let comments = 0;
     let messagesSent = 0;
     let messagesFailed = 0;
     let successfulEvents = 0;
     for (const e of events) {
-      if (e.event_type === 'comment_received') comments += 1;
-      if (e.event_type === 'private_reply') {
+      if (e.event_type === 'comment_received' || e.comment_id) comments += 1;
+      if (e.event_type === 'private_reply' || !e.event_type) {
         if (e.status === 'success') messagesSent += 1;
-        else messagesFailed += 1;
+        else if (e.status === 'failed') messagesFailed += 1;
       }
       if (e.status === 'success') successfulEvents += 1;
     }
+    comments = Math.max(comments, messagesSent + messagesFailed);
     return { comments, messagesSent, messagesFailed, successfulEvents };
   }
 
   if (normalized.includes('from instagram_accounts') && (normalized.includes('where owner_user_id = ? and instagram_user_id = ?') || normalized.includes('where instagram_user_id = ? and owner_user_id = ?'))) {
     const [ownerUserId, instagramUserId] = params;
-    const ownerClauses = [{ owner_user_id: String(ownerUserId) }];
-    if (/^[a-f0-9]{24}$/i.test(String(ownerUserId))) {
-      try { ownerClauses.push({ owner_user_id: new ObjectId(String(ownerUserId)) }); } catch (_) {}
-    }
-    const igClauses = [
-      { instagram_user_id: String(instagramUserId) }
-    ];
-    if (!isNaN(Number(instagramUserId))) {
-      igClauses.push({ instagram_user_id: Number(instagramUserId) });
-    }
+    const ownerClauses = makeOwnerClauses(ownerUserId);
+    const igClauses = makeIgClauses(instagramUserId);
     let acct = await instagramAccounts.findOne({
       $and: [
         { $or: ownerClauses },
@@ -673,12 +684,24 @@ async function deleteUserAccount(userId) {
 // Instagram Helpers
 async function getInstagramAccounts(ownerUserId) {
   const { instagramAccounts } = collections();
-  return instagramAccounts.find({ owner_user_id: ownerUserId }).sort({ connected_at: -1 }).toArray();
+  return instagramAccounts.find({ $or: makeOwnerClauses(ownerUserId) }).sort({ connected_at: -1 }).toArray();
 }
 
 async function getInstagramAccount(ownerUserId, instagramUserId) {
   const { instagramAccounts } = collections();
-  return instagramAccounts.findOne({ owner_user_id: ownerUserId, instagram_user_id: instagramUserId });
+  const ownerClauses = makeOwnerClauses(ownerUserId);
+  const igClauses = makeIgClauses(instagramUserId);
+  let account = await instagramAccounts.findOne({
+    $and: [
+      { $or: ownerClauses },
+      { $or: igClauses }
+    ]
+  });
+  if (!account) {
+    account = await instagramAccounts.findOne({ $or: igClauses }) ||
+           await instagramAccounts.findOne({ $or: ownerClauses });
+  }
+  return account;
 }
 
 // Rate Limiter
