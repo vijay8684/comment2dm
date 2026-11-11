@@ -1054,8 +1054,11 @@ const processingCommentIds = new Set();
 const processingDeliveryKeys = new Set();
 
 // Deliver final resource helper (guaranteed idempotent)
-async function deliverFinalResource({ recipientIgUserId, senderIgsid, automation, tokenData, flow, commentId, prefixMessage }) {
+async function deliverFinalResource({ recipientIgUserId, senderIgsid, automation, tokenData, flow, commentId, prefixMessage, workerId }) {
   const stateKey = `${automation.id}:${recipientIgUserId}:${senderIgsid}`;
+  const now = new Date();
+  const workerToken = workerId || `delivery_worker_${crypto.randomUUID()}`;
+  const leaseExpiresAt = new Date(now.getTime() + 60000); // 60s delivery lock lease
 
   // Concurrency guard 1: In-memory lock
   if (processingDeliveryKeys.has(stateKey)) {
@@ -1065,7 +1068,7 @@ async function deliverFinalResource({ recipientIgUserId, senderIgsid, automation
   processingDeliveryKeys.add(stateKey);
 
   try {
-    // Concurrency guard 2: Atomic database state claim
+    // Concurrency guard 2: Atomic database state claim with recovery from expired leases
     if (db.collections && db.collections().conversationStates) {
       await db.collections().conversationStates.updateOne(
         { key: stateKey },
@@ -1079,32 +1082,43 @@ async function deliverFinalResource({ recipientIgUserId, senderIgsid, automation
             resource_delivered: false,
             delivery_state: 'not_started',
             state: 'INIT',
-            created_at: new Date().toISOString()
+            created_at: now.toISOString()
           }
         },
         { upsert: true }
       );
 
-      const existingState = await db.collections().conversationStates.findOne({ key: stateKey });
-      if (existingState && (existingState.delivery_state === 'sent' || existingState.resource_delivered === true)) {
-        console.log(`[IDEMPOTENCY] Resource already delivered for ${senderIgsid} on automation ${automation.id}. Skipping.`);
-        return;
-      }
-
-      // Atomic transition to "sending" (not "sent" yet!)
-      const claim = await db.collections().conversationStates.updateOne(
-        { key: stateKey, delivery_state: { $nin: ['sending', 'sent'] }, resource_delivered: { $ne: true } },
+      // Atomic lease claim: only claim if not already delivered (neither sent nor delivered=true)
+      // AND eligible: either not_started/failed/null OR previously sending but lease expired
+      // Notice: 'unknown' outcome is NOT in the eligible list to prevent blind resends
+      const claimResult = await db.collections().conversationStates.findOneAndUpdate(
+        {
+          key: stateKey,
+          resource_delivered: { $ne: true },
+          delivery_state: { $ne: 'sent' },
+          $or: [
+            { delivery_state: { $in: ['not_started', 'failed', null] } },
+            {
+              delivery_state: 'sending',
+              delivery_locked_until: { $lt: now }
+            }
+          ]
+        },
         {
           $set: {
             delivery_state: 'sending',
-            sending_started_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
+            delivery_worker_id: workerToken,
+            delivery_locked_until: leaseExpiresAt,
+            sending_started_at: now.toISOString(),
+            updated_at: now.toISOString()
           }
-        }
+        },
+        { returnDocument: 'after' }
       );
 
-      if (claim.matchedCount === 0 && claim.modifiedCount === 0) {
-        console.log(`[IDEMPOTENCY] Resource delivery already in progress or completed for ${stateKey}. Skipping.`);
+      const claimedDoc = claimResult?.value || claimResult;
+      if (!claimedDoc || claimedDoc.delivery_worker_id !== workerToken) {
+        console.log(`[IDEMPOTENCY] Resource delivery already claimed, in progress or completed for ${stateKey}. Skipping.`);
         return;
       }
     }
@@ -1129,7 +1143,6 @@ async function deliverFinalResource({ recipientIgUserId, senderIgsid, automation
     // Format delivery payload: interactive button if URL is valid, clean text fallback
     let deliveryPayload;
     if (resourceUrl && /^https?:\/\//i.test(resourceUrl)) {
-      // Ensure the text body contains the clickable URL for desktop web Instagram where Meta drops button templates
       const textWithLink = deliveryText.includes(resourceUrl) ? deliveryText : `${deliveryText}\n\n🔗 ${resourceUrl}`;
       deliveryPayload = {
         attachment: {
@@ -1163,19 +1176,45 @@ async function deliverFinalResource({ recipientIgUserId, senderIgsid, automation
         tokenData.accessToken
       );
     } catch (dmErr) {
-      // Do NOT perform immediate fallback on rate-limit errors!
+      // 1. Rate-limit errors: release lease, mark failed for retry, and rethrow
       if (dmErr.statusCode === 429 || dmErr?.metaError?.code === 4 || dmErr?.metaError?.code === 17 || dmErr?.metaError?.code === 32 || dmErr?.metaError?.code === 613) {
         if (db.collections && db.collections().conversationStates) {
           await db.collections().conversationStates.updateOne(
-            { key: stateKey },
-            { $set: { delivery_state: 'failed', last_delivery_error: dmErr.message, updated_at: new Date().toISOString() } }
+            { key: stateKey, delivery_worker_id: workerToken },
+            { $set: { delivery_state: 'failed', delivery_locked_until: null, last_delivery_error: dmErr.message, updated_at: new Date().toISOString() } }
           );
         }
         throw dmErr;
       }
 
-      // Graceful fallback to text if template rejected by client
-      if (deliveryPayload.attachment) {
+      // 2. Unknown outcome (network timeout while awaiting response, socket hangup)
+      const isUnknownOutcome = dmErr?.uncertainDelivery === true ||
+        /timeout|socket hang up|econnreset/i.test(dmErr.message || '');
+
+      if (isUnknownOutcome) {
+        console.warn(`[DELIVERY UNCERTAIN] Meta send outcome uncertain for ${stateKey}: ${dmErr.message}`);
+        if (db.collections && db.collections().conversationStates) {
+          await db.collections().conversationStates.updateOne(
+            { key: stateKey, delivery_worker_id: workerToken },
+            {
+              $set: {
+                delivery_state: 'unknown',
+                delivery_locked_until: null,
+                last_delivery_error: dmErr.message,
+                updated_at: new Date().toISOString()
+              }
+            }
+          );
+        }
+        throw dmErr;
+      }
+
+      // 3. Graceful fallback to text ONLY if template was definitely rejected by format error
+      const isTemplateFormatRejection = (dmErr.statusCode === 400 || dmErr?.metaError?.code === 100) &&
+        deliveryPayload.attachment &&
+        (/template|button|attachment|format/i.test(dmErr.message || '') || /template|button|attachment|format/i.test(dmErr?.metaError?.message || ''));
+
+      if (isTemplateFormatRejection) {
         let fallbackText = deliveryText;
         if (resourceUrl && !fallbackText.includes(resourceUrl)) {
           fallbackText += `\n\n🔗 ${buttonText}: ${resourceUrl}`;
@@ -1189,25 +1228,45 @@ async function deliverFinalResource({ recipientIgUserId, senderIgsid, automation
       } else {
         if (db.collections && db.collections().conversationStates) {
           await db.collections().conversationStates.updateOne(
-            { key: stateKey },
-            { $set: { delivery_state: 'failed', last_delivery_error: dmErr.message, updated_at: new Date().toISOString() } }
+            { key: stateKey, delivery_worker_id: workerToken },
+            { $set: { delivery_state: 'failed', delivery_locked_until: null, last_delivery_error: dmErr.message, updated_at: new Date().toISOString() } }
           );
         }
         throw dmErr;
       }
     }
 
-    // Only mark "sent" and resource_delivered=true AFTER Meta confirms acceptance!
+    // 4. Require explicit Meta confirmation (message_id / id)
     const metaMsgId = metaSendResult?.message_id || metaSendResult?.id || null;
+    if (!metaMsgId) {
+      console.warn(`[DELIVERY UNCONFIRMED] Meta response did not include message_id for ${stateKey}`);
+      if (db.collections && db.collections().conversationStates) {
+        await db.collections().conversationStates.updateOne(
+          { key: stateKey, delivery_worker_id: workerToken },
+          {
+            $set: {
+              delivery_state: 'unknown',
+              delivery_locked_until: null,
+              last_delivery_error: 'Meta response missing message_id confirmation',
+              updated_at: new Date().toISOString()
+            }
+          }
+        );
+      }
+      return;
+    }
+
+    // 5. Only mark "sent" and resource_delivered=true AFTER Meta confirms acceptance!
     if (db.collections && db.collections().conversationStates) {
       await db.collections().conversationStates.updateOne(
-        { key: stateKey },
+        { key: stateKey, delivery_worker_id: workerToken },
         {
           $set: {
             delivery_state: 'sent',
             resource_delivered: true,
             state: 'RESOURCE_DELIVERED',
             meta_message_id: metaMsgId,
+            delivery_locked_until: null,
             delivered_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           }
@@ -1370,6 +1429,8 @@ async function executeCommentJob(job) {
       tokenData.accessToken
     );
 
+    const metaMsgId = sendResult?.message_id || sendResult?.id || null;
+
     // 2. Initialize conversation state
     const stateKey = `${selectedAuto.id}:${recipientIgUserId}:${fromId || commentId}`;
     if (db.collections && db.collections().conversationStates) {
@@ -1389,6 +1450,7 @@ async function executeCommentJob(job) {
             button_title: openingBtnTitle,
             follow_gate_required: isFollowGateEnabled,
             resource_delivered: false,
+            meta_message_id: metaMsgId,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           }
@@ -1397,16 +1459,8 @@ async function executeCommentJob(job) {
       );
     }
 
-    // 3. Send Public Comment Reply (if configured)
-    if (selectedAuto.reply_template) {
-      await instagramService.replyToComment(
-        commentId,
-        selectedAuto.reply_template,
-        tokenData.accessToken
-      );
-    }
-
-    // 4. Record automation event
+    // 3. Record automation event for PRIVATE DM immediately!
+    // Confirms DM success before attempting public replies, preventing DM repetition on public reply error
     if (db.collections && db.collections().automationEvents) {
       await db.collections().automationEvents.insertOne({
         event_id: crypto.randomUUID(),
@@ -1423,7 +1477,7 @@ async function executeCommentJob(job) {
         button_text: openingBtnTitle,
         interactive: true,
         status: 'success',
-        meta_message_id: sendResult?.message_id || sendResult?.id || null,
+        meta_message_id: metaMsgId,
         created_at: new Date().toISOString(),
         created_at_date: new Date()
       });
@@ -1433,7 +1487,60 @@ async function executeCommentJob(job) {
         [selectedAuto.owner_user_id, recipientIgUserId, selectedAuto.id, commentId, 'private_reply', selectedAuto.keyword, messageToSend, 'success', new Date().toISOString()]
       );
     }
-    console.log(`[TRIGGER SUCCESS] Successfully sent interactive DM & reply for comment ID ${commentId}`);
+    console.log(`[TRIGGER SUCCESS] Successfully sent opening DM for comment ID ${commentId}`);
+
+    // 4. Send Public Comment Reply in an isolated try/catch (if configured)
+    // Public comment errors/rate limits must NEVER fail or repeat the already-confirmed private DM!
+    if (selectedAuto.reply_template) {
+      try {
+        const publicReplyResult = await instagramService.replyToComment(
+          commentId,
+          selectedAuto.reply_template,
+          tokenData.accessToken
+        );
+        if (db.collections && db.collections().automationEvents) {
+          await db.collections().automationEvents.insertOne({
+            event_id: crypto.randomUUID(),
+            owner_user_id: selectedAuto.owner_user_id,
+            instagram_user_id: recipientIgUserId,
+            automation_id: selectedAuto.id,
+            comment_id: commentId,
+            from_username: fromUsername,
+            from_id: fromId,
+            comment_text: commentText,
+            event_type: 'public_reply',
+            message_text: selectedAuto.reply_template,
+            status: 'success',
+            meta_comment_id: publicReplyResult?.id || null,
+            created_at: new Date().toISOString(),
+            created_at_date: new Date()
+          });
+        }
+      } catch (publicErr) {
+        console.warn(`[PUBLIC REPLY NOTE] Public comment reply failed for comment ${commentId}: ${publicErr.message}`);
+        if (publicErr.statusCode === 429) {
+          metaRateLimiter.pauseAccount(recipientIgUserId, publicErr.retryAfterSeconds || 60, 'Public reply rate limit', db);
+        }
+        if (db.collections && db.collections().automationEvents) {
+          await db.collections().automationEvents.insertOne({
+            event_id: crypto.randomUUID(),
+            owner_user_id: selectedAuto.owner_user_id,
+            instagram_user_id: recipientIgUserId,
+            automation_id: selectedAuto.id,
+            comment_id: commentId,
+            from_username: fromUsername,
+            from_id: fromId,
+            comment_text: commentText,
+            event_type: 'public_reply',
+            message_text: selectedAuto.reply_template,
+            status: 'failed',
+            error: publicErr.message,
+            created_at: new Date().toISOString(),
+            created_at_date: new Date()
+          });
+        }
+      }
+    }
   } catch (apiErr) {
     if (db.collections && db.collections().automationEvents) {
       await db.collections().automationEvents.insertOne({
@@ -1538,7 +1645,7 @@ async function executeMessagingJob(job) {
   if (action === 'SEND_LINK') {
     if (!flow.followGate?.enabled) {
       console.log(`[MESSAGING] Follow gate disabled. Delivering resource immediately to ${senderIgsid}...`);
-      await deliverFinalResource({ recipientIgUserId, senderIgsid, automation: targetAutomation, tokenData, flow, commentId });
+      await deliverFinalResource({ recipientIgUserId, senderIgsid, automation: targetAutomation, tokenData, flow, commentId, workerId: job?.worker_id });
       return;
     }
 
@@ -1565,7 +1672,7 @@ async function executeMessagingJob(job) {
 
     if (followResult.isFollowing === true && followResult.verified === true) {
       console.log(`[MESSAGING] PATH A: Recipient ${senderIgsid} already follows @${creatorUsername}. Delivering resource immediately.`);
-      await deliverFinalResource({ recipientIgUserId, senderIgsid, automation: targetAutomation, tokenData, flow, commentId });
+      await deliverFinalResource({ recipientIgUserId, senderIgsid, automation: targetAutomation, tokenData, flow, commentId, workerId: job?.worker_id });
     } else if (followResult.supported === false || followResult.error || !followResult.verified) {
       console.warn(`[MESSAGING] Meta follow check unavailable or error: ${followResult.error || followResult.note}`);
       const retryNotice = "We couldn't verify your follow status right now due to a network or API delay. Please tap below to retry!";
@@ -2042,7 +2149,7 @@ app.get('/api/analytics/overview', requireAuth, async (request, response, next) 
     }
 
     const totalDMs = sent + failed;
-    const deliveryRate = totalDMs > 0 ? Math.round((sent / totalDMs) * 100) : 100;
+    const deliveryRate = totalDMs > 0 ? Math.round((sent / totalDMs) * 100) : 0;
 
     return response.json({
       dmsSent: sent,
@@ -2702,21 +2809,6 @@ app.use((error, request, response, next) => {
   });
 });
 
-db.initialize().then(async () => {
-  await billing.ensurePlans();
-  app.listen(port, '0.0.0.0', () => {
-    console.log(`Comment2DM server is live on port ${port} (HTTPS ready)`);
-  });
-
-  // Start persistent background worker after database initialization
-  if (process.env.NODE_ENV !== 'test') {
-    webhookWorker.startWorker(db, executeWebhookJob);
-  }
-}).catch((error) => {
-  console.error('Database initialization failed:', error);
-  process.exitCode = 1;
-});
-
 // Graceful shutdown handling for container termination
 async function handleGracefulShutdown(signal) {
   console.log(`[SHUTDOWN] Received ${signal}. Draining queue worker...`);
@@ -2727,5 +2819,25 @@ async function handleGracefulShutdown(signal) {
   }
   process.exit(0);
 }
-process.on('SIGTERM', () => handleGracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => handleGracefulShutdown('SIGINT'));
+
+if (require.main === module) {
+  db.initialize().then(async () => {
+    await billing.ensurePlans();
+    app.listen(port, '0.0.0.0', () => {
+      console.log(`Comment2DM server is live on port ${port} (HTTPS ready)`);
+    });
+
+    // Start persistent background worker after database initialization
+    if (process.env.NODE_ENV !== 'test') {
+      webhookWorker.startWorker(db, executeWebhookJob);
+    }
+  }).catch((error) => {
+    console.error('Database initialization failed:', error);
+    process.exitCode = 1;
+  });
+
+  process.on('SIGTERM', () => handleGracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => handleGracefulShutdown('SIGINT'));
+}
+// Export handlers for automated testing
+module.exports = { app, deliverFinalResource, executeCommentJob, executeMessagingJob, executeWebhookJob };

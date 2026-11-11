@@ -122,7 +122,10 @@ async function processClaimedJob(job, jobExecutor, db) {
   const heartbeatIntervalMs = Math.max(10000, Math.floor(webhookJobQueue.JOB_LEASE_MS / 2));
   const heartbeatTimer = setInterval(async () => {
     try {
-      await webhookJobQueue.extendLease(job, workerId, webhookJobQueue.JOB_LEASE_MS, db);
+      const ok = await webhookJobQueue.extendLease(job, workerId, webhookJobQueue.JOB_LEASE_MS, db);
+      if (!ok) {
+        console.warn(`[WORKER HEARTBEAT] Lease for job ${jobId} expired or claimed by another worker.`);
+      }
     } catch (err) {
       console.warn(`[WORKER HEARTBEAT] Failed to extend lease for job ${jobId}:`, err.message);
     }
@@ -136,8 +139,8 @@ async function processClaimedJob(job, jobExecutor, db) {
     // 2. Execute business logic
     await jobExecutor(job);
 
-    // 3. Mark success
-    await webhookJobQueue.handleJobSuccess(job, {}, db);
+    // 3. Mark success with explicit worker_id ownership
+    await webhookJobQueue.handleJobSuccess(job, { worker_id: workerId }, db);
     totalProcessedCount++;
   } catch (err) {
     console.error(`[WORKER] Job ${jobId} failed attempt ${job.attempts || 1}:`, metaRateLimiter.sanitizeString(err.message));
@@ -151,6 +154,7 @@ async function processClaimedJob(job, jobExecutor, db) {
 
 /**
  * Stops the worker cleanly (drain in-flight tasks).
+ * Allows active jobs to finish within grace period with active heartbeats.
  *
  * @param {number} [timeoutMs=15000] - Grace period for in-flight tasks to finish
  * @returns {Promise<void>}
@@ -165,18 +169,23 @@ async function stopWorker(timeoutMs = 15000) {
     pollTimer = null;
   }
 
-  // Clear all heartbeat timers
-  for (const timer of activeHeartbeats.values()) {
-    clearInterval(timer);
-  }
-  activeHeartbeats.clear();
-
+  // Grace period: Wait for in-flight jobs to complete while keeping their heartbeats active!
   const start = Date.now();
   while (activeJobCount > 0 && (Date.now() - start) < timeoutMs) {
     await new Promise(r => setTimeout(r, 100));
   }
 
-  console.log(`[WORKER] Worker ${workerId} stopped cleanly. Remaining active: ${activeJobCount}`);
+  // Clean up any remaining heartbeat timers after draining
+  for (const timer of activeHeartbeats.values()) {
+    clearInterval(timer);
+  }
+  activeHeartbeats.clear();
+
+  if (activeJobCount > 0) {
+    console.warn(`[WORKER SHUTDOWN] Force exiting with ${activeJobCount} in-flight jobs still running. Their leases will safely expire and be recovered by another worker.`);
+  } else {
+    console.log(`[WORKER] Worker ${workerId} stopped cleanly. All jobs drained.`);
+  }
 }
 
 /**

@@ -934,8 +934,13 @@ async function sendPrivateReply(instagramUserId, commentId, messageContent, acce
     throw err;
   }
 
-  // If Button Template on comment_id failed, try fallback to quick_replies
-  if (!response.ok && bodyData.message?.attachment?.payload?.template_type === 'button') {
+  // If Button Template on comment_id failed, try fallback to quick_replies ONLY for definite format rejections
+  const isTemplateFormatRejection = !response.ok &&
+    response.status === 400 &&
+    bodyData.message?.attachment?.payload?.template_type === 'button' &&
+    (/template|button|attachment|format/i.test(data?.error?.message || '') || data?.error?.code === 100);
+
+  if (isTemplateFormatRejection) {
     console.warn(`[META RETRY] Button template on comment_id returned HTTP ${response.status}. Retrying with quick_replies fallback...`);
     const btn = bodyData.message.attachment.payload.buttons?.[0];
     const fallbackBody = {
@@ -957,9 +962,15 @@ async function sendPrivateReply(instagramUserId, commentId, messageContent, acce
     }
   }
 
-  // Attempt 2: graph.instagram.com/me/messages fallback
-  console.warn(`[META RETRY] Attempt 1 failed (HTTP ${response.status}): ${metaErrorMessage(data, 'Trying /me/messages fallback...')}`);
-  const url2 = `https://graph.instagram.com/${apiVersion}/me/messages`;
+  // Attempt 2: Only eligible for 404 or unsupported endpoint paths (never for rate limits, auth errors or timeouts)
+  const isPrivateEndpointEligible = !response.ok && (
+    response.status === 404 ||
+    (data?.error?.code === 100 && /endpoint|path|subcode 33/i.test(data?.error?.message || ''))
+  );
+
+  if (isPrivateEndpointEligible) {
+    console.warn(`[META RETRY] Attempt 1 failed with 404/unsupported endpoint: ${metaErrorMessage(data, 'Trying /me/messages fallback...')}`);
+    const url2 = `https://graph.instagram.com/${apiVersion}/me/messages`;
   console.log(`[META PRIVATE REPLY OUTGOING 2] POST ${url2}`);
   const response2 = await fetch(url2, {
     method: 'POST',
@@ -986,9 +997,10 @@ async function sendPrivateReply(instagramUserId, commentId, messageContent, acce
   const data3 = await response3.json().catch(() => ({}));
   console.log(`[META PRIVATE REPLY RESPONSE 3] Status: ${response3.status} ${response3.statusText}, Body: ${JSON.stringify(data3)}`);
 
-  if (response3.ok && (data3.message_id || data3.id || data3.recipient_id)) {
+  if (response3 && response3.ok && (data3.message_id || data3.id || data3.recipient_id)) {
     console.log(`[META SUCCESS] Private DM sent successfully via graph.facebook.com to comment ${commentId}`);
     return data3;
+  }
   }
 
   const finalError = data.error || data2.error || data3.error;
@@ -1040,9 +1052,15 @@ async function sendDirectMessage(instagramUserId, recipientIgsid, messageContent
     throw err;
   }
 
-  // Attempt 2: /me/messages fallback
-  console.warn(`[META RETRY] Direct DM Attempt 1 failed (HTTP ${response.status}): ${metaErrorMessage(data, 'Trying /me/messages fallback...')}`);
-  const url2 = `https://graph.instagram.com/${apiVersion}/me/messages`;
+  // Attempt 2: Only eligible for 404 or unsupported endpoint paths (never for rate limits, auth errors or timeouts)
+  const isDirectEndpointEligible = !response.ok && (
+    response.status === 404 ||
+    (data?.error?.code === 100 && /endpoint|path|subcode 33/i.test(data?.error?.message || ''))
+  );
+
+  if (isDirectEndpointEligible) {
+    console.warn(`[META RETRY] Direct DM Attempt 1 failed with 404/unsupported endpoint: ${metaErrorMessage(data, 'Trying /me/messages fallback...')}`);
+    const url2 = `https://graph.instagram.com/${apiVersion}/me/messages`;
   const response2 = await fetch(url2, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
@@ -1065,9 +1083,10 @@ async function sendDirectMessage(instagramUserId, recipientIgsid, messageContent
   });
   const data3 = await response3.json().catch(() => ({}));
 
-  if (response3.ok && (data3.message_id || data3.id || data3.recipient_id)) {
+  if (response3 && response3.ok && (data3.message_id || data3.id || data3.recipient_id)) {
     console.log(`[META SUCCESS] Direct DM sent successfully via graph.facebook.com to recipient ${recipientIgsid}`);
     return data3;
+  }
   }
 
   const finalError = data.error || data2.error || data3.error;
@@ -1096,11 +1115,18 @@ async function replyToComment(commentId, messageText, accessToken) {
     data?.error?.code === 32 || data?.error?.code === 613;
 
   if (isReplyRateLimited) {
-    console.warn(`[META RATE LIMIT] Public comment reply rate limited for comment ${commentId}. Skipping fallback.`);
-    return data;
+    const err = new Error(`Meta Rate Limit on comment reply: ${metaErrorMessage(data, 'Rate limit exceeded')}`);
+    err.statusCode = 429;
+    err.metaError = data?.error;
+    err.retryAfterSeconds = Number(response.headers?.get?.('retry-after') || 0);
+    throw err;
   }
 
-  if (!response.ok && (response.status === 404 || data.error?.code === 100 || data.error?.type === 'OAuthException')) {
+  if (response.ok && data.id) {
+    return { success: true, id: data.id };
+  }
+
+  if (!response.ok && (response.status === 404 || (data?.error?.code === 100 && /endpoint|path/i.test(data?.error?.message || '')))) {
     const fallbackUrl = `https://graph.facebook.com/${apiVersion}/${commentId}/replies`;
     const fallbackResponse = await fetch(fallbackUrl, {
       method: 'POST',
@@ -1108,15 +1134,15 @@ async function replyToComment(commentId, messageText, accessToken) {
       body: JSON.stringify(bodyData)
     });
     const fallbackData = await fallbackResponse.json().catch(() => ({}));
-    if (fallbackResponse.ok && fallbackData.id) return fallbackData;
+    if (fallbackResponse.ok && fallbackData.id) return { success: true, id: fallbackData.id };
     if (!fallbackResponse.ok) { data = fallbackData; response = fallbackResponse; }
   }
 
-  if (!response.ok || data.error) {
-    console.warn(`Public comment reply note: ${metaErrorMessage(data, 'Failed to post public comment reply.')}`);
-  }
-
-  return data;
+  // Structured failure
+  const err = new Error(`Public comment reply failed: ${metaErrorMessage(data, 'Meta API error')}`);
+  err.statusCode = response.status || 500;
+  err.metaError = data?.error;
+  throw err;
 }
 
 // 4. Follow-to-Unlock Meta Graph API Verification

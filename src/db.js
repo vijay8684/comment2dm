@@ -32,7 +32,8 @@ function collections() {
     conversationStates: database.collection('conversation_states'),
     feedback: database.collection('feedback'),
     aiCreditUsage: database.collection('ai_credit_usage'),
-    webhookJobs: database.collection('webhook_jobs')
+    webhookJobs: database.collection('webhook_jobs'),
+    accountRateLimits: database.collection('account_rate_limits')
   };
 }
 
@@ -161,7 +162,10 @@ async function initialize() {
     // Conversation states index for fast lookup:
     collections().conversationStates.createIndex({ key: 1 }, { unique: true, sparse: true, name: 'conversation_states_key_unique' }),
     collections().conversationStates.createIndex({ automation_id: 1, sender_igsid: 1 }, { name: 'conversation_states_auto_sender' }),
-    collections().conversationStates.createIndex({ delivery_state: 1 }, { sparse: true, name: 'conversation_states_delivery_state' })
+    collections().conversationStates.createIndex({ delivery_state: 1 }, { sparse: true, name: 'conversation_states_delivery_state' }),
+    // Distributed account rate limits:
+    collections().accountRateLimits.createIndex({ account_id: 1 }, { unique: true, name: 'account_rate_limits_account' }),
+    collections().accountRateLimits.createIndex({ paused_until: 1 }, { expireAfterSeconds: 0, name: 'account_rate_limits_ttl' })
   ]);
 
   await migrateJsonData().catch((err) => console.warn('JSON migration notice:', err.message));

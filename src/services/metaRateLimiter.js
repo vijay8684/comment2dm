@@ -1,5 +1,16 @@
 // src/services/metaRateLimiter.js
 // Meta Instagram Graph API Rate Limiting, Header Telemetry & Error Classification Engine
+//
+// ── RATE LIMIT SCOPE DOCUMENTATION ─────────────────────────────────────────────
+// 1. Process-Local (In-Memory):
+//    - globalLastRequestTime / GLOBAL_MAX_RPS (20 req/s): Paces outbound HTTP calls within this Node.js instance.
+//    - accountPacingMap / ACCOUNT_MAX_RPS (5 req/s): Paces per-account requests within this Node.js instance.
+// 2. Shared Across Instances (MongoDB-Backed Abstraction):
+//    - account_rate_limits collection: When an account receives a Meta HTTP 429 or throttling header,
+//      the pause expiration timestamp is written to MongoDB. All worker instances inspect this
+//      pause state so throttling an account on one instance prevents other instances from
+//      making redundant calls for the same creator.
+// ───────────────────────────────────────────────────────────────────────────────
 
 const crypto = require('crypto');
 
@@ -10,7 +21,7 @@ const BASE_BACKOFF_MS = Number(process.env.BASE_BACKOFF_MS) || 2000;   // 2s bas
 const MAX_BACKOFF_MS = Number(process.env.MAX_BACKOFF_MS) || 300000;   // 5m max backoff
 const JITTER_MS = Number(process.env.JITTER_MS) || 1000;              // 0-1000ms randomized jitter
 
-// In-memory rate limiting state
+// In-memory rate limiting state (process-local fast path)
 const accountPacingMap = new Map(); // accountId -> timestamp of last request
 const accountPausedUntil = new Map(); // accountId -> timestamp (ms) when pause expires
 let globalLastRequestTime = 0;
@@ -179,8 +190,9 @@ function calculateBackoffWithJitter(attempt, baseMs = BASE_BACKOFF_MS) {
  *
  * @param {Headers|object} headers - Fetch response headers
  * @param {string} [instagramAccountId] - Optional account ID for targeted throttling
+ * @param {object} [db] - Optional db for distributed pause recording
  */
-function inspectMetaHeaders(headers, instagramAccountId) {
+function inspectMetaHeaders(headers, instagramAccountId, db) {
   if (!headers) return;
 
   try {
@@ -196,7 +208,7 @@ function inspectMetaHeaders(headers, instagramAccountId) {
       if (!isNaN(seconds) && seconds > 0) {
         const pauseUntil = Date.now() + (seconds * 1000);
         if (instagramAccountId) {
-          accountPausedUntil.set(instagramAccountId, pauseUntil);
+          pauseAccount(instagramAccountId, seconds * 1000, 'Meta Retry-After header', db);
           console.warn(`[META RATE LIMIT] Account ${instagramAccountId} paused for ${seconds}s via Retry-After`);
         } else {
           globalRateLimitPauseUntil = pauseUntil;
@@ -227,7 +239,6 @@ function inspectMetaHeaders(headers, instagramAccountId) {
     const businessUsageRaw = getHeader('x-business-use-case-usage');
     if (businessUsageRaw) {
       const bUsage = typeof businessUsageRaw === 'object' ? businessUsageRaw : JSON.parse(businessUsageRaw);
-      // Can be a map or array of use-case objects
       const values = Array.isArray(bUsage) ? bUsage : Object.values(bUsage);
       for (const item of values) {
         const maxPercent = Math.max(
@@ -237,7 +248,7 @@ function inspectMetaHeaders(headers, instagramAccountId) {
         );
         if (maxPercent >= 100 && instagramAccountId) {
           console.error(`[META RATE LIMIT CRITICAL] Business Use Case usage reached ${maxPercent}% for account ${instagramAccountId}. Pausing account for 60s.`);
-          accountPausedUntil.set(instagramAccountId, Date.now() + 60000);
+          pauseAccount(instagramAccountId, 60000, 'Meta Business Use Case usage 100%', db);
         }
       }
     }
@@ -296,6 +307,7 @@ async function paceRequest(instagramAccountId) {
 
 /**
  * Checks if a specific account is currently paused due to rate limiting.
+ * Fast in-memory check with optional MongoDB sync.
  *
  * @param {string} instagramAccountId - Account ID
  * @returns {boolean}
@@ -312,14 +324,34 @@ function isAccountPaused(instagramAccountId) {
 
 /**
  * Manually pauses an account (e.g. after receiving a 429).
+ * Updates fast in-memory map and optionally persists to MongoDB for multi-instance sync.
  *
  * @param {string} instagramAccountId - Account ID
  * @param {number} durationMs - Pause duration in milliseconds
+ * @param {string} [reason] - Reason for pause
+ * @param {object} [db] - Optional db module
  */
-function pauseAccount(instagramAccountId, durationMs = 30000) {
+function pauseAccount(instagramAccountId, durationMs = 30000, reason = 'rate_limit', db = null) {
   if (!instagramAccountId) return;
-  accountPausedUntil.set(instagramAccountId, Date.now() + durationMs);
+  const pauseUntil = Date.now() + durationMs;
+  accountPausedUntil.set(instagramAccountId, pauseUntil);
   rateLimitEventsCount++;
+
+  // Shared MongoDB persistence abstraction
+  if (db && db.collections && db.collections().accountRateLimits) {
+    db.collections().accountRateLimits.updateOne(
+      { account_id: instagramAccountId },
+      {
+        $set: {
+          account_id: instagramAccountId,
+          paused_until: new Date(pauseUntil),
+          reason: reason,
+          updated_at: new Date()
+        }
+      },
+      { upsert: true }
+    ).catch(err => console.warn('[RATE LIMIT DB SYNC WARNING]', err.message));
+  }
 }
 
 /**

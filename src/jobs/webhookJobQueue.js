@@ -246,7 +246,7 @@ async function ingestWebhookPayload(payload, db) {
 async function claimNextJob(db, options = {}) {
   const isMongo = Boolean(db && db.collections && db.collections().webhookJobs);
   const now = new Date();
-  const workerId = options.workerId || `worker_${process.pid}_${crypto.randomBytes(4).toString('hex')}`;
+  const workerId = (typeof options === 'string' ? options : options?.workerId) || `worker_${process.pid}_${crypto.randomBytes(4).toString('hex')}`;
   const leaseMs = Number(options.leaseMs) || JOB_LEASE_MS;
   const lockExpiry = new Date(now.getTime() + leaseMs);
   const excludedAccounts = Array.isArray(options.excludedAccountIds) ? options.excludedAccountIds : [];
@@ -351,7 +351,8 @@ async function extendLease(job, workerId, extensionMs = JOB_LEASE_MS, db) {
     const col = db.collections().webhookJobs;
     const filter = {
       event_key: job.event_key,
-      status: 'processing'
+      status: 'processing',
+      locked_until: { $gt: now }
     };
     if (workerId) filter.worker_id = workerId;
 
@@ -366,7 +367,9 @@ async function extendLease(job, workerId, extensionMs = JOB_LEASE_MS, db) {
   } else {
     const existing = memoryJobsStore.get(job.event_key);
     if (existing && existing.status === 'processing') {
-      if (!workerId || existing.worker_id === workerId) {
+      const isOwner = !workerId || existing.worker_id === workerId;
+      const isUnexpired = existing.locked_until && new Date(existing.locked_until) > now;
+      if (isOwner && isUnexpired) {
         existing.locked_until = newLockExpiry;
         existing.lease_extended_at = now;
         existing.updated_at = now;
@@ -388,6 +391,7 @@ async function extendLease(job, workerId, extensionMs = JOB_LEASE_MS, db) {
 async function handleJobFailure(job, error, db) {
   const isMongo = Boolean(db && db.collections && db.collections().webhookJobs);
   const now = new Date();
+  const workerId = job.worker_id;
   const classification = metaRateLimiter.classifyMetaError(error);
 
   const attemptRecord = {
@@ -411,7 +415,7 @@ async function handleJobFailure(job, error, db) {
     runAt = new Date(now.getTime() + delay);
 
     if (classification.category === 'RATE_LIMITED' && job.instagram_account_id) {
-      metaRateLimiter.pauseAccount(job.instagram_account_id, delay);
+      metaRateLimiter.pauseAccount(job.instagram_account_id, delay, 'Rate limit during execution', db);
     }
   } else {
     newStatus = reachedMaxAttempts ? 'dead_letter' : 'failed';
@@ -430,16 +434,29 @@ async function handleJobFailure(job, error, db) {
 
   if (isMongo) {
     const col = db.collections().webhookJobs;
-    await col.updateOne(
-      { event_key: job.event_key },
+    const filter = { event_key: job.event_key };
+    if (workerId) {
+      filter.worker_id = workerId;
+      filter.status = 'processing';
+    }
+    const res = await col.updateOne(
+      filter,
       {
         $set: updateFields,
         $push: { attempt_history: attemptRecord }
       }
     );
+    if (res.matchedCount === 0) {
+      console.warn(`[LEASE LOSS] Worker ${workerId} could not update failed status for job ${job.event_key}: lease expired or claimed by another worker.`);
+      return { status: 'stale_worker', classification };
+    }
   } else {
     const existing = memoryJobsStore.get(job.event_key);
     if (existing) {
+      if (workerId && (existing.worker_id !== workerId || existing.status !== 'processing')) {
+        console.warn(`[LEASE LOSS] Worker ${workerId} could not update failed status for job ${job.event_key}: lease lost.`);
+        return { status: 'stale_worker', classification };
+      }
       Object.assign(existing, updateFields);
       if (!Array.isArray(existing.attempt_history)) existing.attempt_history = [];
       existing.attempt_history.push(attemptRecord);
@@ -457,8 +474,11 @@ async function handleJobFailure(job, error, db) {
  * @param {object} db - Database module instance
  */
 async function handleJobSuccess(job, details = {}, db) {
-  const isMongo = Boolean(db && db.collections && db.collections().webhookJobs);
+  const targetDb = (details && details.collections) ? details : db;
+  const jobDetails = (details && details.collections) ? {} : details;
+  const isMongo = Boolean(targetDb && targetDb.collections && targetDb.collections().webhookJobs);
   const now = new Date();
+  const workerId = job.worker_id || details.worker_id;
 
   const updateFields = {
     status: 'sent',
@@ -471,12 +491,28 @@ async function handleJobSuccess(job, details = {}, db) {
 
   if (isMongo) {
     const col = db.collections().webhookJobs;
-    await col.updateOne({ event_key: job.event_key }, { $set: updateFields });
+    const filter = { event_key: job.event_key };
+    if (workerId) {
+      filter.worker_id = workerId;
+      filter.status = 'processing';
+    }
+    const res = await col.updateOne(filter, { $set: updateFields });
+    if (res.matchedCount === 0) {
+      console.warn(`[LEASE LOSS] Worker ${workerId} could not mark job ${job.event_key} as sent: lease expired or claimed by another worker.`);
+      return false;
+    }
+    return true;
   } else {
     const existing = memoryJobsStore.get(job.event_key);
     if (existing) {
+      if (workerId && (existing.worker_id !== workerId || existing.status !== 'processing')) {
+        console.warn(`[LEASE LOSS] Worker ${workerId} could not mark job ${job.event_key} as sent: lease expired or claimed by ${existing.worker_id}`);
+        return false;
+      }
       Object.assign(existing, updateFields);
+      return true;
     }
+    return false;
   }
 }
 
