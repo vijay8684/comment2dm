@@ -133,19 +133,26 @@ async function processClaimedJob(job, jobExecutor, db) {
   activeHeartbeats.set(jobId, heartbeatTimer);
 
   try {
-    // 1. Pacing Guard: respects global and account rate limits before calling Meta
-    await metaRateLimiter.paceRequest(accId);
+    // 1. Pacing Guard: respects global and account rate limits (including shared MongoDB pauses)
+    await metaRateLimiter.paceRequest(accId, db);
 
     // 2. Execute business logic
     await jobExecutor(job);
 
-    // 3. Mark success with explicit worker_id ownership
-    await webhookJobQueue.handleJobSuccess(job, { worker_id: workerId }, db);
-    totalProcessedCount++;
+    // 3. Mark success with explicit worker_id ownership and lease verification
+    const successRes = await webhookJobQueue.handleJobSuccess(job, { worker_id: workerId }, db);
+    if (!successRes || successRes === false || successRes.success === false || successRes.status === 'stale_worker') {
+      console.warn(`[WORKER LEASE LOSS] Worker ${workerId} executed job ${jobId}, but lease was lost before committing success.`);
+    } else {
+      totalProcessedCount++;
+    }
   } catch (err) {
     console.error(`[WORKER] Job ${jobId} failed attempt ${job.attempts || 1}:`, metaRateLimiter.sanitizeString(err.message));
     totalFailedCount++;
-    await webhookJobQueue.handleJobFailure(job, err, db);
+    const failRes = await webhookJobQueue.handleJobFailure({ ...job, worker_id: workerId }, err, db);
+    if (failRes && (failRes.status === 'stale_worker' || failRes.success === false)) {
+      console.warn(`[WORKER LEASE LOSS] Worker ${workerId} could not record failure for job ${jobId}: lease lost.`);
+    }
   } finally {
     clearInterval(heartbeatTimer);
     activeHeartbeats.delete(jobId);

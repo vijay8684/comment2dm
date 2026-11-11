@@ -379,7 +379,7 @@ function createMockDb() {
     };
 
     const updated = await webhookJobQueue.handleJobSuccess(staleWorkerAJob, {}, mockDb);
-    assert.strictEqual(updated, false, 'Stale worker A should fail to mark job as sent');
+    assert.strictEqual(updated === false || updated?.success === false, true, 'Stale worker A should fail to mark job as sent');
 
     // Verify DB record is STILL owned by Worker B in processing status
     const current = await mockDb.collections().webhookJobs.findOne({ event_key: 'comment_scen_1' });
@@ -626,7 +626,8 @@ function createMockDb() {
       job_id: 'job_perm_test',
       status: 'processing',
       attempts: 1,
-      worker_id: 'worker_perm_1'
+      worker_id: 'worker_perm_1',
+      locked_until: new Date(Date.now() + 60000)
     };
     await mockDb.collections().webhookJobs.insertOne(permJob);
 
@@ -681,7 +682,8 @@ function createMockDb() {
       job_id: 'job_temp_test',
       status: 'processing',
       attempts: 1,
-      worker_id: 'worker_temp_1'
+      worker_id: 'worker_temp_1',
+      locked_until: new Date(Date.now() + 60000)
     };
     await mockDb.collections().webhookJobs.insertOne(tempJob);
 

@@ -33,7 +33,8 @@ function collections() {
     feedback: database.collection('feedback'),
     aiCreditUsage: database.collection('ai_credit_usage'),
     webhookJobs: database.collection('webhook_jobs'),
-    accountRateLimits: database.collection('account_rate_limits')
+    accountRateLimits: database.collection('account_rate_limits'),
+    openingDmClaims: database.collection('opening_dm_claims')
   };
 }
 
@@ -165,7 +166,11 @@ async function initialize() {
     collections().conversationStates.createIndex({ delivery_state: 1 }, { sparse: true, name: 'conversation_states_delivery_state' }),
     // Distributed account rate limits:
     collections().accountRateLimits.createIndex({ account_id: 1 }, { unique: true, name: 'account_rate_limits_account' }),
-    collections().accountRateLimits.createIndex({ paused_until: 1 }, { expireAfterSeconds: 0, name: 'account_rate_limits_ttl' })
+    collections().accountRateLimits.createIndex({ paused_until: 1 }, { expireAfterSeconds: 0, name: 'account_rate_limits_ttl' }),
+    // Durable Opening DM Idempotency Claims:
+    collections().openingDmClaims.createIndex({ claim_key: 1 }, { unique: true, name: 'opening_dm_claims_key_unique' }),
+    collections().openingDmClaims.createIndex({ status: 1, locked_until: 1 }, { name: 'opening_dm_claims_status_locked' }),
+    collections().openingDmClaims.createIndex({ instagram_account_id: 1, created_at: -1 }, { name: 'opening_dm_claims_account_created' })
   ]);
 
   await migrateJsonData().catch((err) => console.warn('JSON migration notice:', err.message));

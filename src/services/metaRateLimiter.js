@@ -1,15 +1,22 @@
 // src/services/metaRateLimiter.js
 // Meta Instagram Graph API Rate Limiting, Header Telemetry & Error Classification Engine
 //
-// ── RATE LIMIT SCOPE DOCUMENTATION ─────────────────────────────────────────────
-// 1. Process-Local (In-Memory):
-//    - globalLastRequestTime / GLOBAL_MAX_RPS (20 req/s): Paces outbound HTTP calls within this Node.js instance.
-//    - accountPacingMap / ACCOUNT_MAX_RPS (5 req/s): Paces per-account requests within this Node.js instance.
-// 2. Shared Across Instances (MongoDB-Backed Abstraction):
-//    - account_rate_limits collection: When an account receives a Meta HTTP 429 or throttling header,
-//      the pause expiration timestamp is written to MongoDB. All worker instances inspect this
-//      pause state so throttling an account on one instance prevents other instances from
-//      making redundant calls for the same creator.
+// ── RATE LIMIT SCOPE & ARCHITECTURE DOCUMENTATION ──────────────────────────────
+// 1. Process-Local (In-Memory Controls):
+//    - globalLastRequestTime / GLOBAL_MAX_RPS (20 req/s): Leaky bucket pacing outbound HTTP
+//      calls strictly within this Node.js instance to avoid local port/CPU starvation.
+//    - accountPacingMap / ACCOUNT_MAX_RPS (5 req/s): Leaky bucket pacing per-account requests
+//      within this Node.js process.
+//
+// 2. Shared Across Instances (MongoDB-Backed Rate Limiting):
+//    - account_rate_limits collection: When an account receives a Meta HTTP 429, Retry-After,
+//      or X-Business-Use-Case-Usage 100% throttling header, the pause expiration timestamp
+//      is persisted to MongoDB with a TTL index on `paused_until`.
+//    - All worker instances check `isAccountPausedAsync()` prior to dispatching outbound calls.
+//    - To avoid pounding MongoDB on every request tick, a short-lived in-memory cache
+//      (`sharedPauseCache`, 2000ms TTL) caches negative lookups while honoring active pauses.
+//    - When the persistent worker polls for jobs (`claimNextJob()`), actively paused accounts
+//      are dynamically excluded from the claim query so unpaused accounts are never blocked.
 // ───────────────────────────────────────────────────────────────────────────────
 
 const crypto = require('crypto');
@@ -24,6 +31,9 @@ const JITTER_MS = Number(process.env.JITTER_MS) || 1000;              // 0-1000m
 // In-memory rate limiting state (process-local fast path)
 const accountPacingMap = new Map(); // accountId -> timestamp of last request
 const accountPausedUntil = new Map(); // accountId -> timestamp (ms) when pause expires
+const sharedPauseCache = new Map(); // accountId -> { pausedUntilMs: number, lastCheckedAtMs: number }
+const SHARED_PAUSE_CACHE_TTL_MS = 2000; // 2s cache for MongoDB pause lookups
+
 let globalLastRequestTime = 0;
 let globalRateLimitPauseUntil = 0;
 let rateLimitEventsCount = 0;
@@ -56,7 +66,7 @@ function classifyMetaError(err, statusCode) {
   const message = String(err?.message || err?.metaError?.message || '').toLowerCase();
   const status = Number(statusCode || err?.statusCode || err?.status || 0);
 
-  // 1. Rate Limited
+  // 1. Rate Limited (Retryable with backoff & Retry-After)
   const isRateLimit = status === 429 ||
     code === 4 ||    // Application request limit reached
     code === 17 ||   // User request limit reached
@@ -83,7 +93,7 @@ function classifyMetaError(err, statusCode) {
     };
   }
 
-  // 2. Messaging Window Policy Restriction
+  // 2. Messaging Window Policy Restriction (Permanent: User must interact first)
   const isWindowExpired = subcode === 2018278 ||
     message.includes('24 hours') ||
     message.includes('outside allowed window');
@@ -97,10 +107,10 @@ function classifyMetaError(err, statusCode) {
     };
   }
 
-  // 3. Permission or Authentication Error
+  // 3. Permanent Permission or Authentication Error (Never auto-retry)
   const isAuthError = status === 401 ||
     status === 403 ||
-    code === 190 || // Invalid OAuth access token
+    code === 190 || // Invalid OAuth access token / expired
     code === 10 ||  // Permission denied
     code === 200 || // Permissions error
     (code === 100 && subcode === 33) || // Unsupported post request
@@ -116,7 +126,24 @@ function classifyMetaError(err, statusCode) {
     };
   }
 
-  // 4. Invalid Request / Bad Parameter
+  // 4. Invalid or Unavailable Recipient (Permanent: Cannot message user)
+  const isInvalidRecipient = code === 551 || // User not available / cannot message
+    subcode === 2018001 || // Cannot message user
+    code === 803 || // Recipient does not exist
+    message.includes('cannot message') ||
+    message.includes('not available') ||
+    message.includes('blocked');
+
+  if (isInvalidRecipient) {
+    return {
+      category: 'INVALID_RECIPIENT',
+      retryable: false,
+      backoffMs: 0,
+      reason: sanitizeString(err?.message || 'Instagram user is unavailable or cannot receive messages.')
+    };
+  }
+
+  // 5. Invalid Request / Bad Parameter (Permanent: Client payload error)
   const isInvalidRequest = status === 400 ||
     code === 100 ||
     message.includes('invalid parameter') ||
@@ -131,21 +158,26 @@ function classifyMetaError(err, statusCode) {
     };
   }
 
-  // 5. Unknown Outcome (Socket timeout or hangup while awaiting reply)
-  const isUnknown = message.includes('network timeout waiting for response') ||
-    message.includes('socket hang up while waiting') ||
-    err?.uncertainDelivery === true;
+  // 6. Unknown Outcome (Network timeout or socket hangup after request was dispatched)
+  // CRITICAL: If the request was in flight, Meta may have already delivered the message!
+  // Never automatically resend an uncertain delivery!
+  const isUnknown = err?.uncertainDelivery === true ||
+    err?.requestDispatched === true ||
+    message.includes('network timeout') ||
+    message.includes('socket hang up') ||
+    message.includes('esockettimedout') ||
+    status === 504;
 
   if (isUnknown) {
     return {
       category: 'UNKNOWN_OUTCOME',
-      retryable: false, // DO NOT blindly retry uncertain delivery!
+      retryable: false, // Never automatically retry uncertain outcomes
       backoffMs: 0,
-      reason: 'Network timeout after dispatch; delivery outcome unknown.'
+      reason: sanitizeString(err?.message || 'Network timeout or socket drop after request dispatch; delivery outcome unknown.')
     };
   }
 
-  // 6. Temporary Network / Server Error
+  // 7. Temporary Network / Meta 5xx Server Error (Safe to retry only if NOT in unknown category)
   const isNetworkError = status >= 500 ||
     message.includes('etimedout') ||
     message.includes('econnreset') ||
@@ -178,23 +210,22 @@ function classifyMetaError(err, statusCode) {
  * @param {number} [baseMs] - Base backoff in ms
  * @returns {number} - Total delay in milliseconds
  */
-function calculateBackoffWithJitter(attempt, baseMs = BASE_BACKOFF_MS) {
-  const safeAttempt = Math.max(1, Number(attempt) || 1);
-  const exponentialDelay = Math.min(baseMs * Math.pow(2, safeAttempt - 1), MAX_BACKOFF_MS);
-  const jitter = Math.floor(Math.random() * JITTER_MS);
-  return exponentialDelay + jitter;
+function calculateBackoffWithJitter(attempt = 1, baseMs = BASE_BACKOFF_MS) {
+  const factor = Math.min(Math.pow(2, Math.max(0, attempt - 1)), 32);
+  const backoff = Math.min(baseMs * factor, MAX_BACKOFF_MS);
+  const jitter = crypto.randomInt(0, JITTER_MS + 1);
+  return backoff + jitter;
 }
 
 /**
- * Inspects Meta response headers for usage limits and throttling signals.
+ * Inspects HTTP response headers from Meta for rate limiting and app usage indicators.
  *
- * @param {Headers|object} headers - Fetch response headers
- * @param {string} [instagramAccountId] - Optional account ID for targeted throttling
- * @param {object} [db] - Optional db for distributed pause recording
+ * @param {object|Headers} headers - Response headers
+ * @param {string} [instagramAccountId] - Account ID being operated on
+ * @param {object} [db] - Database module
  */
 function inspectMetaHeaders(headers, instagramAccountId, db) {
   if (!headers) return;
-
   try {
     const getHeader = (name) => {
       if (typeof headers.get === 'function') return headers.get(name);
@@ -258,12 +289,79 @@ function inspectMetaHeaders(headers, instagramAccountId, db) {
 }
 
 /**
+ * Checks if a specific account is currently paused due to rate limiting.
+ * Asynchronously verifies MongoDB state with a 2-second in-memory cache to prevent excessive DB traffic.
+ *
+ * @param {string} instagramAccountId - Account ID
+ * @param {object} [db] - Database module
+ * @returns {Promise<boolean>}
+ */
+async function isAccountPausedAsync(instagramAccountId, db = null) {
+  const now = Date.now();
+  if (globalRateLimitPauseUntil > now) return true;
+  if (!instagramAccountId) return false;
+
+  // 1. Check in-memory local map first (fastest path)
+  const localExpiry = accountPausedUntil.get(instagramAccountId);
+  if (localExpiry && localExpiry > now) return true;
+
+  // 2. Check short-lived cache of MongoDB state
+  const cached = sharedPauseCache.get(instagramAccountId);
+  if (cached && (now - cached.lastCheckedAtMs) < SHARED_PAUSE_CACHE_TTL_MS) {
+    return cached.pausedUntilMs > now;
+  }
+
+  // 3. Query MongoDB account_rate_limits collection if available
+  if (db && db.collections && db.collections().accountRateLimits) {
+    try {
+      const record = await db.collections().accountRateLimits.findOne({ account_id: instagramAccountId });
+      if (record && record.paused_until) {
+        const pausedUntilMs = new Date(record.paused_until).getTime();
+        sharedPauseCache.set(instagramAccountId, { pausedUntilMs, lastCheckedAtMs: now });
+        if (pausedUntilMs > now) {
+          accountPausedUntil.set(instagramAccountId, pausedUntilMs);
+          return true;
+        }
+      } else {
+        sharedPauseCache.set(instagramAccountId, { pausedUntilMs: 0, lastCheckedAtMs: now });
+      }
+    } catch (err) {
+      // Safe fallback to local state if db query fails
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Synchronous check for process-local pause state.
+ *
+ * @param {string} instagramAccountId - Account ID
+ * @returns {boolean}
+ */
+function isAccountPaused(instagramAccountId) {
+  const now = Date.now();
+  if (globalRateLimitPauseUntil > now) return true;
+  if (!instagramAccountId) return false;
+
+  const localExpiry = accountPausedUntil.get(instagramAccountId);
+  if (localExpiry && localExpiry > now) return true;
+
+  const cached = sharedPauseCache.get(instagramAccountId);
+  if (cached && cached.pausedUntilMs > now) return true;
+
+  return false;
+}
+
+/**
  * Coordinates request pacing for both global rate limits and per-account rate limits.
+ * Checks shared MongoDB pause state before pacing.
  *
  * @param {string} [instagramAccountId] - Target Instagram Account ID
+ * @param {object} [db] - Database module
  * @returns {Promise<void>}
  */
-async function paceRequest(instagramAccountId) {
+async function paceRequest(instagramAccountId, db = null) {
   const now = Date.now();
 
   // 1. Check Global Pause
@@ -273,15 +371,19 @@ async function paceRequest(instagramAccountId) {
     await new Promise(r => setTimeout(r, waitTime));
   }
 
-  // 2. Check Account-Specific Pause
-  if (instagramAccountId && accountPausedUntil.has(instagramAccountId)) {
-    const pauseExpiry = accountPausedUntil.get(instagramAccountId);
-    if (pauseExpiry > now) {
-      const waitTime = pauseExpiry - now;
-      console.warn(`[META PACER] Account ${instagramAccountId} pause active. Waiting ${waitTime}ms...`);
-      await new Promise(r => setTimeout(r, waitTime));
-    } else {
-      accountPausedUntil.delete(instagramAccountId);
+  // 2. Check Shared Account Pause (checks MongoDB + local cache)
+  if (instagramAccountId) {
+    const isPaused = await isAccountPausedAsync(instagramAccountId, db);
+    if (isPaused) {
+      const expiry = Math.max(
+        accountPausedUntil.get(instagramAccountId) || 0,
+        sharedPauseCache.get(instagramAccountId)?.pausedUntilMs || 0
+      );
+      const waitTime = Math.max(0, expiry - Date.now());
+      if (waitTime > 0) {
+        console.warn(`[META PACER] Account ${instagramAccountId} shared pause active. Waiting ${waitTime}ms...`);
+        await new Promise(r => setTimeout(r, waitTime));
+      }
     }
   }
 
@@ -306,25 +408,8 @@ async function paceRequest(instagramAccountId) {
 }
 
 /**
- * Checks if a specific account is currently paused due to rate limiting.
- * Fast in-memory check with optional MongoDB sync.
- *
- * @param {string} instagramAccountId - Account ID
- * @returns {boolean}
- */
-function isAccountPaused(instagramAccountId) {
-  if (globalRateLimitPauseUntil > Date.now()) return true;
-  if (!instagramAccountId) return false;
-  const expiry = accountPausedUntil.get(instagramAccountId);
-  if (!expiry) return false;
-  if (expiry > Date.now()) return true;
-  accountPausedUntil.delete(instagramAccountId);
-  return false;
-}
-
-/**
  * Manually pauses an account (e.g. after receiving a 429).
- * Updates fast in-memory map and optionally persists to MongoDB for multi-instance sync.
+ * Updates fast in-memory map and persists to MongoDB for multi-instance sync.
  *
  * @param {string} instagramAccountId - Account ID
  * @param {number} durationMs - Pause duration in milliseconds
@@ -333,8 +418,10 @@ function isAccountPaused(instagramAccountId) {
  */
 function pauseAccount(instagramAccountId, durationMs = 30000, reason = 'rate_limit', db = null) {
   if (!instagramAccountId) return;
-  const pauseUntil = Date.now() + durationMs;
+  const now = Date.now();
+  const pauseUntil = now + durationMs;
   accountPausedUntil.set(instagramAccountId, pauseUntil);
+  sharedPauseCache.set(instagramAccountId, { pausedUntilMs: pauseUntil, lastCheckedAtMs: now });
   rateLimitEventsCount++;
 
   // Shared MongoDB persistence abstraction
@@ -360,6 +447,7 @@ function pauseAccount(instagramAccountId, durationMs = 30000, reason = 'rate_lim
 function _resetForTesting() {
   accountPacingMap.clear();
   accountPausedUntil.clear();
+  sharedPauseCache.clear();
   globalLastRequestTime = 0;
   globalRateLimitPauseUntil = 0;
   rateLimitEventsCount = 0;
@@ -377,6 +465,7 @@ module.exports = {
   inspectMetaHeaders,
   paceRequest,
   isAccountPaused,
+  isAccountPausedAsync,
   pauseAccount,
   getRateLimitEventsCount: () => rateLimitEventsCount,
   _resetForTesting

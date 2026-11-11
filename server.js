@@ -1054,11 +1054,23 @@ const processingCommentIds = new Set();
 const processingDeliveryKeys = new Set();
 
 // Deliver final resource helper (guaranteed idempotent)
-async function deliverFinalResource({ recipientIgUserId, senderIgsid, automation, tokenData, flow, commentId, prefixMessage, workerId }) {
+async function deliverFinalResource({
+  recipientIgUserId,
+  senderIgsid,
+  automation,
+  tokenData,
+  flow,
+  commentId,
+  prefixMessage,
+  workerId,
+  options = {}
+}) {
   const stateKey = `${automation.id}:${recipientIgUserId}:${senderIgsid}`;
   const now = new Date();
   const workerToken = workerId || `delivery_worker_${crypto.randomUUID()}`;
-  const leaseExpiresAt = new Date(now.getTime() + 60000); // 60s delivery lock lease
+  const deliveryLeaseMs = Number(options.deliveryLeaseMs) || 60000; // Configurable lease (default 60s)
+  const deliveryHeartbeatIntervalMs = Number(options.deliveryHeartbeatIntervalMs) || Math.min(15000, Math.floor(deliveryLeaseMs / 2));
+  const leaseExpiresAt = new Date(now.getTime() + deliveryLeaseMs);
 
   // Concurrency guard 1: In-memory lock
   if (processingDeliveryKeys.has(stateKey)) {
@@ -1066,6 +1078,48 @@ async function deliverFinalResource({ recipientIgUserId, senderIgsid, automation
     return;
   }
   processingDeliveryKeys.add(stateKey);
+
+  let deliveryHeartbeat = null;
+  function startDeliveryHeartbeat() {
+    if (deliveryHeartbeat) return;
+    deliveryHeartbeat = setInterval(async () => {
+      try {
+        const curNow = new Date();
+        const renewedExpiry = new Date(curNow.getTime() + deliveryLeaseMs);
+        if (db.collections && db.collections().conversationStates) {
+          const res = await db.collections().conversationStates.updateOne(
+            {
+              key: stateKey,
+              delivery_worker_id: workerToken,
+              delivery_state: 'sending',
+              delivery_locked_until: { $gt: curNow }
+            },
+            {
+              $set: {
+                delivery_locked_until: renewedExpiry,
+                delivery_lease_renewed_at: curNow.toISOString(),
+                updated_at: curNow.toISOString()
+              }
+            }
+          );
+          if (res.matchedCount === 0) {
+            console.warn(`[DELIVERY LEASE LOSS] Worker ${workerToken} lost delivery lease for ${stateKey}`);
+            stopDeliveryHeartbeat();
+          }
+        }
+      } catch (err) {
+        console.warn(`[DELIVERY HEARTBEAT] Error renewing lease for ${stateKey}:`, err.message);
+      }
+    }, deliveryHeartbeatIntervalMs);
+    if (deliveryHeartbeat.unref) deliveryHeartbeat.unref();
+  }
+
+  function stopDeliveryHeartbeat() {
+    if (deliveryHeartbeat) {
+      clearInterval(deliveryHeartbeat);
+      deliveryHeartbeat = null;
+    }
+  }
 
   try {
     // Concurrency guard 2: Atomic database state claim with recovery from expired leases
@@ -1122,6 +1176,9 @@ async function deliverFinalResource({ recipientIgUserId, senderIgsid, automation
         return;
       }
     }
+
+    // Start active delivery lease renewal heartbeat
+    startDeliveryHeartbeat();
 
     let deliveryText = flow.delivery?.message || automation.dm_message || "Here's what you requested! Enjoy ✨";
     if (prefixMessage) {
@@ -1256,10 +1313,15 @@ async function deliverFinalResource({ recipientIgUserId, senderIgsid, automation
       return;
     }
 
-    // 5. Only mark "sent" and resource_delivered=true AFTER Meta confirms acceptance!
+    // 5. Only mark "sent" and resource_delivered=true AFTER Meta confirms acceptance AND lease is unexpired!
     if (db.collections && db.collections().conversationStates) {
-      await db.collections().conversationStates.updateOne(
-        { key: stateKey, delivery_worker_id: workerToken },
+      const stateUpdateRes = await db.collections().conversationStates.updateOne(
+        {
+          key: stateKey,
+          delivery_worker_id: workerToken,
+          delivery_state: 'sending',
+          delivery_locked_until: { $gt: new Date() } // Must still hold active unexpired lease
+        },
         {
           $set: {
             delivery_state: 'sent',
@@ -1272,6 +1334,10 @@ async function deliverFinalResource({ recipientIgUserId, senderIgsid, automation
           }
         }
       );
+      if (stateUpdateRes.matchedCount === 0) {
+        console.warn(`[DELIVERY LEASE LOSS] Stale worker ${workerToken} cannot mark ${stateKey} as sent: lease expired or reclaimed.`);
+        return { success: false, reason: 'LEASE_LOST' };
+      }
     }
 
     // Log in automation_events
@@ -1290,15 +1356,17 @@ async function deliverFinalResource({ recipientIgUserId, senderIgsid, automation
       });
     }
   } finally {
-    setTimeout(() => {
+    stopDeliveryHeartbeat();
+    const cleanupTimer = setTimeout(() => {
       processingDeliveryKeys.delete(stateKey);
     }, 15000);
+    if (cleanupTimer.unref) cleanupTimer.unref();
   }
 }
 
-// ==========================================
+// ========================================== 
 // Webhook Job Processing & Execution Engine
-// ==========================================
+// ========================================== 
 
 async function executeCommentJob(job) {
   const recipientIgUserId = job.instagram_account_id;
@@ -1308,7 +1376,7 @@ async function executeCommentJob(job) {
   const fromUsername = job.from_username;
   const commentMediaId = job.media_id || '';
 
-  // 1. Check if comment was already replied to
+  // 1. Fast check if comment was already replied to in automationEvents
   if (db.collections && db.collections().automationEvents) {
     const alreadyDone = await db.collections().automationEvents.findOne({
       comment_id: commentId,
@@ -1367,6 +1435,104 @@ async function executeCommentJob(job) {
     return;
   }
 
+  // 4. Durable Opening DM Idempotency Claim before sending opening DM
+  const claimKey = `${recipientIgUserId}:${commentId}:${selectedAuto.id}`;
+  const workerToken = job?.worker_id || `comment_worker_${process.pid}_${crypto.randomBytes(4).toString('hex')}`;
+  const now = new Date();
+  const claimLeaseExpiry = new Date(now.getTime() + 60000); // 60s lease
+
+  if (db.collections && db.collections().openingDmClaims) {
+    const claimsCol = db.collections().openingDmClaims;
+
+    // Check existing claim state
+    const existingClaim = await claimsCol.findOne({ claim_key: claimKey });
+    if (existingClaim) {
+      if (existingClaim.status === 'sent') {
+        console.log(`[DEDUP] Opening DM already sent for comment ${commentId} on automation ${selectedAuto.id}. Skipping.`);
+        return;
+      }
+      if (existingClaim.status === 'unknown') {
+        console.warn(`[IDEMPOTENCY] Opening DM for comment ${commentId} has unknown delivery outcome. Never blindly resending.`);
+        return;
+      }
+      if (existingClaim.status === 'failed' && existingClaim.retryable === false) {
+        console.log(`[IDEMPOTENCY] Opening DM for comment ${commentId} previously failed permanently. Skipping.`);
+        return;
+      }
+    }
+
+    // Upsert default 'pending' state if missing
+    await claimsCol.updateOne(
+      { claim_key: claimKey },
+      {
+        $setOnInsert: {
+          claim_key: claimKey,
+          instagram_account_id: recipientIgUserId,
+          comment_id: commentId,
+          automation_id: selectedAuto.id,
+          status: 'pending',
+          request_dispatched: false,
+          created_at: now
+        }
+      },
+      { upsert: true }
+    );
+
+    // Atomic claim via findOneAndUpdate:
+    // Can claim if:
+    // 1. status is 'pending' or 'failed_retryable'
+    // OR
+    // 2. status is 'processing' AND locked_until is expired (< now) AND request_dispatched is NOT true
+    const claimRes = await claimsCol.findOneAndUpdate(
+      {
+        claim_key: claimKey,
+        status: { $nin: ['sent', 'unknown'] },
+        $or: [
+          { status: { $in: ['pending', 'failed_retryable'] } },
+          {
+            status: 'processing',
+            locked_until: { $lt: now },
+            request_dispatched: { $ne: true }
+          }
+        ]
+      },
+      {
+        $set: {
+          status: 'processing',
+          worker_id: workerToken,
+          locked_until: claimLeaseExpiry,
+          request_dispatched: false,
+          claiming_started_at: now,
+          updated_at: now
+        }
+      },
+      { returnDocument: 'after' }
+    );
+
+    const claimedDoc = claimRes?.value || claimRes;
+    if (!claimedDoc || claimedDoc.worker_id !== workerToken) {
+      // Check if this was an expired lease where request_dispatched was true:
+      const checkDoc = await claimsCol.findOne({ claim_key: claimKey });
+      if (checkDoc && checkDoc.status === 'processing' && checkDoc.request_dispatched === true && checkDoc.locked_until < now) {
+        // Outcome uncertain because request was dispatched before crash! Mark unknown!
+        await claimsCol.updateOne(
+          { claim_key: claimKey, status: 'processing' },
+          {
+            $set: {
+              status: 'unknown',
+              locked_until: null,
+              last_error: 'Worker crashed or lease expired after HTTP request was dispatched',
+              updated_at: new Date()
+            }
+          }
+        );
+        console.warn(`[IDEMPOTENCY UNCERTAIN] Marked ${claimKey} as unknown: previous worker lease expired after request dispatch.`);
+      }
+      console.log(`[IDEMPOTENCY] Opening DM delivery already in progress or completed for ${claimKey}. Skipping.`);
+      return;
+    }
+  }
+
   console.log(`[TRIGGER] Matched automation ${selectedAuto.id} for comment "${commentText}" (ID: ${commentId}). Sending interactive opening DM...`);
 
   // Ensure flow is loaded
@@ -1421,6 +1587,14 @@ async function executeCommentJob(job) {
   };
 
   try {
+    // Record request dispatch state before network call
+    if (db.collections && db.collections().openingDmClaims) {
+      await db.collections().openingDmClaims.updateOne(
+        { claim_key: claimKey, worker_id: workerToken },
+        { $set: { request_dispatched: true, dispatched_at: new Date() } }
+      );
+    }
+
     // 1. Send Interactive Private DM
     const sendResult = await instagramService.sendPrivateReply(
       recipientIgUserId,
@@ -1430,6 +1604,40 @@ async function executeCommentJob(job) {
     );
 
     const metaMsgId = sendResult?.message_id || sendResult?.id || null;
+
+    if (!metaMsgId) {
+      console.warn(`[OPENING DM UNCONFIRMED] Meta response missing message_id for ${claimKey}`);
+      if (db.collections && db.collections().openingDmClaims) {
+        await db.collections().openingDmClaims.updateOne(
+          { claim_key: claimKey, worker_id: workerToken },
+          {
+            $set: {
+              status: 'unknown',
+              locked_until: null,
+              last_error: 'Meta response missing message_id confirmation',
+              updated_at: new Date()
+            }
+          }
+        );
+      }
+      return;
+    }
+
+    // Persist claim as confirmed 'sent'
+    if (db.collections && db.collections().openingDmClaims) {
+      await db.collections().openingDmClaims.updateOne(
+        { claim_key: claimKey, worker_id: workerToken },
+        {
+          $set: {
+            status: 'sent',
+            meta_message_id: metaMsgId,
+            locked_until: null,
+            sent_at: new Date(),
+            updated_at: new Date()
+          }
+        }
+      );
+    }
 
     // 2. Initialize conversation state
     const stateKey = `${selectedAuto.id}:${recipientIgUserId}:${fromId || commentId}`;
@@ -1460,7 +1668,6 @@ async function executeCommentJob(job) {
     }
 
     // 3. Record automation event for PRIVATE DM immediately!
-    // Confirms DM success before attempting public replies, preventing DM repetition on public reply error
     if (db.collections && db.collections().automationEvents) {
       await db.collections().automationEvents.insertOne({
         event_id: crypto.randomUUID(),
@@ -1490,7 +1697,6 @@ async function executeCommentJob(job) {
     console.log(`[TRIGGER SUCCESS] Successfully sent opening DM for comment ID ${commentId}`);
 
     // 4. Send Public Comment Reply in an isolated try/catch (if configured)
-    // Public comment errors/rate limits must NEVER fail or repeat the already-confirmed private DM!
     if (selectedAuto.reply_template) {
       try {
         const publicReplyResult = await instagramService.replyToComment(
@@ -1542,6 +1748,51 @@ async function executeCommentJob(job) {
       }
     }
   } catch (apiErr) {
+    const classification = metaRateLimiter.classifyMetaError(apiErr);
+
+    if (db.collections && db.collections().openingDmClaims) {
+      if (classification.category === 'UNKNOWN_OUTCOME') {
+        await db.collections().openingDmClaims.updateOne(
+          { claim_key: claimKey, worker_id: workerToken },
+          {
+            $set: {
+              status: 'unknown',
+              locked_until: null,
+              last_error: apiErr.message,
+              updated_at: new Date()
+            }
+          }
+        );
+      } else if (classification.category === 'RATE_LIMITED') {
+        await db.collections().openingDmClaims.updateOne(
+          { claim_key: claimKey, worker_id: workerToken },
+          {
+            $set: {
+              status: 'failed_retryable',
+              locked_until: null,
+              last_error: apiErr.message,
+              retryable: true,
+              retry_after: classification.backoffMs,
+              updated_at: new Date()
+            }
+          }
+        );
+      } else {
+        await db.collections().openingDmClaims.updateOne(
+          { claim_key: claimKey, worker_id: workerToken },
+          {
+            $set: {
+              status: 'failed',
+              locked_until: null,
+              last_error: apiErr.message,
+              retryable: false,
+              updated_at: new Date()
+            }
+          }
+        );
+      }
+    }
+
     if (db.collections && db.collections().automationEvents) {
       await db.collections().automationEvents.insertOne({
         event_id: crypto.randomUUID(),
@@ -1560,17 +1811,11 @@ async function executeCommentJob(job) {
         created_at: new Date().toISOString(),
         created_at_date: new Date()
       });
-    } else {
-      await db.run(
-        'INSERT INTO automation_events (owner_user_id, instagram_user_id, automation_id, comment_id, event_type, keyword, message_text, status, error_message, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [selectedAuto.owner_user_id, recipientIgUserId, selectedAuto.id, commentId, 'private_reply', selectedAuto.keyword, selectedAuto.dm_message, 'failed', apiErr.message, new Date().toISOString()]
-      );
     }
     console.error(`Failed to execute automation for comment ${commentId}:`, apiErr.message);
     throw apiErr;
   }
 }
-
 async function executeMessagingJob(job) {
   const recipientIgUserId = job.instagram_account_id;
   const senderIgsid = job.from_id;
