@@ -31,7 +31,8 @@ function collections() {
     otps: database.collection('otps'),
     conversationStates: database.collection('conversation_states'),
     feedback: database.collection('feedback'),
-    aiCreditUsage: database.collection('ai_credit_usage')
+    aiCreditUsage: database.collection('ai_credit_usage'),
+    webhookJobs: database.collection('webhook_jobs')
   };
 }
 
@@ -149,7 +150,15 @@ async function initialize() {
     // User feedback:
     collections().feedback.createIndex({ user_id: 1, created_at: -1 }, { name: 'feedback_user_created' }),
     // AI credit usage:
-    collections().aiCreditUsage.createIndex({ user_id: 1, created_at: -1 }, { name: 'ai_credit_usage_user' })
+    collections().aiCreditUsage.createIndex({ user_id: 1, created_at: -1 }, { name: 'ai_credit_usage_user' }),
+    // Durable Webhook Ingestion Queue:
+    collections().webhookJobs.createIndex({ event_key: 1 }, { unique: true, name: 'webhook_jobs_event_key_unique' }),
+    collections().webhookJobs.createIndex({ status: 1, created_at: 1 }, { name: 'webhook_jobs_status_created' }),
+    collections().webhookJobs.createIndex({ instagram_account_id: 1, created_at: -1 }, { name: 'webhook_jobs_account_created' }),
+    collections().webhookJobs.createIndex({ comment_id: 1 }, { sparse: true, name: 'webhook_jobs_comment_id' }),
+    // Conversation states index for fast lookup:
+    collections().conversationStates.createIndex({ key: 1 }, { unique: true, sparse: true, name: 'conversation_states_key_unique' }),
+    collections().conversationStates.createIndex({ automation_id: 1, sender_igsid: 1 }, { name: 'conversation_states_auto_sender' })
   ]);
 
   await migrateJsonData().catch((err) => console.warn('JSON migration notice:', err.message));
