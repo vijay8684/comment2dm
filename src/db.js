@@ -176,8 +176,9 @@ async function initialize() {
     collections().openingDmClaims.createIndex({ claim_key: 1 }, { unique: true, name: 'opening_dm_claims_key_unique' }),
     collections().openingDmClaims.createIndex({ status: 1, locked_until: 1 }, { name: 'opening_dm_claims_status_locked' }),
     collections().openingDmClaims.createIndex({ instagram_account_id: 1, created_at: -1 }, { name: 'opening_dm_claims_account_created' }),
-    // Retention for opening DM claims: 30 days protects against delayed retries past Meta's 7-day comment reply limit
-    collections().openingDmClaims.createIndex({ created_at: 1 }, { expireAfterSeconds: 30 * 86400, name: 'opening_dm_claims_ttl' })
+    // Safe TTL retention: Only confirmed successfully sent claims carrying completed_at are purged after 30 days.
+    // Unknown, processing, pending, and retryable claims never carry completed_at and are permanently preserved.
+    collections().openingDmClaims.createIndex({ completed_at: 1 }, { expireAfterSeconds: 30 * 86400, sparse: true, name: 'opening_dm_claims_completed_ttl' })
   ]);
 
   await migrateJsonData().catch((err) => console.warn('JSON migration notice:', err.message));

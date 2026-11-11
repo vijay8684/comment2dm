@@ -1593,11 +1593,18 @@ async function executeCommentJob(job) {
       if (checkDoc && checkDoc.status === 'processing' && checkDoc.request_dispatched === true && new Date(checkDoc.locked_until) < now) {
         // Outcome uncertain because request was dispatched before crash! Mark unknown!
         await claimsCol.updateOne(
-          { claim_key: claimKey, status: 'processing', worker_id: checkDoc.worker_id },
+          {
+            claim_key: claimKey,
+            status: 'processing',
+            worker_id: checkDoc.worker_id,
+            locked_until: { $lt: now }
+          },
           {
             $set: {
               status: 'unknown',
               locked_until: null,
+              worker_id: null,
+              previous_worker_id: checkDoc.worker_id,
               last_error: 'Worker crashed or lease expired after HTTP request was dispatched',
               updated_at: new Date()
             }
@@ -1698,10 +1705,21 @@ async function executeCommentJob(job) {
     // Record request dispatch state before network call
     requestDispatched = true;
     if (db.collections && db.collections().openingDmClaims) {
-      await db.collections().openingDmClaims.updateOne(
-        { claim_key: claimKey, worker_id: workerToken },
-        { $set: { request_dispatched: true, dispatched_at: new Date() } }
+      const dispatchRes = await db.collections().openingDmClaims.updateOne(
+        {
+          claim_key: claimKey,
+          worker_id: workerToken,
+          status: 'processing',
+          locked_until: { $gt: new Date() }
+        },
+        { $set: { request_dispatched: true, dispatched_at: new Date(), updated_at: new Date() } }
       );
+      if (dispatchRes.matchedCount === 0) {
+        const leaseLostErr = new Error(`Worker ${workerToken} lost claim lease before dispatch for ${claimKey}`);
+        leaseLostErr.category = 'LEASE_LOST';
+        leaseLostErr.retryable = false;
+        throw leaseLostErr;
+      }
     }
 
     // 1. Send Interactive Private DM
@@ -1718,7 +1736,11 @@ async function executeCommentJob(job) {
       console.warn(`[OPENING DM UNCONFIRMED] Meta response missing message_id for ${claimKey}`);
       if (db.collections && db.collections().openingDmClaims) {
         await db.collections().openingDmClaims.updateOne(
-          { claim_key: claimKey, worker_id: workerToken },
+          {
+            claim_key: claimKey,
+            worker_id: workerToken,
+            status: 'processing'
+          },
           {
             $set: {
               status: 'unknown',
@@ -1737,18 +1759,26 @@ async function executeCommentJob(job) {
 
     // Persist claim as confirmed 'sent'
     if (db.collections && db.collections().openingDmClaims) {
-      await db.collections().openingDmClaims.updateOne(
-        { claim_key: claimKey, worker_id: workerToken },
+      const successRes = await db.collections().openingDmClaims.updateOne(
+        {
+          claim_key: claimKey,
+          worker_id: workerToken,
+          status: 'processing'
+        },
         {
           $set: {
             status: 'sent',
             meta_message_id: metaMsgId,
             locked_until: null,
             sent_at: new Date(),
+            completed_at: new Date(),
             updated_at: new Date()
           }
         }
       );
+      if (successRes.matchedCount === 0) {
+        console.warn(`[STALE WORKER] Worker ${workerToken} delivered opening DM for ${claimKey}, but claim was no longer in processing state (e.g. lease expired and transitioned to unknown). Preserving existing claim status.`);
+      }
     }
 
     // 2. Initialize conversation state
@@ -1905,8 +1935,12 @@ async function executeCommentJob(job) {
     }
 
     if (db.collections && db.collections().openingDmClaims) {
-      await db.collections().openingDmClaims.updateOne(
-        { claim_key: claimKey, worker_id: workerToken },
+      const failRes = await db.collections().openingDmClaims.updateOne(
+        {
+          claim_key: claimKey,
+          worker_id: workerToken,
+          status: 'processing'
+        },
         {
           $set: {
             status: targetClaimStatus,
@@ -1918,6 +1952,9 @@ async function executeCommentJob(job) {
           }
         }
       );
+      if (failRes.matchedCount === 0) {
+        console.warn(`[STALE WORKER] Worker ${workerToken} failed for ${claimKey}, but claim was no longer in processing state (e.g. lease expired and transitioned to unknown). Preserving existing claim status.`);
+      }
     }
 
     if (db.collections && db.collections().automationEvents) {
