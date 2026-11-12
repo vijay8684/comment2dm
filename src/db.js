@@ -1,7 +1,9 @@
 const fs = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const mongodb = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = mongodb;
+let clientClass = MongoClient;
 
 const databaseName = process.env.MONGODB_DB_NAME || 'nudge';
 const usersFile = path.join(__dirname, '..', 'data', 'users.json');
@@ -9,6 +11,7 @@ const instagramFile = path.join(__dirname, '..', 'data', 'instagram-accounts.jso
 
 let client;
 let database;
+let initializationPromise = null;
 
 function collections() {
   if (!database) {
@@ -100,89 +103,119 @@ async function migrateJsonData() {
 }
 
 async function initialize() {
-  const uri = process.env.MONGODB_URI;
-  if (!uri) {
-    throw new Error('MONGODB_URI must be configured.');
+  if (client && database) {
+    return database;
   }
 
-  client = new MongoClient(uri, {
-    serverApi: {
-      version: ServerApiVersion.v1,
-      strict: true,
-      deprecationErrors: true
-    },
-    maxPoolSize: 10,
-    minPoolSize: 1,
-    maxIdleTimeMS: 60000,
-    serverSelectionTimeoutMS: 8000,
-    connectTimeoutMS: 10000
-  });
+  if (initializationPromise) {
+    return initializationPromise;
+  }
 
-  await client.connect();
-  database = client.db(databaseName);
-  await database.command({ ping: 1 });
+  initializationPromise = (async () => {
+    const uri = process.env.MONGODB_URI;
+    if (!uri) {
+      throw new Error('MONGODB_URI must be configured.');
+    }
 
-  const { users, instagramAccounts, automations, webhookEvents, automationEvents, rateLimits, sessions } = collections();
+    let createdClient = null;
+    try {
+      createdClient = new clientClass(uri, {
+        serverApi: {
+          version: ServerApiVersion.v1,
+          strict: true,
+          deprecationErrors: true
+        },
+        maxPoolSize: 10,
+        minPoolSize: 1,
+        maxIdleTimeMS: 60000,
+        serverSelectionTimeoutMS: 8000,
+        connectTimeoutMS: 10000
+      });
 
-  // Create indexes safely. TTL indexes ensure MongoDB free tier space (512MB) is never exhausted.
-  await Promise.allSettled([
-    users.createIndex({ email: 1 }, { unique: true, name: 'users_email_unique' }),
-    users.createIndex({ id: 1 }, { unique: true, name: 'users_id_unique' }),
-    instagramAccounts.createIndex({ owner_user_id: 1, instagram_user_id: 1 }, { unique: true, name: 'instagram_owner_account_unique' }),
-    instagramAccounts.createIndex({ instagram_user_id: 1, expires_at: -1 }, { name: 'instagram_user_lookup' }),
-    automations.createIndex({ id: 1 }, { unique: true, sparse: true, name: 'automations_id_unique' }),
-    automations.createIndex({ owner_user_id: 1, created_at: -1 }, { name: 'automations_owner_created' }),
-    automations.createIndex({ instagram_user_id: 1, enabled: 1 }, { name: 'automations_instagram_enabled' }),
-    automations.createIndex({ instagram_user_id: 1, media_id: 1, enabled: 1 }, { name: 'automations_instagram_media_enabled' }),
-    // Auto-delete webhook duplicate tracking records after 7 days (saves MongoDB space):
-    webhookEvents.createIndex({ event_id: 1 }, { unique: true, name: 'webhook_event_unique' }),
-    webhookEvents.createIndex({ processed_at: 1 }, { expireAfterSeconds: 7 * 86400, name: 'webhook_events_ttl' }),
-    // Auto-delete automation event logs after 30 days (saves MongoDB space):
-    automationEvents.createIndex({ owner_user_id: 1, created_at: -1 }, { name: 'automation_events_owner_created' }),
-    automationEvents.createIndex({ instagram_user_id: 1, created_at: -1 }, { name: 'automation_events_instagram_created' }),
-    automationEvents.createIndex({ created_at_date: 1 }, { expireAfterSeconds: 30 * 86400, name: 'automation_events_ttl' }),
-    // Rate limits auto-expire:
-    rateLimits.createIndex({ expires_at: 1 }, { expireAfterSeconds: 0, name: 'rate_limits_ttl' }),
-    // Sessions auto-expire:
-    sessions.createIndex({ token_hash: 1 }, { unique: true, name: 'sessions_token_unique' }),
-    sessions.createIndex({ expires_at: 1 }, { expireAfterSeconds: 0, name: 'sessions_expires_ttl' }),
-    // OTPs auto-expire:
-    collections().otps.createIndex({ expires_at: 1 }, { expireAfterSeconds: 0, name: 'otps_expires_ttl' }),
-    collections().otps.createIndex({ email: 1, type: 1 }, { name: 'otps_email_type' }),
-    // User feedback:
-    collections().feedback.createIndex({ user_id: 1, created_at: -1 }, { name: 'feedback_user_created' }),
-    // AI credit usage:
-    collections().aiCreditUsage.createIndex({ user_id: 1, created_at: -1 }, { name: 'ai_credit_usage_user' }),
-    // Durable Webhook Ingestion Queue:
-    collections().webhookJobs.createIndex({ event_key: 1 }, { unique: true, name: 'webhook_jobs_event_key_unique' }),
-    collections().webhookJobs.createIndex({ status: 1, created_at: 1 }, { name: 'webhook_jobs_status_created' }),
-    collections().webhookJobs.createIndex({ status: 1, run_at: 1, created_at: 1 }, { name: 'webhook_jobs_status_run_created' }),
-    collections().webhookJobs.createIndex({ status: 1, locked_until: 1 }, { name: 'webhook_jobs_status_locked' }),
-    collections().webhookJobs.createIndex({ instagram_account_id: 1, created_at: -1 }, { name: 'webhook_jobs_account_created' }),
-    collections().webhookJobs.createIndex({ comment_id: 1 }, { sparse: true, name: 'webhook_jobs_comment_id' }),
-    collections().webhookJobs.createIndex({ run_at: 1, created_at: 1 }, { name: 'webhook_jobs_poll_sort' }),
-    // Safe TTL retention: Only terminal/completed jobs are purged after 7 days (preserves active queued/retrying/processing jobs)
-    collections().webhookJobs.createIndex({ completed_at: 1 }, { expireAfterSeconds: 7 * 86400, sparse: true, name: 'webhook_jobs_completed_ttl' }),
-    // Conversation states index for fast lookup:
-    collections().conversationStates.createIndex({ key: 1 }, { unique: true, sparse: true, name: 'conversation_states_key_unique' }),
-    collections().conversationStates.createIndex({ automation_id: 1, sender_igsid: 1 }, { name: 'conversation_states_auto_sender' }),
-    collections().conversationStates.createIndex({ delivery_state: 1 }, { sparse: true, name: 'conversation_states_delivery_state' }),
-    // Retention for conversation states: 90 days after last interaction
-    collections().conversationStates.createIndex({ updated_at: 1 }, { expireAfterSeconds: 90 * 86400, name: 'conversation_states_ttl' }),
-    // Distributed account rate limits:
-    collections().accountRateLimits.createIndex({ account_id: 1 }, { unique: true, name: 'account_rate_limits_account' }),
-    collections().accountRateLimits.createIndex({ paused_until: 1 }, { expireAfterSeconds: 0, name: 'account_rate_limits_ttl' }),
-    // Durable Opening DM Idempotency Claims:
-    collections().openingDmClaims.createIndex({ claim_key: 1 }, { unique: true, name: 'opening_dm_claims_key_unique' }),
-    collections().openingDmClaims.createIndex({ status: 1, locked_until: 1 }, { name: 'opening_dm_claims_status_locked' }),
-    collections().openingDmClaims.createIndex({ instagram_account_id: 1, created_at: -1 }, { name: 'opening_dm_claims_account_created' }),
-    // Safe TTL retention: Only confirmed successfully sent claims carrying completed_at are purged after 30 days.
-    // Unknown, processing, pending, and retryable claims never carry completed_at and are permanently preserved.
-    collections().openingDmClaims.createIndex({ completed_at: 1 }, { expireAfterSeconds: 30 * 86400, sparse: true, name: 'opening_dm_claims_completed_ttl' })
-  ]);
+      await createdClient.connect();
+      const dbInstance = createdClient.db(databaseName);
+      await dbInstance.command({ ping: 1 });
 
-  await migrateJsonData().catch((err) => console.warn('JSON migration notice:', err.message));
-  console.log(`MongoDB connected successfully to database "${databaseName}". Free-tier TTL cleanup active.`);
+      client = createdClient;
+      database = dbInstance;
+
+      const { users, instagramAccounts, automations, webhookEvents, automationEvents, rateLimits, sessions } = collections();
+
+      // Create indexes safely. TTL indexes ensure MongoDB free tier space (512MB) is never exhausted.
+      await Promise.allSettled([
+        users.createIndex({ email: 1 }, { unique: true, name: 'users_email_unique' }),
+        users.createIndex({ id: 1 }, { unique: true, name: 'users_id_unique' }),
+        instagramAccounts.createIndex({ owner_user_id: 1, instagram_user_id: 1 }, { unique: true, name: 'instagram_owner_account_unique' }),
+        instagramAccounts.createIndex({ instagram_user_id: 1, expires_at: -1 }, { name: 'instagram_user_lookup' }),
+        automations.createIndex({ id: 1 }, { unique: true, sparse: true, name: 'automations_id_unique' }),
+        automations.createIndex({ owner_user_id: 1, created_at: -1 }, { name: 'automations_owner_created' }),
+        automations.createIndex({ instagram_user_id: 1, enabled: 1 }, { name: 'automations_instagram_enabled' }),
+        automations.createIndex({ instagram_user_id: 1, media_id: 1, enabled: 1 }, { name: 'automations_instagram_media_enabled' }),
+        // Auto-delete webhook duplicate tracking records after 7 days (saves MongoDB space):
+        webhookEvents.createIndex({ event_id: 1 }, { unique: true, name: 'webhook_event_unique' }),
+        webhookEvents.createIndex({ processed_at: 1 }, { expireAfterSeconds: 7 * 86400, name: 'webhook_events_ttl' }),
+        // Auto-delete automation event logs after 30 days (saves MongoDB space):
+        automationEvents.createIndex({ owner_user_id: 1, created_at: -1 }, { name: 'automation_events_owner_created' }),
+        automationEvents.createIndex({ instagram_user_id: 1, created_at: -1 }, { name: 'automation_events_instagram_created' }),
+        automationEvents.createIndex({ created_at_date: 1 }, { expireAfterSeconds: 30 * 86400, name: 'automation_events_ttl' }),
+        // Rate limits auto-expire:
+        rateLimits.createIndex({ expires_at: 1 }, { expireAfterSeconds: 0, name: 'rate_limits_ttl' }),
+        // Sessions auto-expire:
+        sessions.createIndex({ token_hash: 1 }, { unique: true, name: 'sessions_token_unique' }),
+        sessions.createIndex({ expires_at: 1 }, { expireAfterSeconds: 0, name: 'sessions_expires_ttl' }),
+        // OTPs auto-expire:
+        collections().otps.createIndex({ expires_at: 1 }, { expireAfterSeconds: 0, name: 'otps_expires_ttl' }),
+        collections().otps.createIndex({ email: 1, type: 1 }, { name: 'otps_email_type' }),
+        // User feedback:
+        collections().feedback.createIndex({ user_id: 1, created_at: -1 }, { name: 'feedback_user_created' }),
+        // AI credit usage:
+        collections().aiCreditUsage.createIndex({ user_id: 1, created_at: -1 }, { name: 'ai_credit_usage_user' }),
+        // Durable Webhook Ingestion Queue:
+        collections().webhookJobs.createIndex({ event_key: 1 }, { unique: true, name: 'webhook_jobs_event_key_unique' }),
+        collections().webhookJobs.createIndex({ status: 1, created_at: 1 }, { name: 'webhook_jobs_status_created' }),
+        collections().webhookJobs.createIndex({ status: 1, run_at: 1, created_at: 1 }, { name: 'webhook_jobs_status_run_created' }),
+        collections().webhookJobs.createIndex({ status: 1, locked_until: 1 }, { name: 'webhook_jobs_status_locked' }),
+        collections().webhookJobs.createIndex({ instagram_account_id: 1, created_at: -1 }, { name: 'webhook_jobs_account_created' }),
+        collections().webhookJobs.createIndex({ comment_id: 1 }, { sparse: true, name: 'webhook_jobs_comment_id' }),
+        collections().webhookJobs.createIndex({ run_at: 1, created_at: 1 }, { name: 'webhook_jobs_poll_sort' }),
+        // Safe TTL retention: Only terminal/completed jobs are purged after 7 days (preserves active queued/retrying/processing jobs)
+        collections().webhookJobs.createIndex({ completed_at: 1 }, { expireAfterSeconds: 7 * 86400, sparse: true, name: 'webhook_jobs_completed_ttl' }),
+        // Conversation states index for fast lookup:
+        collections().conversationStates.createIndex({ key: 1 }, { unique: true, sparse: true, name: 'conversation_states_key_unique' }),
+        collections().conversationStates.createIndex({ automation_id: 1, sender_igsid: 1 }, { name: 'conversation_states_auto_sender' }),
+        collections().conversationStates.createIndex({ delivery_state: 1 }, { sparse: true, name: 'conversation_states_delivery_state' }),
+        // Retention for conversation states: 90 days after last interaction
+        collections().conversationStates.createIndex({ updated_at: 1 }, { expireAfterSeconds: 90 * 86400, name: 'conversation_states_ttl' }),
+        // Distributed account rate limits:
+        collections().accountRateLimits.createIndex({ account_id: 1 }, { unique: true, name: 'account_rate_limits_account' }),
+        collections().accountRateLimits.createIndex({ paused_until: 1 }, { expireAfterSeconds: 0, name: 'account_rate_limits_ttl' }),
+        // Durable Opening DM Idempotency Claims:
+        collections().openingDmClaims.createIndex({ claim_key: 1 }, { unique: true, name: 'opening_dm_claims_key_unique' }),
+        collections().openingDmClaims.createIndex({ status: 1, locked_until: 1 }, { name: 'opening_dm_claims_status_locked' }),
+        collections().openingDmClaims.createIndex({ instagram_account_id: 1, created_at: -1 }, { name: 'opening_dm_claims_account_created' }),
+        // Safe TTL retention: Only confirmed successfully sent claims carrying completed_at are purged after 30 days.
+        // Unknown, processing, pending, and retryable claims never carry completed_at and are permanently preserved.
+        collections().openingDmClaims.createIndex({ completed_at: 1 }, { expireAfterSeconds: 30 * 86400, sparse: true, name: 'opening_dm_claims_completed_ttl' })
+      ]);
+
+      await migrateJsonData().catch((err) => console.warn('JSON migration notice:', err.message));
+      console.log(`MongoDB connected successfully to database "${databaseName}". Free-tier TTL cleanup active.`);
+      return database;
+    } catch (err) {
+      if (createdClient && typeof createdClient.close === 'function') {
+        try {
+          await createdClient.close();
+        } catch (_) {}
+      }
+      client = null;
+      database = null;
+      throw err;
+    } finally {
+      initializationPromise = null;
+    }
+  })();
+
+  return initializationPromise;
 }
 
 function makeOwnerClauses(ownerUserId) {
@@ -789,8 +822,39 @@ async function deleteSession(tokenHash) {
   await sessions.deleteOne({ token_hash: tokenHash });
 }
 
+function getDatabase() {
+  return database;
+}
+
+function getClient() {
+  return client;
+}
+
+function _setDatabaseForTesting(mockDb, mockClient = null) {
+  database = mockDb;
+  client = mockClient;
+  initializationPromise = null;
+}
+
+function _setMongoClientClassForTesting(customClass) {
+  clientClass = customClass || MongoClient;
+}
+
 async function close() {
-  if (client) await client.close();
+  if (initializationPromise) {
+    try {
+      await initializationPromise;
+    } catch (_) {}
+  }
+  if (client) {
+    if (typeof client.close === 'function') {
+      await client.close();
+    }
+    client = null;
+    database = null;
+  }
+  initializationPromise = null;
+  clientClass = MongoClient;
 }
 
 module.exports = {
@@ -814,5 +878,9 @@ module.exports = {
   deleteSession,
   consumeRateLimit,
   close,
-  collections
+  collections,
+  getDatabase,
+  getClient,
+  _setDatabaseForTesting,
+  _setMongoClientClassForTesting
 };

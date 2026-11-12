@@ -39,7 +39,7 @@ app.use((request, response, next) => {
   response.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   response.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
   response.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
-  response.setHeader('X-DNS-Prefetch-Control', 'off');
+  response.setHeader('X-DNS-Prefetch-Control', 'on');
   response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' https://checkout.razorpay.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://api.openai.com https://generativelanguage.googleapis.com https://api.instagram.com https://graph.instagram.com https://graph.facebook.com https://oauth2.googleapis.com https://api.razorpay.com https://checkout.razorpay.com; frame-src 'self' https://checkout.razorpay.com https://api.razorpay.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none';");
   if (isProduction) response.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   if (request.path.startsWith('/api/')) response.setHeader('Cache-Control', 'no-store');
@@ -133,7 +133,29 @@ function requireSameOriginForStateChanges(request, response, next) {
   return next();
 }
 
-app.use(express.static(path.join(__dirname)));
+const staticAssetOptions = {
+  etag: true,
+  lastModified: true,
+  setHeaders: (response, filePath) => {
+    const ext = path.extname(filePath).toLowerCase();
+    if (ext === '.html') {
+      // HTML documents: must revalidate with origin before use to deliver updates immediately
+      response.setHeader('Cache-Control', 'no-cache');
+    } else if (ext === '.css' || ext === '.js') {
+      // Unversioned CSS and JS: cached locally by the browser, but must revalidate via ETag on each load
+      // Ensures instant 304 responses on repeat visits while delivering updates immediately after deployment.
+      response.setHeader('Cache-Control', 'no-cache');
+    } else if (['.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.woff', '.woff2', '.ttf', '.eot'].includes(ext)) {
+      // Static media, icons, and fonts: rarely change, safe to cache for 7 days
+      response.setHeader('Cache-Control', 'public, max-age=604800, stale-while-revalidate=86400');
+    } else {
+      // Fallback for other static assets
+      response.setHeader('Cache-Control', 'no-cache');
+    }
+  }
+};
+
+app.use(express.static(path.join(__dirname), staticAssetOptions));
 
 function validateCredentials(body, includeName) {
   const name = typeof body.name === 'string' ? body.name.trim() : '';
@@ -694,7 +716,7 @@ app.post('/api/automations', requireAuth, async (request, response, next) => {
     }
 
     // Entitlement & Tier Quota Check
-    const userEntitlement = await billing.entitlement(request.user.id);
+    const userEntitlement = await billing.entitlement(request.user.id, request);
     const trigger = triggerType === 'all' ? 'all' : 'keyword';
 
     if (trigger === 'all' && !userEntitlement?.limits?.allCommentsTrigger) {
@@ -814,7 +836,7 @@ app.patch('/api/automations/:id', requireAuth, async (request, response, next) =
       targetIgId = instagramUserId.trim();
     }
 
-    const userEntitlement = await billing.entitlement(request.user.id);
+    const userEntitlement = await billing.entitlement(request.user.id, request);
 
     let newTrigger = existing.trigger_type || 'keyword';
     if (triggerType !== undefined) {
@@ -1217,7 +1239,7 @@ async function deliverFinalResource({
 
     // Free branding attribution if not white-label
     try {
-      const userEntitlement = await billing.entitlement(automation.owner_user_id);
+      const userEntitlement = options?.entitlement || await billing.entitlement(automation.owner_user_id, options);
       if (!userEntitlement?.limits?.whiteLabel) {
         if (!deliveryText.includes('Powered by Comment2DM')) {
           deliveryText += '\n\n⚡ Powered by Comment2DM';
@@ -1676,7 +1698,7 @@ async function executeCommentJob(job) {
 
     // Plan-based Free Branding Attribution
     try {
-      const userEntitlement = await billing.entitlement(selectedAuto.owner_user_id);
+      const userEntitlement = await billing.entitlement(selectedAuto.owner_user_id, job);
       if (!userEntitlement?.limits?.whiteLabel) {
         if (!messageToSend.includes('Powered by Comment2DM')) {
           messageToSend += '\n\n⚡ Powered by Comment2DM';
@@ -2056,7 +2078,7 @@ async function executeMessagingJob(job) {
   if (action === 'SEND_LINK') {
     if (!flow.followGate?.enabled) {
       console.log(`[MESSAGING] Follow gate disabled. Delivering resource immediately to ${senderIgsid}...`);
-      await deliverFinalResource({ recipientIgUserId, senderIgsid, automation: targetAutomation, tokenData, flow, commentId, workerId: job?.worker_id });
+      await deliverFinalResource({ recipientIgUserId, senderIgsid, automation: targetAutomation, tokenData, flow, commentId, workerId: job?.worker_id, options: { context: job } });
       return;
     }
 
@@ -2083,7 +2105,7 @@ async function executeMessagingJob(job) {
 
     if (followResult.isFollowing === true && followResult.verified === true) {
       console.log(`[MESSAGING] PATH A: Recipient ${senderIgsid} already follows @${creatorUsername}. Delivering resource immediately.`);
-      await deliverFinalResource({ recipientIgUserId, senderIgsid, automation: targetAutomation, tokenData, flow, commentId, workerId: job?.worker_id });
+      await deliverFinalResource({ recipientIgUserId, senderIgsid, automation: targetAutomation, tokenData, flow, commentId, workerId: job?.worker_id, options: { context: job } });
     } else if (followResult.supported === false || followResult.error || !followResult.verified) {
       console.warn(`[MESSAGING] Meta follow check unavailable or error: ${followResult.error || followResult.note}`);
       const retryNotice = "We couldn't verify your follow status right now due to a network or API delay. Please tap below to retry!";
@@ -2188,7 +2210,9 @@ async function executeMessagingJob(job) {
         tokenData,
         flow,
         commentId,
-        prefixMessage: successPrefix
+        prefixMessage: successPrefix,
+        workerId: job?.worker_id,
+        options: { context: job }
       });
     } else if (recheckResult.supported === false || recheckResult.error || !recheckResult.verified) {
       console.warn(`[MESSAGING] Meta follower recheck error: ${recheckResult.error || recheckResult.note}`);
@@ -2305,6 +2329,11 @@ app.post('/api/instagram/webhook', async (request, response) => {
   // 3. Durable Event Ingestion to MongoDB webhook_jobs collection
   try {
     const ingestResult = await webhookJobQueue.ingestWebhookPayload(payload, db);
+
+    // Notify persistent worker immediately if any fresh job was persisted
+    if (ingestResult && ingestResult.count > 0) {
+      webhookWorker.triggerImmediatePoll();
+    }
 
     // 4. Return HTTP 200 ONLY after durable persistence succeeds
     // Ingestion is strictly decoupled from execution: the persistent webhookWorker
@@ -3187,7 +3216,8 @@ app.post('/api/billing/validate-coupon', async (request, response) => {
 // 404 & Error handlers
 app.use((request, response) => {
   if (request.path.startsWith('/api/')) return response.status(404).json({ error: 'Endpoint not found.' });
-  return response.status(404).sendFile(path.join(__dirname, '404.html'));
+  response.setHeader('Cache-Control', 'no-cache');
+  return response.status(404).sendFile('404.html', { root: __dirname });
 });
 
 app.use((error, request, response, next) => {
