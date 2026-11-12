@@ -14,6 +14,7 @@ const { verifyWebhookSignature, verifyGetChallenge } = require('./src/services/w
 const webhookJobQueue = require('./src/jobs/webhookJobQueue');
 const webhookWorker = require('./src/jobs/webhookWorker');
 const metaRateLimiter = require('./src/services/metaRateLimiter');
+const emailService = require('./src/services/emailService');
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
@@ -74,6 +75,23 @@ async function loginRateLimit(request, response, next) {
     return next();
   } catch (error) {
     console.warn('Login rate limiter bypassed due to temporary DB latency:', error.message);
+    return next();
+  }
+}
+
+async function passwordChangeRateLimit(request, response, next) {
+  try {
+    const userId = request.user?.id || 'anon';
+    const ip = request.ip || request.socket.remoteAddress || 'unknown';
+    // Max 5 password update attempts per 15 minutes per user/IP
+    const allowed = await db.consumeRateLimit(`pwchange:${userId}:${ip}`, 15 * 60 * 1000, 5);
+    if (!allowed) {
+      response.setHeader('Retry-After', '900');
+      return response.status(429).json({ error: 'Too many password update attempts. Please try again in 15 minutes.' });
+    }
+    return next();
+  } catch (error) {
+    console.warn('Password change rate limiter bypassed due to temporary DB latency:', error.message);
     return next();
   }
 }
@@ -462,16 +480,54 @@ app.get('/api/me', requireAuth, (request, response) => {
 app.get('/api/settings', requireAuth, async (request, response, next) => {
   try {
     const user = await db.getUserById(request.user.id);
+    if (!user) {
+      return response.status(404).json({ error: 'User not found.' });
+    }
+    const hasPassword = Boolean(user.password_hash);
     return response.json({
       user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
+        id: user.id || (user._id ? user._id.toString() : ''),
+        name: user.name || '',
+        email: user.email || '',
         phone: user.phone || '',
+        bio: user.bio || '',
         avatarUrl: user.avatar_url || '',
-        createdAt: user.created_at || user.createdAt
+        createdAt: user.created_at || user.createdAt || '',
+        hasPassword: hasPassword,
+        isOAuth: !hasPassword
       },
-      preferences: { notifications: true, emailReports: true }
+      preferences: user.notification_preferences || {
+        dm_sent: false,
+        failed: false,
+        weekly: false,
+        billing: false
+      }
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// Legacy / alias endpoint to support callers expecting /api/auth/me
+app.get('/api/auth/me', requireAuth, async (request, response, next) => {
+  try {
+    const user = await db.getUserById(request.user.id);
+    if (!user) {
+      return response.status(404).json({ error: 'User not found.' });
+    }
+    const hasPassword = Boolean(user.password_hash);
+    return response.json({
+      user: {
+        id: user.id || (user._id ? user._id.toString() : ''),
+        name: user.name || '',
+        email: user.email || '',
+        phone: user.phone || '',
+        bio: user.bio || '',
+        avatarUrl: user.avatar_url || '',
+        createdAt: user.created_at || user.createdAt || '',
+        hasPassword: hasPassword,
+        isOAuth: !hasPassword
+      }
     });
   } catch (error) {
     return next(error);
@@ -480,31 +536,73 @@ app.get('/api/settings', requireAuth, async (request, response, next) => {
 
 app.patch('/api/settings/profile', requireAuth, async (request, response, next) => {
   try {
-    const { name, email, phone, avatarUrl } = request.body || {};
-    if (name && (name.length < 2 || name.length > 100)) {
-      return response.status(400).json({ error: 'Name must be between 2 and 100 characters.' });
-    }
-    if (email) {
-      const cleanEmail = email.trim().toLowerCase();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-        return response.status(400).json({ error: 'Enter a valid email address.' });
+    const { name, phone, bio, avatarUrl } = request.body || {};
+
+    if (name !== undefined) {
+      if (typeof name !== 'string') {
+        return response.status(400).json({ error: 'Name must be a text string.' });
       }
-      const existing = await db.getUserByEmail(cleanEmail);
-      if (existing && existing.id !== request.user.id) {
-        return response.status(409).json({ error: 'An account with that email already exists.' });
+      const trimmedName = name.trim();
+      if (trimmedName.length < 2 || trimmedName.length > 100) {
+        return response.status(400).json({ error: 'Name must be between 2 and 100 characters.' });
       }
     }
 
-    await db.updateUserProfile(request.user.id, { name, email, phone, avatarUrl });
+    if (phone !== undefined && phone !== null && phone !== '') {
+      if (typeof phone !== 'string') {
+        return response.status(400).json({ error: 'Phone must be a text string.' });
+      }
+      const trimmedPhone = phone.trim();
+      if (trimmedPhone.length > 20) {
+        return response.status(400).json({ error: 'Phone number cannot exceed 20 characters.' });
+      }
+    }
+
+    if (bio !== undefined && bio !== null && bio !== '') {
+      if (typeof bio !== 'string') {
+        return response.status(400).json({ error: 'Bio must be a text string.' });
+      }
+      const trimmedBio = bio.trim();
+      if (trimmedBio.length > 160) {
+        return response.status(400).json({ error: 'Bio cannot exceed 160 characters.' });
+      }
+    }
+
+    if (avatarUrl !== undefined && avatarUrl !== null && avatarUrl !== '') {
+      if (typeof avatarUrl !== 'string') {
+        return response.status(400).json({ error: 'Invalid avatar format.' });
+      }
+      const trimmedAvatar = avatarUrl.trim();
+      if (trimmedAvatar.length > 60000) {
+        return response.status(400).json({ error: 'Avatar image exceeds maximum allowed size of 40 KB.' });
+      }
+      const avatarMatch = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(trimmedAvatar);
+      if (!avatarMatch) {
+        return response.status(400).json({ error: 'Unsupported avatar format. Only JPEG, PNG, and WebP images are allowed.' });
+      }
+    }
+
+    // Do not allow arbitrary unverified email modification via profile update
+    await db.updateUserProfile(request.user.id, {
+      name,
+      phone,
+      bio,
+      avatarUrl
+    });
+
     const updated = await db.getUserById(request.user.id);
+    const hasPassword = Boolean(updated.password_hash);
     return response.json({
       user: {
-        id: updated.id,
-        name: updated.name,
-        email: updated.email,
+        id: updated.id || (updated._id ? updated._id.toString() : ''),
+        name: updated.name || '',
+        email: updated.email || '',
         phone: updated.phone || '',
+        bio: updated.bio || '',
         avatarUrl: updated.avatar_url || '',
-        createdAt: updated.created_at || updated.createdAt
+        createdAt: updated.created_at || updated.createdAt || '',
+        hasPassword: hasPassword,
+        isOAuth: !hasPassword
       }
     });
   } catch (error) {
@@ -512,14 +610,17 @@ app.patch('/api/settings/profile', requireAuth, async (request, response, next) 
   }
 });
 
-app.post('/api/settings/password', requireAuth, async (request, response, next) => {
+app.post('/api/settings/password', requireAuth, passwordChangeRateLimit, async (request, response, next) => {
   try {
     const { currentPassword, newPassword } = request.body || {};
     if (!currentPassword || !newPassword) {
       return response.status(400).json({ error: 'Current password and new password are required.' });
     }
-    if (newPassword.length < 6) {
-      return response.status(400).json({ error: 'New password must be at least 6 characters.' });
+    if (typeof newPassword !== 'string' || newPassword.length < 8) {
+      return response.status(400).json({ error: 'New password must be at least 8 characters.' });
+    }
+    if (newPassword.length > 128) {
+      return response.status(400).json({ error: 'New password cannot exceed 128 characters.' });
     }
 
     const userRecord = await db.getUserById(request.user.id);
@@ -534,7 +635,35 @@ app.post('/api/settings/password', requireAuth, async (request, response, next) 
 
     const newHash = await bcrypt.hash(newPassword, 12);
     await db.updateUserPassword(request.user.id, newHash);
+
+    // Invalidate other sessions to secure account across devices, preserving current session
+    if (authService.deleteOtherUserSessions) {
+      await authService.deleteOtherUserSessions(request.user.id, request.sessionToken);
+    }
+
+    // Trigger security alert email asynchronously if configured
+    emailService.sendPasswordChangedAlert(userRecord.email, userRecord.name).catch((emailErr) => {
+      console.warn('[Security] Could not dispatch password changed alert:', emailErr.message);
+    });
+
     return response.json({ success: true, message: 'Password updated successfully.' });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.patch('/api/settings/notifications', requireAuth, async (request, response, next) => {
+  try {
+    const body = request.body || {};
+    const prefs = body.preferences || body;
+    const cleanPrefs = {
+      dm_sent: Boolean(prefs.dm_sent),
+      failed: Boolean(prefs.failed),
+      weekly: Boolean(prefs.weekly),
+      billing: Boolean(prefs.billing)
+    };
+    await db.updateUserNotificationPreferences(request.user.id, cleanPrefs);
+    return response.json({ success: true, preferences: cleanPrefs });
   } catch (error) {
     return next(error);
   }
@@ -542,9 +671,23 @@ app.post('/api/settings/password', requireAuth, async (request, response, next) 
 
 app.delete('/api/account/delete', requireAuth, async (request, response, next) => {
   try {
+    const { confirmation } = request.body || {};
+    if (confirmation !== 'DELETE') {
+      return response.status(400).json({ error: 'Confirmation required. Please type DELETE to confirm.' });
+    }
+
+    // Subscription protection: Prevent unsafe deletion if active or pending subscription exists
+    const activeSub = await billing.getActiveSubscription(request.user.id);
+    if (activeSub) {
+      return response.status(409).json({
+        error: 'Active subscription detected. Please cancel your subscription in Billing before deleting your account.'
+      });
+    }
+
     await db.deleteUserAccount(request.user.id);
     response.clearCookie('comment2dm_session', { path: '/' });
     response.clearCookie('nudge_session', { path: '/' });
+    response.clearCookie('nudge_token', { path: '/' });
     return response.json({ success: true, message: 'Account deleted successfully.' });
   } catch (error) {
     return next(error);

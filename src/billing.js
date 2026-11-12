@@ -557,6 +557,18 @@ async function cancel(req, res) {
   return res.json({ cancelled: true });
 }
 
+async function getActiveSubscription(uid) {
+  try {
+    const d = await store();
+    return await d.collection('subscriptions').findOne({
+      user_id: String(uid),
+      status: { $in: ['active', 'authenticated', 'pending'] }
+    });
+  } catch (err) {
+    return null;
+  }
+}
+
 // In-memory fallback for local testing when MongoDB is offline
 const localCreditUsageMap = new Map();
 
@@ -671,10 +683,10 @@ async function status(req, res) {
     aiCreditsRemaining: aiStatus.balance,
     aiCreditsUsed: aiStatus.used,
     limits: {
-      instagramAccounts: e.limits.instagramAccounts,
+      instagramAccounts: Number.isFinite(e.limits.instagramAccounts) ? e.limits.instagramAccounts : null,
       automations: Number.isFinite(e.limits.automations) ? e.limits.automations : null,
-      dmMonthly: e.limits.dmMonthly,
-      aiCreditsMonthly: e.limits.aiCreditsMonthly,
+      dmMonthly: Number.isFinite(e.limits.dmMonthly) ? e.limits.dmMonthly : null,
+      aiCreditsMonthly: Number.isFinite(e.limits.aiCreditsMonthly) ? e.limits.aiCreditsMonthly : null,
       allCommentsTrigger: e.limits.allCommentsTrigger
     },
     usage: {
@@ -840,5 +852,6 @@ module.exports = {
   PLANS,
   LIMITS,
   isAdminEmail,
-  getAdminEmails
+  getAdminEmails,
+  getActiveSubscription
 };

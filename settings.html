@@ -234,7 +234,11 @@
             <!-- Security -->
             <div class="settings-panel" id="panel-security">
               <div class="panel-title">Security Settings</div>
-              <div class="panel-sub">Change your password and manage your sessions.</div>
+              <div class="panel-sub">Change your password and secure your account.</div>
+              <div id="oauthNotice" style="display:none;background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.25);border-radius:12px;padding:16px;margin-bottom:20px;font-size:0.86rem;color:#cbd5e1;">
+                <div style="font-weight:600;color:#f1f5f9;margin-bottom:4px;">Google Account</div>
+                You signed in with Google. Password management is not applicable for OAuth accounts.
+              </div>
               <form id="passwordForm">
                 <div class="form-row">
                   <label for="currentPw">Current Password</label>
@@ -246,18 +250,18 @@
                 <div class="form-row">
                   <label for="newPw">New Password</label>
                   <div class="pw-wrap">
-                    <input class="form-input" type="password" id="newPw" placeholder="Min. 8 characters" minlength="8" required>
+                    <input class="form-input" type="password" id="newPw" placeholder="Min. 8 characters" minlength="8" maxlength="128" required>
                     <button type="button" class="pw-toggle" data-target="newPw">👁</button>
                   </div>
                 </div>
                 <div class="form-row">
                   <label for="confirmPw">Confirm New Password</label>
                   <div class="pw-wrap">
-                    <input class="form-input" type="password" id="confirmPw" placeholder="Repeat new password" required>
+                    <input class="form-input" type="password" id="confirmPw" placeholder="Repeat new password" maxlength="128" required>
                     <button type="button" class="pw-toggle" data-target="confirmPw">👁</button>
                   </div>
                 </div>
-                <button type="submit" class="btn btn-accent">Update Password</button>
+                <button type="submit" class="btn btn-accent" id="updatePasswordBtn">Update Password</button>
               </form>
               <div style="margin-top:28px;padding-top:20px;border-top:1px solid rgba(255,255,255,0.06);">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
@@ -275,20 +279,20 @@
               <div class="panel-title">Notification Preferences</div>
               <div class="panel-sub">Email notifications are sent to your registered email address.</div>
               <div class="toggle-row">
-                <div><div class="toggle-label">DM Sent Alerts</div><div class="toggle-sub">Get notified when DMs are sent successfully</div></div>
-                <label class="toggle-switch"><input type="checkbox" id="notif_dm_sent" checked><span class="toggle-slider"></span></label>
+                <div><div class="toggle-label">DM Sent Alerts <span class="coming-soon-badge" style="margin-left:8px;vertical-align:middle;">Coming Soon</span></div><div class="toggle-sub">Get notified when DMs are sent successfully</div></div>
+                <label class="toggle-switch"><input type="checkbox" id="notif_dm_sent" disabled><span class="toggle-slider" style="opacity:0.6;cursor:not-allowed;"></span></label>
               </div>
               <div class="toggle-row">
-                <div><div class="toggle-label">Failed Automation Alerts</div><div class="toggle-sub">Alerts when an automation fails to send a DM</div></div>
-                <label class="toggle-switch"><input type="checkbox" id="notif_failed" checked><span class="toggle-slider"></span></label>
+                <div><div class="toggle-label">Failed Automation Alerts <span class="coming-soon-badge" style="margin-left:8px;vertical-align:middle;">Coming Soon</span></div><div class="toggle-sub">Alerts when an automation fails to send a DM</div></div>
+                <label class="toggle-switch"><input type="checkbox" id="notif_failed" disabled><span class="toggle-slider" style="opacity:0.6;cursor:not-allowed;"></span></label>
               </div>
               <div class="toggle-row">
-                <div><div class="toggle-label">Weekly Performance Digest</div><div class="toggle-sub">Weekly summary of your automation performance</div></div>
-                <label class="toggle-switch"><input type="checkbox" id="notif_weekly"><span class="toggle-slider"></span></label>
+                <div><div class="toggle-label">Weekly Performance Digest <span class="coming-soon-badge" style="margin-left:8px;vertical-align:middle;">Coming Soon</span></div><div class="toggle-sub">Weekly summary of your automation performance</div></div>
+                <label class="toggle-switch"><input type="checkbox" id="notif_weekly" disabled><span class="toggle-slider" style="opacity:0.6;cursor:not-allowed;"></span></label>
               </div>
               <div class="toggle-row">
-                <div><div class="toggle-label">Billing Reminders</div><div class="toggle-sub">Payment confirmations and renewal reminders</div></div>
-                <label class="toggle-switch"><input type="checkbox" id="notif_billing" checked><span class="toggle-slider"></span></label>
+                <div><div class="toggle-label">Billing Reminders <span class="coming-soon-badge" style="margin-left:8px;vertical-align:middle;">Coming Soon</span></div><div class="toggle-sub">Payment confirmations and renewal reminders</div></div>
+                <label class="toggle-switch"><input type="checkbox" id="notif_billing" disabled><span class="toggle-slider" style="opacity:0.6;cursor:not-allowed;"></span></label>
               </div>
               <button class="btn btn-accent" id="saveNotifBtn" style="margin-top:16px;">Save Preferences</button>
             </div>

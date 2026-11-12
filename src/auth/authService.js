@@ -320,6 +320,16 @@ async function deleteAllUserSessions(userId) {
   await sessions.deleteMany({ user_id: String(userId) });
 }
 
+async function deleteOtherUserSessions(userId, currentSessionToken) {
+  const { sessions } = db.collections();
+  const filter = { user_id: String(userId) };
+  if (currentSessionToken) {
+    const currentHash = hashSessionToken(currentSessionToken);
+    filter.token_hash = { $ne: currentHash };
+  }
+  return sessions.deleteMany(filter);
+}
+
 function createToken(user) {
   return jwt.sign(
     { sub: user.id },
@@ -385,6 +395,7 @@ module.exports = {
   getSessionUser,
   deleteSession,
   deleteAllUserSessions,
+  deleteOtherUserSessions,
   createToken,
   getUserByEmail,
   getUserById,

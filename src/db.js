@@ -705,14 +705,23 @@ async function updateUserPassword(userId, passwordHash) {
   return users.updateOne({ id: userId }, { $set: { password_hash: passwordHash, updated_at: new Date().toISOString() } });
 }
 
-async function updateUserProfile(userId, { name, email, phone, avatarUrl }) {
+async function updateUserProfile(userId, { name, email, phone, bio, avatarUrl }) {
   const { users } = collections();
   const update = { updated_at: new Date().toISOString() };
-  if (name) update.name = String(name).trim();
-  if (email) update.email = String(email).trim().toLowerCase();
+  if (name !== undefined) update.name = String(name).trim();
+  if (email !== undefined) update.email = String(email).trim().toLowerCase();
   if (phone !== undefined) update.phone = String(phone).trim();
+  if (bio !== undefined) update.bio = String(bio).trim();
   if (avatarUrl !== undefined) update.avatar_url = String(avatarUrl).trim();
-  return users.updateOne({ id: userId }, { $set: update });
+  return users.updateOne({ id: String(userId) }, { $set: update });
+}
+
+async function updateUserNotificationPreferences(userId, prefs) {
+  const { users } = collections();
+  return users.updateOne(
+    { id: String(userId) },
+    { $set: { notification_preferences: prefs, updated_at: new Date().toISOString() } }
+  );
 }
 
 async function markUserVerified(email) {
@@ -732,14 +741,47 @@ async function updateUserPasswordByEmail(email, passwordHash) {
 }
 
 async function deleteUserAccount(userId) {
-  const { users, instagramAccounts, automations, automationEvents, sessions } = collections();
-  await Promise.allSettled([
-    users.deleteOne({ id: userId }),
-    instagramAccounts.deleteMany({ owner_user_id: userId }),
-    automations.deleteMany({ owner_user_id: userId }),
-    automationEvents.deleteMany({ owner_user_id: userId }),
-    sessions.deleteMany({ user_id: userId })
-  ]);
+  const {
+    users,
+    instagramAccounts,
+    automations,
+    automationEvents,
+    sessions,
+    conversationStates,
+    webhookJobs,
+    openingDmClaims,
+    aiCreditUsage,
+    feedback
+  } = collections();
+
+  const uid = String(userId);
+  const ownerClauses = makeOwnerClauses(uid);
+
+  // Find all Instagram accounts belonging to this user to clean dependent queues
+  let igAccountIds = [];
+  try {
+    const userAccounts = await instagramAccounts.find({ $or: ownerClauses }, { projection: { instagram_user_id: 1, id: 1 } }).toArray();
+    igAccountIds = userAccounts.map(a => a.instagram_user_id || a.id).filter(Boolean);
+  } catch (e) {}
+
+  const deleteTasks = [
+    users.deleteOne({ id: uid }),
+    instagramAccounts.deleteMany({ $or: ownerClauses }),
+    automations.deleteMany({ $or: [{ owner_user_id: uid }, { owner_id: uid }] }),
+    automationEvents.deleteMany({ $or: [{ owner_user_id: uid }, { owner_id: uid }] }),
+    sessions.deleteMany({ user_id: uid })
+  ];
+
+  if (conversationStates) deleteTasks.push(conversationStates.deleteMany({ owner_user_id: uid }));
+  if (aiCreditUsage) deleteTasks.push(aiCreditUsage.deleteMany({ user_id: uid }));
+  if (feedback) deleteTasks.push(feedback.deleteMany({ user_id: uid }));
+
+  if (igAccountIds.length > 0) {
+    if (webhookJobs) deleteTasks.push(webhookJobs.deleteMany({ instagram_account_id: { $in: igAccountIds } }));
+    if (openingDmClaims) deleteTasks.push(openingDmClaims.deleteMany({ instagram_account_id: { $in: igAccountIds } }));
+  }
+
+  await Promise.allSettled(deleteTasks);
   return true;
 }
 
@@ -869,6 +911,7 @@ module.exports = {
   updateUserPasswordByEmail,
   markUserVerified,
   updateUserProfile,
+  updateUserNotificationPreferences,
   deleteUserAccount,
   getInstagramAccounts,
   getInstagramAccount,
