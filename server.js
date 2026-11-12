@@ -39,7 +39,7 @@ app.use((request, response, next) => {
   response.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   response.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
   response.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
-  response.setHeader('X-DNS-Prefetch-Control', 'off');
+  response.setHeader('X-DNS-Prefetch-Control', 'on');
   response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' https://checkout.razorpay.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://api.openai.com https://generativelanguage.googleapis.com https://api.instagram.com https://graph.instagram.com https://graph.facebook.com https://oauth2.googleapis.com https://api.razorpay.com https://checkout.razorpay.com; frame-src 'self' https://checkout.razorpay.com https://api.razorpay.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none';");
   if (isProduction) response.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   if (request.path.startsWith('/api/')) response.setHeader('Cache-Control', 'no-store');
@@ -133,7 +133,29 @@ function requireSameOriginForStateChanges(request, response, next) {
   return next();
 }
 
-app.use(express.static(path.join(__dirname)));
+const staticAssetOptions = {
+  etag: true,
+  lastModified: true,
+  setHeaders: (response, filePath) => {
+    const ext = path.extname(filePath).toLowerCase();
+    if (ext === '.html') {
+      // HTML documents: must revalidate with origin before use to deliver updates immediately
+      response.setHeader('Cache-Control', 'no-cache');
+    } else if (ext === '.css' || ext === '.js') {
+      // Unversioned CSS and JS: cached locally by the browser, but must revalidate via ETag on each load
+      // Ensures instant 304 responses on repeat visits while delivering updates immediately after deployment.
+      response.setHeader('Cache-Control', 'no-cache');
+    } else if (['.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.woff', '.woff2', '.ttf', '.eot'].includes(ext)) {
+      // Static media, icons, and fonts: rarely change, safe to cache for 7 days
+      response.setHeader('Cache-Control', 'public, max-age=604800, stale-while-revalidate=86400');
+    } else {
+      // Fallback for other static assets
+      response.setHeader('Cache-Control', 'no-cache');
+    }
+  }
+};
+
+app.use(express.static(path.join(__dirname), staticAssetOptions));
 
 function validateCredentials(body, includeName) {
   const name = typeof body.name === 'string' ? body.name.trim() : '';
@@ -3194,7 +3216,8 @@ app.post('/api/billing/validate-coupon', async (request, response) => {
 // 404 & Error handlers
 app.use((request, response) => {
   if (request.path.startsWith('/api/')) return response.status(404).json({ error: 'Endpoint not found.' });
-  return response.status(404).sendFile(path.join(__dirname, '404.html'));
+  response.setHeader('Cache-Control', 'no-cache');
+  return response.status(404).sendFile('404.html', { root: __dirname });
 });
 
 app.use((error, request, response, next) => {

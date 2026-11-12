@@ -426,6 +426,12 @@
         renderAccountDropdown(accounts, currentSelectedAccount.id);
 
         if (modal) modal.classList.remove('show');
+
+        // If the initial concurrent overview was dispatched with no account ID or an account that was no longer valid,
+        // refresh overview for the resolved account
+        if (document.body.getAttribute('data-page') === 'dashboard' && (!savedId || !matched)) {
+          loadDashboardOverview(currentSelectedAccount.id);
+        }
       } else {
         currentSelectedAccount = null;
         localStorage.removeItem('comment2dm_selected_account_id');
@@ -469,10 +475,13 @@
     });
   }
 
+  let latestOverviewRequestId = 0;
+
   // 9. Load Home Activity & Account-Specific Real-Time Metrics
   async function loadDashboardOverview(accountId) {
     if (document.body.getAttribute('data-page') !== 'dashboard') return;
 
+    const currentRequestId = ++latestOverviewRequestId;
     const targetId = accountId || (currentSelectedAccount ? currentSelectedAccount.id : '');
     const url = targetId ? `/api/analytics/overview?instagram_user_id=${encodeURIComponent(targetId)}` : '/api/analytics/overview';
 
@@ -481,15 +490,19 @@
         headers: window.getAuthHeaders(),
         credentials: 'same-origin'
       });
+      if (currentRequestId !== latestOverviewRequestId) return;
+
       if (!response.ok && targetId) {
         // Safe fallback to user-level overview if account query was rejected
         response = await fetch('/api/analytics/overview', {
           headers: window.getAuthHeaders(),
           credentials: 'same-origin'
         });
+        if (currentRequestId !== latestOverviewRequestId) return;
       }
       if (!response.ok) return;
       const data = await response.json().catch(() => ({}));
+      if (currentRequestId !== latestOverviewRequestId) return;
 
       const dmsSent = document.getElementById('cardDmsSent');
       const activeAutos = document.getElementById('cardActiveAutos');
@@ -532,6 +545,8 @@
       const container = document.getElementById('activityFeedContainer');
       const emptyState = document.getElementById('activityEmptyState');
       const recent = data.recent || [];
+
+      if (currentRequestId !== latestOverviewRequestId) return;
 
       if (container) {
         if (recent.length > 0) {
@@ -738,16 +753,20 @@
 
   // Initialize all data concurrently
   async function initDashboard() {
-    await Promise.allSettled([
+    const isDashboardPage = document.body.getAttribute('data-page') === 'dashboard';
+    const initialAccountId = isDashboardPage ? localStorage.getItem('comment2dm_selected_account_id') : null;
+
+    const tasks = [
       loadUser(),
       loadBillingQuota(),
       loadInstagramAccounts()
-    ]);
-    // After loading accounts, load overview for the selected account
-    if (document.body.getAttribute('data-page') === 'dashboard') {
-      const selectedId = localStorage.getItem('comment2dm_selected_account_id');
-      loadDashboardOverview(selectedId);
+    ];
+
+    if (isDashboardPage) {
+      tasks.push(loadDashboardOverview(initialAccountId));
     }
+
+    await Promise.allSettled(tasks);
   }
 
   initDashboard();
