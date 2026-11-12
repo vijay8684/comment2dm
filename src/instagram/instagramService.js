@@ -810,20 +810,24 @@ async function disconnect(userId, instagramUserId) {
     const { instagramAccounts, automations } = db.collections();
     const ids = [String(instagramUserId)];
     if (!isNaN(Number(instagramUserId))) ids.push(Number(instagramUserId));
-    await Promise.allSettled([
-      instagramAccounts.deleteMany({
+    const deletePromises = [];
+    if (instagramAccounts?.deleteMany) {
+      deletePromises.push(instagramAccounts.deleteMany({
         $or: [
           { instagram_user_id: { $in: ids }, owner_user_id: String(userId) },
           { instagram_user_id: { $in: ids } }
         ]
-      }),
-      automations.deleteMany({
+      }));
+    }
+    if (automations?.deleteMany) {
+      deletePromises.push(automations.deleteMany({
         $or: [
           { instagram_user_id: { $in: ids }, owner_user_id: String(userId) },
           { instagram_user_id: { $in: ids } }
         ]
-      })
-    ]);
+      }));
+    }
+    await Promise.allSettled(deletePromises);
   } else {
     await db.run('DELETE FROM instagram_accounts WHERE owner_user_id = ? AND instagram_user_id = ?', [userId, instagramUserId]);
     await db.run('DELETE FROM automations WHERE owner_user_id = ? AND instagram_user_id = ?', [userId, instagramUserId]);
@@ -870,9 +874,21 @@ async function getDecryptedTokenForAccount(ownerUserId, instagramUserId) {
   return decryptToken(account.ciphertext, account.iv, account.tag);
 }
 
-// In-memory decrypted token cache to avoid redundant database reads and AES decryption during rapid automation flows
+// In-memory decrypted token cache to avoid redundant database reads and AES decryption during rapid automation flows.
+// Cache Architecture & Multi-Instance Consistency:
+// 1. Process-Local Cache: Caches decrypted token objects for up to 30 seconds within this Node.js process.
+// 2. Local Invalidation: Immediately invalidated upon connect/reconnect (saveAccount) or disconnect (disconnect).
+// 3. Cross-Instance Safety: Enforced authoritatively at the database layer by MongoDB's atomic acquireDispatchLease()
+//    inside safeDispatchOutbound(). Even if a separate Node.js instance has a token in its in-memory cache,
+//    attempting to dispatch any message requires acquiring a lease on instagramAccounts in MongoDB. If the account
+//    was disconnected or deleted by another instance, acquireDispatchLease() atomically fails (ACCOUNT_DELETED),
+//    halting outbound dispatch immediately. Thus, disconnected accounts cannot send messages across any instance.
 const tokenCache = new Map();
 const TOKEN_CACHE_TTL_MS = 30000;
+
+function clearTokenCache() {
+  tokenCache.clear();
+}
 
 async function getDecryptedTokenByInstagramUserId(instagramUserId, ownerUserId) {
   const cacheKey = `${instagramUserId}:${ownerUserId || ''}`;
@@ -904,11 +920,13 @@ async function getDecryptedTokenByInstagramUserId(instagramUserId, ownerUserId) 
     }
   }
   if (!account) {
+    tokenCache.delete(cacheKey);
     const error = new Error(`Connected Instagram account ${instagramUserId} not found.`);
     error.statusCode = 404;
     throw error;
   }
   if (account.expires_at <= Date.now()) {
+    tokenCache.delete(cacheKey);
     const error = new Error('Instagram access token has expired.');
     error.statusCode = 401;
     throw error;
@@ -1287,5 +1305,6 @@ module.exports = {
   calculateReelEngagement,
   getReelInsights,
   analyzeAccountReels,
-  analyzeManualReel
+  analyzeManualReel,
+  clearTokenCache
 };

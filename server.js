@@ -1257,75 +1257,95 @@ const processingCommentIds = new Set();
 // In-memory set to deduplicate concurrent webhook postbacks / deliveries
 const processingDeliveryKeys = new Set();
 
-// Outbound Dispatch Lease Coordination helper with Unique Lease ID Tracking
+// Outbound Dispatch Lease Coordination helper with Unique Lease ID Tracking (Strictly Fail-Closed)
 async function safeDispatchOutbound(recipientIgUserId, workerId, dispatchFn, leaseOptions = {}) {
-  if (db.acquireDispatchLease) {
+  if (!db || typeof db.acquireDispatchLease !== 'function') {
+    console.error(`[DISPATCH LEASE REJECTED] Dispatch lease API unavailable for Instagram account. Aborting dispatch.`);
+    return { success: false, skipped: true, reason: 'LEASE_API_UNAVAILABLE' };
+  }
+
+  let lease;
+  let leaseDuration = 0;
+  try {
     const leaseStart = Date.now();
-    const lease = await db.acquireDispatchLease(recipientIgUserId, workerId);
-    const leaseDuration = Date.now() - leaseStart;
-    if (!lease || !lease.leaseId) {
-      console.warn(`[DISPATCH LEASE REJECTED] Instagram account ${recipientIgUserId} is deleted or undergoing deletion. Aborting outbound dispatch.`);
-      return { success: false, skipped: true, reason: 'ACCOUNT_DELETED' };
-    }
+    lease = await db.acquireDispatchLease(recipientIgUserId, workerId);
+    leaseDuration = Date.now() - leaseStart;
+  } catch (leaseAcquireErr) {
+    console.error(`[DISPATCH LEASE ERROR] Exception during lease acquisition:`, leaseAcquireErr.message);
+    return { success: false, skipped: true, reason: 'LEASE_ACQUISITION_FAILED', error: leaseAcquireErr.message };
+  }
 
-    if (leaseOptions.stage) {
-      automationTimeline.recordTimelineStage({
-        stage: leaseOptions.stage,
-        duration_ms: leaseDuration,
-        job_id: leaseOptions.job_id || null,
-        automation_id: leaseOptions.automation_id || null,
-        instagram_account_id: recipientIgUserId,
-        event_type: leaseOptions.event_type || null,
-        success: true
-      });
-    }
+  if (!lease || !lease.leaseId) {
+    console.warn(`[DISPATCH LEASE REJECTED] Instagram account is deleted, undergoing deletion, or database is unavailable. Aborting outbound dispatch.`);
+    return { success: false, skipped: true, reason: 'ACCOUNT_DELETED' };
+  }
 
-    let leaseRenewTimer = null;
-    if (db.renewDispatchLease) {
-      leaseRenewTimer = setInterval(async () => {
-        try {
-          await db.renewDispatchLease(recipientIgUserId, lease.leaseId, 15000);
-        } catch (_) {}
-      }, 5000);
-      if (leaseRenewTimer.unref) leaseRenewTimer.unref();
-    }
+  if (leaseOptions.stage && typeof automationTimeline?.recordTimelineStage === 'function') {
+    automationTimeline.recordTimelineStage({
+      stage: leaseOptions.stage,
+      duration_ms: leaseDuration,
+      job_id: leaseOptions.job_id || null,
+      automation_id: leaseOptions.automation_id || null,
+      instagram_account_id: recipientIgUserId,
+      event_type: leaseOptions.event_type || null,
+      success: true
+    });
+  }
 
-    try {
-      console.log(`[STAGE: DISPATCH_LEASE_ACQUIRED]`, JSON.stringify({
-        instagram_user_id: recipientIgUserId,
-        worker_id: String(workerId || 'unknown'),
-        lease_id: lease.leaseId,
-        expires_at: lease.expiresAt
+  let leaseRenewTimer = null;
+  if (typeof db.renewDispatchLease === 'function') {
+    leaseRenewTimer = setInterval(async () => {
+      try {
+        await db.renewDispatchLease(recipientIgUserId, lease.leaseId, 15000);
+      } catch (_) {}
+    }, 5000);
+    if (leaseRenewTimer.unref) leaseRenewTimer.unref();
+  }
+
+  try {
+    console.log(`[STAGE: DISPATCH_LEASE_ACQUIRED]`, JSON.stringify({
+      worker_id: String(workerId || 'unknown'),
+      lease_id: lease.leaseId,
+      expires_at: lease.expiresAt
+    }));
+
+    const res = await dispatchFn(lease);
+
+    // Strictly fail-closed lease validation
+    if (typeof db.isDispatchLeaseValid === 'function') {
+      let stillValid = false;
+      try {
+        stillValid = await db.isDispatchLeaseValid(recipientIgUserId, lease.leaseId);
+      } catch (valErr) {
+        console.error(`[DISPATCH LEASE ERROR] Exception during lease validation:`, valErr.message);
+        stillValid = false;
+      }
+      if (!stillValid) {
+        console.warn(`[DISPATCH LEASE LOST] Worker ${workerId} lost dispatch lease ${lease.leaseId} during network processing. Halting.`);
+        const leaseLossErr = new Error(`Dispatch lease expired or reclaimed during request processing`);
+        leaseLossErr.code = 'LEASE_LOST';
+        leaseLossErr.retryable = false;
+        throw leaseLossErr;
+      }
+    } else {
+      console.error(`[DISPATCH LEASE ERROR] isDispatchLeaseValid API unavailable. Halting.`);
+      const leaseLossErr = new Error(`Dispatch lease validation unavailable`);
+      leaseLossErr.code = 'LEASE_LOST';
+      leaseLossErr.retryable = false;
+      throw leaseLossErr;
+    }
+    return res;
+  } finally {
+    if (leaseRenewTimer) {
+      clearInterval(leaseRenewTimer);
+    }
+    if (typeof db.releaseDispatchLease === 'function') {
+      await db.releaseDispatchLease(recipientIgUserId, lease.leaseId);
+      console.log(`[STAGE: DISPATCH_LEASE_RELEASED]`, JSON.stringify({
+        lease_id: lease.leaseId
       }));
-
-      const res = await dispatchFn(lease);
-
-      // Verify lease is still valid before returning success (detect lease expiration during slow dispatch)
-      if (db.isDispatchLeaseValid) {
-        const stillValid = await db.isDispatchLeaseValid(recipientIgUserId, lease.leaseId);
-        if (!stillValid) {
-          console.warn(`[DISPATCH LEASE LOST] Worker ${workerId} lost dispatch lease ${lease.leaseId} for ${recipientIgUserId} during network processing. Halting.`);
-          const leaseLossErr = new Error(`Dispatch lease expired or reclaimed during request processing`);
-          leaseLossErr.code = 'LEASE_LOST';
-          leaseLossErr.retryable = false;
-          throw leaseLossErr;
-        }
-      }
-      return res;
-    } finally {
-      if (leaseRenewTimer) {
-        clearInterval(leaseRenewTimer);
-      }
-      if (db.releaseDispatchLease) {
-        await db.releaseDispatchLease(recipientIgUserId, lease.leaseId);
-        console.log(`[STAGE: DISPATCH_LEASE_RELEASED]`, JSON.stringify({
-          instagram_user_id: recipientIgUserId,
-          lease_id: lease.leaseId
-        }));
-      }
     }
   }
-  return await dispatchFn();
 }
 
 // Deliver final resource helper (guaranteed idempotent)
@@ -1554,11 +1574,9 @@ async function deliverFinalResource({
     }
 
     console.log(`[STAGE: META_REQUEST_STARTED]`, JSON.stringify({
-      automation_id: automation.id,
-      instagram_user_id: recipientIgUserId,
-      sender_igsid: senderIgsid,
-      method: 'POST',
-      endpoint: `/${recipientIgUserId}/messages`
+      auto_ref: automationTimeline.hashCorrelationId(automation.id),
+      account_ref: automationTimeline.hashCorrelationId(recipientIgUserId),
+      method: 'POST'
     }));
 
     let metaSendResult;
@@ -1749,9 +1767,8 @@ async function deliverFinalResource({
     }
 
     console.log(`[STAGE: META_REQUEST_COMPLETED]`, JSON.stringify({
-      automation_id: automation.id,
-      instagram_user_id: recipientIgUserId,
-      sender_igsid: senderIgsid,
+      auto_ref: automationTimeline.hashCorrelationId(automation.id),
+      account_ref: automationTimeline.hashCorrelationId(recipientIgUserId),
       meta_message_id: metaMsgId,
       delivery_result: 'DELIVERED'
     }));
@@ -2026,12 +2043,9 @@ async function executeCommentJob(job) {
     const isFollowGateEnabled = Boolean(flow.followGate?.enabled);
 
     console.log(`[STAGE: COMMENT_RECEIVED]`, JSON.stringify({
-      automation_id: selectedAuto.id,
-      job_id: job.job_id || job.event_key || null,
-      instagram_user_id: recipientIgUserId,
-      comment_id: commentId,
-      from_id: fromId,
-      keyword: selectedAuto.keyword,
+      auto_ref: automationTimeline.hashCorrelationId(selectedAuto.id),
+      job_ref: automationTimeline.hashCorrelationId(job.job_id || job.event_key),
+      account_ref: automationTimeline.hashCorrelationId(recipientIgUserId),
       follow_gate_enabled: isFollowGateEnabled
     }));
 
@@ -2566,12 +2580,9 @@ async function executeMessagingJob(job) {
   const stateKey = `${targetAutomation.id}:${targetAutomation.instagram_user_id}:${senderIgsid}`;
 
   const logContext = {
-    automation_id: targetAutomation.id,
-    job_id: job.job_id || job.event_key || null,
-    instagram_user_id: recipientIgUserId,
-    comment_id: resolvedCommentId || null,
-    conversation_key: stateKey,
-    sender_igsid: senderIgsid,
+    auto_ref: automationTimeline.hashCorrelationId(targetAutomation.id),
+    job_ref: automationTimeline.hashCorrelationId(job.job_id || job.event_key),
+    account_ref: automationTimeline.hashCorrelationId(recipientIgUserId),
     action: effectiveAction
   };
 
@@ -3835,4 +3846,4 @@ if (require.main === module) {
   process.on('SIGINT', () => handleGracefulShutdown('SIGINT'));
 }
 // Export handlers for automated testing
-module.exports = { app, deliverFinalResource, executeCommentJob, executeMessagingJob, executeWebhookJob, isAdminEmail, getAdminEmails };
+module.exports = { app, deliverFinalResource, executeCommentJob, executeMessagingJob, executeWebhookJob, safeDispatchOutbound, isAdminEmail, getAdminEmails };

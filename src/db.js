@@ -754,12 +754,14 @@ async function acquireDispatchLease(instagramAccountId, workerId, leaseMs = 1500
     cols = (module.exports && typeof module.exports.collections === 'function')
       ? module.exports.collections()
       : collections();
-  } catch (_) {
-    return { success: true, leaseId: 'mock_bypass', expiresAt: new Date(Date.now() + 15000) };
+  } catch (err) {
+    console.error('[Dispatch Lease] Database collections unavailable for acquireDispatchLease:', err.message);
+    return null;
   }
   const instagramAccounts = cols?.instagramAccounts || cols?.instagram_accounts;
   if (!instagramAccounts || typeof instagramAccounts.findOneAndUpdate !== 'function') {
-    return { success: true, leaseId: 'mock_bypass', expiresAt: new Date(Date.now() + 15000) };
+    console.error('[Dispatch Lease] instagramAccounts collection unavailable for acquireDispatchLease');
+    return null;
   }
   const accId = String(instagramAccountId || '').trim();
   if (!accId) return null;
@@ -800,28 +802,34 @@ async function acquireDispatchLease(instagramAccountId, workerId, leaseMs = 1500
   }
 
   // Atomically check deletion_pending: { $ne: true } and record individual lease
-  const account = await instagramAccounts.findOneAndUpdate(
-    {
-      $or: [
-        { instagram_user_id: { $in: ids } },
-        { id: { $in: ids } }
-      ],
-      deletion_pending: { $ne: true },
-      deletion_state: { $ne: 'deleting' }
-    },
-    {
-      $push: { active_dispatch_leases: leaseRecord },
-      $inc: { active_dispatches: 1 },
-      $set: {
-        dispatch_lease_expires_at: leaseExpiry,
-        last_dispatch_worker_id: String(workerId || 'unknown'),
-        last_dispatch_at: now
-      }
-    },
-    { returnDocument: 'after' }
-  );
+  let account;
+  try {
+    account = await instagramAccounts.findOneAndUpdate(
+      {
+        $or: [
+          { instagram_user_id: { $in: ids } },
+          { id: { $in: ids } }
+        ],
+        deletion_pending: { $ne: true },
+        deletion_state: { $ne: 'deleting' }
+      },
+      {
+        $push: { active_dispatch_leases: leaseRecord },
+        $inc: { active_dispatches: 1 },
+        $set: {
+          dispatch_lease_expires_at: leaseExpiry,
+          last_dispatch_worker_id: String(workerId || 'unknown'),
+          last_dispatch_at: now
+        }
+      },
+      { returnDocument: 'after' }
+    );
+  } catch (err) {
+    console.error('[Dispatch Lease] Database error during findOneAndUpdate:', err.message);
+    return null;
+  }
 
-  const doc = account?.value || account;
+  const doc = account && ('value' in account) ? account.value : account;
   if (!doc) return null;
 
   return {
@@ -840,13 +848,16 @@ async function releaseDispatchLease(instagramAccountId, leaseIdentifier) {
     cols = (module.exports && typeof module.exports.collections === 'function')
       ? module.exports.collections()
       : collections();
-  } catch (_) {
-    return;
+  } catch (err) {
+    console.error('[Dispatch Lease] Error accessing collections for releaseDispatchLease:', err.message);
+    return { success: false, modified: false };
   }
   const instagramAccounts = cols?.instagramAccounts || cols?.instagram_accounts;
-  if (!instagramAccounts || typeof instagramAccounts.updateOne !== 'function') return;
+  if (!instagramAccounts || typeof instagramAccounts.updateOne !== 'function') {
+    return { success: false, modified: false };
+  }
   const accId = String(instagramAccountId || '').trim();
-  if (!accId) return;
+  if (!accId) return { success: false, modified: false };
 
   const ids = [accId];
   if (!isNaN(Number(accId))) ids.push(Number(accId));
@@ -855,39 +866,33 @@ async function releaseDispatchLease(instagramAccountId, leaseIdentifier) {
     ? (leaseIdentifier.leaseId || leaseIdentifier.lease_id)
     : String(leaseIdentifier || '');
 
+  if (!leaseId) return { success: false, modified: false };
+
   try {
-    if (leaseId) {
-      // Pull ONLY this specific lease ID. Idempotent and cannot affect any other worker's lease!
-      await instagramAccounts.updateOne(
-        {
-          $or: [
-            { instagram_user_id: { $in: ids } },
-            { id: { $in: ids } }
-          ]
+    // Atomic, genuinely idempotent release:
+    // Match the EXACT active_dispatch_leases.lease_id in the filter!
+    // Decrement active_dispatches ONLY when that exact lease exists and is removed.
+    const result = await instagramAccounts.updateOne(
+      {
+        $or: [
+          { instagram_user_id: { $in: ids } },
+          { id: { $in: ids } }
+        ],
+        'active_dispatch_leases.lease_id': leaseId
+      },
+      {
+        $pull: {
+          active_dispatch_leases: { lease_id: leaseId }
         },
-        {
-          $pull: {
-            active_dispatch_leases: { lease_id: leaseId }
-          },
-          $inc: { active_dispatches: -1 }
-        }
-      );
-    } else {
-      await instagramAccounts.updateOne(
-        {
-          $or: [
-            { instagram_user_id: { $in: ids } },
-            { id: { $in: ids } }
-          ],
-          active_dispatches: { $gt: 0 }
-        },
-        {
-          $inc: { active_dispatches: -1 }
-        }
-      );
-    }
+        $inc: { active_dispatches: -1 }
+      }
+    );
+
+    const modified = Boolean(result && (result.modifiedCount > 0 || result.nModified > 0));
+    return { success: true, modified };
   } catch (err) {
     console.warn('[Dispatch Lease] Error releasing dispatch lease:', err.message);
+    return { success: false, modified: false, error: err.message };
   }
 }
 
@@ -897,11 +902,15 @@ async function isDispatchLeaseValid(instagramAccountId, leaseIdentifier) {
     cols = (module.exports && typeof module.exports.collections === 'function')
       ? module.exports.collections()
       : collections();
-  } catch (_) {
-    return true;
+  } catch (err) {
+    console.error('[Dispatch Lease] Database unavailable during lease validation:', err.message);
+    return false;
   }
   const instagramAccounts = cols?.instagramAccounts || cols?.instagram_accounts;
-  if (!instagramAccounts || typeof instagramAccounts.findOne !== 'function') return true;
+  if (!instagramAccounts || typeof instagramAccounts.findOne !== 'function') {
+    console.error('[Dispatch Lease] instagramAccounts collection unavailable for lease validation');
+    return false;
+  }
   const accId = String(instagramAccountId || '').trim();
   if (!accId) return false;
 
@@ -914,24 +923,30 @@ async function isDispatchLeaseValid(instagramAccountId, leaseIdentifier) {
   if (!isNaN(Number(accId))) ids.push(Number(accId));
   const now = new Date();
 
-  const account = await instagramAccounts.findOne(
-    {
-      $or: [
-        { instagram_user_id: { $in: ids } },
-        { id: { $in: ids } }
-      ],
-      deletion_pending: { $ne: true },
-      deletion_state: { $ne: 'deleting' },
-      'active_dispatch_leases.lease_id': leaseId
-    },
-    {
-      projection: {
-        active_dispatch_leases: 1,
-        deletion_pending: 1,
-        deletion_state: 1
+  let account;
+  try {
+    account = await instagramAccounts.findOne(
+      {
+        $or: [
+          { instagram_user_id: { $in: ids } },
+          { id: { $in: ids } }
+        ],
+        deletion_pending: { $ne: true },
+        deletion_state: { $ne: 'deleting' },
+        'active_dispatch_leases.lease_id': leaseId
+      },
+      {
+        projection: {
+          active_dispatch_leases: 1,
+          deletion_pending: 1,
+          deletion_state: 1
+        }
       }
-    }
-  );
+    );
+  } catch (err) {
+    console.error('[Dispatch Lease] Error executing findOne for lease validation:', err.message);
+    return false;
+  }
 
   if (!account) return false;
   const leases = account.active_dispatch_leases || [];
@@ -982,7 +997,8 @@ async function renewDispatchLease(instagramAccountId, leaseIdentifier, extendMs 
     },
     { returnDocument: 'after' }
   );
-  return Boolean(updated?.value || updated);
+  const doc = updated && ('value' in updated) ? updated.value : updated;
+  return Boolean(doc);
 }
 
 async function getActiveDispatchLeases(instagramAccountId) {

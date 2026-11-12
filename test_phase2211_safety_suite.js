@@ -60,6 +60,11 @@ function createMockDb() {
         if (!allMatch) return false;
         continue;
       }
+      if (key === 'active_dispatch_leases.lease_id') {
+        const leases = doc.active_dispatch_leases || [];
+        if (!leases.some(l => l.lease_id === val)) return false;
+        continue;
+      }
 
       const docVal = doc[key];
       if (val !== null && typeof val === 'object' && !Array.isArray(val) && !(val instanceof Date)) {
@@ -211,9 +216,112 @@ function createMockDb() {
     };
   }
 
+  const instagramAccounts = new Map();
+  const instagramAccountsCol = {
+    async countDocuments(query = {}) {
+      let count = 0;
+      for (const acc of instagramAccounts.values()) {
+        if (matchesFilter(acc, query)) count++;
+      }
+      if (count === 0 && query?.$or) {
+        for (const sub of query.$or) {
+          const targetId = sub.instagram_user_id || sub.id;
+          if (targetId && !instagramAccounts.has(String(targetId))) {
+            const acc = {
+              id: String(targetId),
+              instagram_user_id: String(targetId),
+              deletion_pending: false,
+              deletion_state: 'active',
+              active_dispatches: 0,
+              active_dispatch_leases: []
+            };
+            instagramAccounts.set(String(targetId), acc);
+            return 1;
+          }
+        }
+      }
+      return count;
+    },
+    async findOne(query) {
+      for (const acc of instagramAccounts.values()) {
+        if (matchesFilter(acc, query)) return JSON.parse(JSON.stringify(acc));
+      }
+      return null;
+    },
+    async findOneAndUpdate(query, update, options = {}) {
+      let acc = null;
+      for (const a of instagramAccounts.values()) {
+        if (matchesFilter(a, query)) { acc = a; break; }
+      }
+      if (!acc) {
+        let foundId = null;
+        if (query?.$or) {
+          for (const sub of query.$or) {
+            if (sub.instagram_user_id?.$in) foundId = String(sub.instagram_user_id.$in[0]);
+            else if (sub.id?.$in) foundId = String(sub.id.$in[0]);
+          }
+        } else if (query?.instagram_user_id) {
+          foundId = String(query.instagram_user_id);
+        } else if (query?.id) {
+          foundId = String(query.id);
+        }
+        if (foundId) {
+          acc = {
+            id: foundId,
+            instagram_user_id: foundId,
+            deletion_pending: false,
+            deletion_state: 'active',
+            active_dispatches: 0,
+            active_dispatch_leases: []
+          };
+          instagramAccounts.set(foundId, acc);
+        }
+      }
+      if (acc) {
+        if (update.$push && update.$push.active_dispatch_leases) {
+          if (!acc.active_dispatch_leases) acc.active_dispatch_leases = [];
+          acc.active_dispatch_leases.push(update.$push.active_dispatch_leases);
+        }
+        if (update.$inc) {
+          for (const [f, incVal] of Object.entries(update.$inc)) {
+            acc[f] = (acc[f] || 0) + incVal;
+          }
+        }
+        if (update.$set) Object.assign(acc, update.$set);
+        return JSON.parse(JSON.stringify(acc));
+      }
+      return null;
+    },
+    async updateOne(query, update) {
+      for (const acc of instagramAccounts.values()) {
+        if (matchesFilter(acc, query)) {
+          if (update.$pull && update.$pull.active_dispatch_leases) {
+            const lCriteria = update.$pull.active_dispatch_leases;
+            if (acc.active_dispatch_leases) {
+              acc.active_dispatch_leases = acc.active_dispatch_leases.filter(l => {
+                if (lCriteria.lease_id && l.lease_id === lCriteria.lease_id) return false;
+                if (lCriteria.expires_at?.$lte && l.expires_at <= lCriteria.expires_at.$lte) return false;
+                return true;
+              });
+            }
+          }
+          if (update.$inc) {
+            for (const [f, incVal] of Object.entries(update.$inc)) {
+              acc[f] = (acc[f] || 0) + incVal;
+            }
+          }
+          if (update.$set) Object.assign(acc, update.$set);
+          return { matchedCount: 1, modifiedCount: 1 };
+        }
+      }
+      return { matchedCount: 0, modifiedCount: 0 };
+    }
+  };
+
   const dbInstance = {
     collections() {
       return {
+        instagramAccounts: instagramAccountsCol,
         webhookJobs: makeCollection(jobs, 'event_key'),
         conversationStates: makeCollection(conversationStates, 'key'),
         openingDmClaims: makeCollection(openingDmClaims, 'claim_key'),
