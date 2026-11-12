@@ -8,6 +8,7 @@ const metaRateLimiter = require('../services/metaRateLimiter');
 let isWorkerRunning = false;
 let isPolling = false;
 let pollTimer = null;
+let pendingImmediate = null;
 let activeJobCount = 0;
 const activeJobsByAccount = new Map(); // instagramAccountId -> count
 const activeHeartbeats = new Map();    // jobId -> interval timer
@@ -16,6 +17,60 @@ let workerId = `worker_${process.pid}_${crypto.randomBytes(3).toString('hex')}`;
 let lastHeartbeatTime = null;
 let totalProcessedCount = 0;
 let totalFailedCount = 0;
+
+// Event-driven worker wake-up coordination
+let workerGeneration = 0;
+let wakeUpRequested = false;
+let immediatePollPending = false;
+let currentPollLoop = null;
+let immediatePollTriggeredCount = 0;
+
+/**
+ * Triggers an immediate worker poll cycle without waiting for the next periodic poll interval.
+ * Coalesces simultaneous requests and prevents overlapping poll executions.
+ *
+ * @returns {boolean} - True if immediate wake-up was scheduled or flagged, false if worker is stopped
+ */
+function triggerImmediatePoll() {
+  if (!isWorkerRunning || typeof currentPollLoop !== 'function') {
+    return false;
+  }
+
+  immediatePollTriggeredCount++;
+
+  // If a claim/poll cycle is already active, record the wake-up request.
+  // When the current poll finishes its work, its finally block will immediately
+  // trigger another poll pass instead of sleeping for pollIntervalMs.
+  if (isPolling) {
+    wakeUpRequested = true;
+    return true;
+  }
+
+  // If an immediate poll is already pending on the event loop (setImmediate),
+  // record the request and avoid enqueuing redundant setImmediate callbacks.
+  if (immediatePollPending) {
+    wakeUpRequested = true;
+    return true;
+  }
+
+  // Worker is idle waiting for pollTimer: cancel periodic timer and poll immediately
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+
+  immediatePollPending = true;
+  const gen = workerGeneration;
+  pendingImmediate = setImmediate(() => {
+    immediatePollPending = false;
+    pendingImmediate = null;
+    if (isWorkerRunning && workerGeneration === gen && typeof currentPollLoop === 'function') {
+      currentPollLoop();
+    }
+  });
+
+  return true;
+}
 
 /**
  * Starts the persistent background queue worker.
@@ -35,24 +90,30 @@ function startWorker(db, jobExecutor, options = {}) {
   }
 
   isWorkerRunning = true;
+  isPolling = false;
+  wakeUpRequested = false;
+  immediatePollPending = false;
+  workerGeneration++;
+  const currentGen = workerGeneration;
   lastHeartbeatTime = new Date().toISOString();
   const pollInterval = Number(options.pollIntervalMs) || webhookJobQueue.WORKER_POLL_INTERVAL_MS;
 
   console.log(`[WORKER] Starting persistent webhook worker (${workerId}). Concurrency: ${webhookJobQueue.WORKER_CONCURRENCY}, Account Concurrency: ${webhookJobQueue.ACCOUNT_CONCURRENCY}, Poll Interval: ${pollInterval}ms`);
 
   async function pollLoop() {
-    if (!isWorkerRunning) return;
+    if (!isWorkerRunning || workerGeneration !== currentGen) return;
     lastHeartbeatTime = new Date().toISOString();
 
     if (isPolling) {
-      scheduleNextPoll();
+      wakeUpRequested = true;
       return;
     }
 
     isPolling = true;
+    wakeUpRequested = false;
 
     try {
-      while (isWorkerRunning && activeJobCount < webhookJobQueue.WORKER_CONCURRENCY) {
+      while (isWorkerRunning && workerGeneration === currentGen && activeJobCount < webhookJobQueue.WORKER_CONCURRENCY) {
         // Build exclusion list for accounts at capacity or currently paused
         const excludedAccounts = [];
         for (const [accId, count] of activeJobsByAccount.entries()) {
@@ -88,8 +149,8 @@ function startWorker(db, jobExecutor, options = {}) {
           }
 
           // Trigger immediate refill if worker has capacity
-          if (isWorkerRunning && activeJobCount < webhookJobQueue.WORKER_CONCURRENCY) {
-            setImmediate(pollLoop);
+          if (isWorkerRunning && workerGeneration === currentGen && activeJobCount < webhookJobQueue.WORKER_CONCURRENCY) {
+            triggerImmediatePoll();
           }
         });
       }
@@ -97,18 +158,43 @@ function startWorker(db, jobExecutor, options = {}) {
       console.error('[WORKER ERROR] Unexpected error during claim cycle:', err.message);
     } finally {
       isPolling = false;
-      scheduleNextPoll();
+      if (isWorkerRunning && workerGeneration === currentGen) {
+        if (wakeUpRequested) {
+          wakeUpRequested = false;
+          if (pollTimer) {
+            clearTimeout(pollTimer);
+            pollTimer = null;
+          }
+          immediatePollPending = true;
+          pendingImmediate = setImmediate(() => {
+            immediatePollPending = false;
+            pendingImmediate = null;
+            if (isWorkerRunning && workerGeneration === currentGen && typeof currentPollLoop === 'function') {
+              currentPollLoop();
+            }
+          });
+        } else {
+          scheduleNextPoll();
+        }
+      }
     }
   }
 
   function scheduleNextPoll() {
-    if (!isWorkerRunning) return;
+    if (!isWorkerRunning || workerGeneration !== currentGen) return;
     if (pollTimer) clearTimeout(pollTimer);
     pollTimer = setTimeout(pollLoop, pollInterval);
   }
 
+  currentPollLoop = pollLoop;
+
   // Initial trigger
-  setImmediate(pollLoop);
+  pendingImmediate = setImmediate(() => {
+    pendingImmediate = null;
+    if (isWorkerRunning && workerGeneration === currentGen && typeof currentPollLoop === 'function') {
+      currentPollLoop();
+    }
+  });
 }
 
 /**
@@ -208,10 +294,19 @@ async function stopWorker(timeoutMs = 15000) {
   if (!isWorkerRunning) return;
   console.log(`[WORKER] Stopping worker ${workerId}... Draining ${activeJobCount} in-flight jobs.`);
   isWorkerRunning = false;
+  isPolling = false;
+  wakeUpRequested = false;
+  immediatePollPending = false;
+  workerGeneration++;
+  currentPollLoop = null;
 
   if (pollTimer) {
     clearTimeout(pollTimer);
     pollTimer = null;
+  }
+  if (pendingImmediate) {
+    clearImmediate(pendingImmediate);
+    pendingImmediate = null;
   }
 
   // Grace period: Wait for in-flight jobs to complete while keeping their heartbeats active!
@@ -240,11 +335,14 @@ function getWorkerStatus() {
   return {
     worker_id: workerId,
     is_running: isWorkerRunning,
+    is_polling: isPolling,
+    wake_up_requested: wakeUpRequested,
     active_jobs: activeJobCount,
     active_by_account: Object.fromEntries(activeJobsByAccount.entries()),
     last_heartbeat: lastHeartbeatTime,
     total_processed: totalProcessedCount,
-    total_failed: totalFailedCount
+    total_failed: totalFailedCount,
+    immediate_polls_triggered: immediatePollTriggeredCount
   };
 }
 
@@ -254,9 +352,18 @@ function getWorkerStatus() {
 function _resetWorkerForTesting() {
   isWorkerRunning = false;
   isPolling = false;
+  wakeUpRequested = false;
+  immediatePollPending = false;
+  workerGeneration++;
+  currentPollLoop = null;
+  immediatePollTriggeredCount = 0;
   if (pollTimer) {
     clearTimeout(pollTimer);
     pollTimer = null;
+  }
+  if (pendingImmediate) {
+    clearImmediate(pendingImmediate);
+    pendingImmediate = null;
   }
   for (const timer of activeHeartbeats.values()) {
     clearInterval(timer);
@@ -272,6 +379,8 @@ module.exports = {
   startWorker,
   stopWorker,
   getWorkerStatus,
+  triggerImmediatePoll,
+  notifyWorker: triggerImmediatePoll,
   _processClaimedJobForTesting: processClaimedJob,
   _resetWorkerForTesting
 };

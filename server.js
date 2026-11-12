@@ -2306,6 +2306,11 @@ app.post('/api/instagram/webhook', async (request, response) => {
   try {
     const ingestResult = await webhookJobQueue.ingestWebhookPayload(payload, db);
 
+    // Notify persistent worker immediately if any fresh job was persisted
+    if (ingestResult && ingestResult.count > 0) {
+      webhookWorker.triggerImmediatePoll();
+    }
+
     // 4. Return HTTP 200 ONLY after durable persistence succeeds
     // Ingestion is strictly decoupled from execution: the persistent webhookWorker
     // is the single consumer that claims and executes webhook_jobs.
