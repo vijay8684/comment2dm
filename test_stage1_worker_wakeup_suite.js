@@ -469,6 +469,90 @@ function createMockDb() {
     assert.strictEqual(webhookWorker.triggerImmediatePoll, webhookWorker.notifyWorker);
   });
 
+  // -------------------------------------------------------------------------
+  // Test 8: Delayed-claim shutdown and restart safety across worker generations
+  // -------------------------------------------------------------------------
+  await runTestAsync('Test 8: Delayed claim resolving after stop/restart does not corrupt locks or lose jobs', async () => {
+    webhookWorker._resetWorkerForTesting();
+    const mockDb = createMockDb();
+
+    // Ingest a job
+    await mockDb.collections().webhookJobs.insertOne({
+      event_key: 'comment:delayed_claim_job',
+      job_id: 'comment:delayed_claim_job',
+      instagram_account_id: 'acc_creator_delayed',
+      status: 'queued',
+      attempts: 0,
+      run_at: new Date(),
+      created_at: new Date()
+    });
+
+    const origClaim = webhookJobQueue.claimNextJob;
+    let claimCount = 0;
+    let oldClaimResolve = null;
+
+    webhookJobQueue.claimNextJob = async function (db, options) {
+      claimCount++;
+      if (claimCount === 1) {
+        // Generation 1 claim: suspend until explicitly resolved
+        const job = await origClaim.call(this, db, options);
+        await new Promise(r => { oldClaimResolve = r; });
+        return job;
+      }
+      return await origClaim.call(this, db, options);
+    };
+
+    let gen1JobExecuted = false;
+    let gen2JobExecuted = false;
+
+    try {
+      // 1. Start worker generation 1
+      webhookWorker.startWorker(mockDb, async (job) => {
+        gen1JobExecuted = true;
+      }, { pollIntervalMs: 60000 });
+
+      // Wait until generation 1 has initiated the delayed claim
+      const claimWait = Date.now();
+      while (!oldClaimResolve && (Date.now() - claimWait) < 500) {
+        await new Promise(r => setTimeout(r, 10));
+      }
+      assert.ok(oldClaimResolve, 'Generation 1 claimNextJob must be in-flight');
+
+      // 2. Stop worker while claim is pending
+      const stopPromise = webhookWorker.stopWorker(200);
+
+      // 3. Restart worker as Generation 2 before old claim resolves
+      webhookWorker.startWorker(mockDb, async (job) => {
+        gen2JobExecuted = true;
+      }, { pollIntervalMs: 60000 });
+
+      const gen2Status = webhookWorker.getWorkerStatus();
+      assert.strictEqual(gen2Status.is_running, true, 'Generation 2 worker must be running');
+
+      // 4. Now let the old Generation 1 claim resolve
+      oldClaimResolve();
+      await stopPromise;
+
+      // Allow event loop to process Generation 1 release and Generation 2 claim
+      webhookWorker.triggerImmediatePoll();
+
+      const waitStart = Date.now();
+      while (!gen2JobExecuted && (Date.now() - waitStart) < 1000) {
+        await new Promise(r => setTimeout(r, 20));
+      }
+
+      // Assertions:
+      assert.strictEqual(gen1JobExecuted, false, 'Obsolete Generation 1 must not process claimed job');
+      assert.strictEqual(gen2JobExecuted, true, 'Generation 2 must claim and process the job released by Generation 1');
+
+      await webhookWorker.stopWorker();
+    } finally {
+      webhookJobQueue.claimNextJob = origClaim;
+      if (oldClaimResolve) oldClaimResolve();
+      await webhookWorker.stopWorker();
+    }
+  });
+
   console.log('\n================================================================');
   console.log(` ALL ${passedTests}/${totalTests} STAGE 1 VERIFICATION TESTS PASSED`);
   console.log('================================================================\n');

@@ -152,7 +152,6 @@ function createMockDb() {
     assert.strictEqual(billingDb, null, 'billingDb should be uninitialized initially');
 
     // Calling store() should pick up the shared db instance from src/db
-    const resolvedDb = await billing.check.__proto__.constructor ? null : null; // sanity
     const storedDb = await (async () => {
       // Trigger store via entitlement
       await billing.entitlement('any_user');
@@ -386,15 +385,124 @@ function createMockDb() {
   // -------------------------------------------------------------------------
   // Test 7: Operation Context helper creation & direct pass-through
   // -------------------------------------------------------------------------
-  runTest('Test 7: createOperationContext helper and direct entitlement pass-through', () => {
+  await runTestAsync('Test 7: createOperationContext helper and direct entitlement pass-through', async () => {
     const ctx = billing.createOperationContext();
     assert.ok(ctx._entitlementCache instanceof Map);
 
     // Direct entitlement pass-through
     const precomputed = { plan: 'pro', limits: { whiteLabel: true } };
-    billing.entitlement('uid_any', { entitlement: precomputed }).then((res) => {
-      assert.strictEqual(res, precomputed);
-    });
+    const res = await billing.entitlement('uid_any', { entitlement: precomputed });
+    assert.strictEqual(res, precomputed);
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 8: Concurrent database initialization creates only one connection attempt
+  // -------------------------------------------------------------------------
+  await runTestAsync('Test 8: Concurrent db.initialize() callers share a single connection attempt', async () => {
+    await db.close();
+
+    const origUri = process.env.MONGODB_URI;
+
+    try {
+      process.env.MONGODB_URI = 'mongodb://127.0.0.1:27017/nudge_test_concurrency';
+
+      let clientInstantiations = 0;
+      function MockMongoClient(uri, options) {
+        clientInstantiations++;
+        this.connect = async () => {
+          await new Promise(r => setTimeout(r, 40)); // simulate connection latency
+        };
+        this.db = () => ({
+          command: async () => ({ ok: 1 }),
+          collection: () => ({ createIndex: async () => ({}) })
+        });
+        this.close = async () => {};
+      }
+
+      db._setMongoClientClassForTesting(MockMongoClient);
+
+      // Fire 5 concurrent initialize calls simultaneously
+      const initCalls = [
+        db.initialize(),
+        db.initialize(),
+        db.initialize(),
+        db.initialize(),
+        db.initialize()
+      ];
+
+      const results = await Promise.all(initCalls);
+
+      assert.strictEqual(results.length, 5);
+      for (let i = 1; i < results.length; i++) {
+        assert.strictEqual(results[i], results[0], 'All concurrent callers must receive identical database instance');
+      }
+
+      // Exactly ONE MongoClient must have been created across all 5 concurrent calls
+      assert.strictEqual(clientInstantiations, 1, `Expected exactly 1 MongoClient instantiation but got ${clientInstantiations}`);
+
+      await db.close();
+    } finally {
+      db._setMongoClientClassForTesting(null);
+      process.env.MONGODB_URI = origUri;
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 9: Connection failure cleanup and safe retry
+  // -------------------------------------------------------------------------
+  await runTestAsync('Test 9: Connection failure cleans up partial state and permits clean retry', async () => {
+    await db.close();
+
+    const origUri = process.env.MONGODB_URI;
+
+    try {
+      process.env.MONGODB_URI = 'mongodb://127.0.0.1:27017/nudge_test_failure';
+
+      let clientClosed = false;
+      let attempt = 0;
+
+      function MockFailingClient(uri, options) {
+        attempt++;
+        this.connect = async () => {
+          if (attempt === 1) {
+            throw new Error('ECONNREFUSED: Simulated connection drop');
+          }
+        };
+        this.db = () => ({
+          command: async () => ({ ok: 1 }),
+          collection: () => ({ createIndex: async () => ({}) })
+        });
+        this.close = async () => {
+          clientClosed = true;
+        };
+      }
+
+      db._setMongoClientClassForTesting(MockFailingClient);
+
+      // Attempt 1: Fails
+      let errorThrown = false;
+      try {
+        await db.initialize();
+      } catch (err) {
+        errorThrown = true;
+        assert.ok(err.message.includes('ECONNREFUSED'));
+      }
+      assert.strictEqual(errorThrown, true, 'First attempt must reject');
+      assert.strictEqual(clientClosed, true, 'Failed client must be closed');
+      assert.strictEqual(db.getClient(), null, 'Client reference must be null after failure');
+      assert.strictEqual(db.getDatabase(), null, 'Database reference must be null after failure');
+
+      // Attempt 2: Succeeds cleanly on retry
+      const recoveredDb = await db.initialize();
+      assert.ok(recoveredDb, 'Second initialization attempt must succeed after prior failure');
+      assert.ok(db.getClient(), 'Client must be set after successful retry');
+      assert.strictEqual(db.getDatabase(), recoveredDb, 'Database reference must match');
+
+      await db.close();
+    } finally {
+      db._setMongoClientClassForTesting(null);
+      process.env.MONGODB_URI = origUri;
+    }
   });
 
   console.log('\n================================================================');

@@ -7,6 +7,8 @@ const metaRateLimiter = require('../services/metaRateLimiter');
 
 let isWorkerRunning = false;
 let isPolling = false;
+let pollingGeneration = 0;
+let activePollPromise = null;
 let pollTimer = null;
 let pendingImmediate = null;
 let activeJobCount = 0;
@@ -73,6 +75,40 @@ function triggerImmediatePoll() {
 }
 
 /**
+ * Safely releases a claimed job back to pending if the claiming worker generation was cancelled.
+ */
+async function releaseClaimedJob(job, db) {
+  if (!job || !job.event_key) return;
+  const isMongo = Boolean(db && db.collections && db.collections().webhookJobs);
+  const now = new Date();
+  const updateFields = {
+    status: 'queued',
+    worker_id: null,
+    locked_until: null,
+    updated_at: now
+  };
+  try {
+    if (isMongo) {
+      await db.collections().webhookJobs.updateOne(
+        { event_key: job.event_key, worker_id: job.worker_id, status: 'processing' },
+        {
+          $set: updateFields,
+          $inc: { attempts: -1 }
+        }
+      );
+    } else if (webhookJobQueue.memoryJobsStore) {
+      const existing = webhookJobQueue.memoryJobsStore.get(job.event_key);
+      if (existing && existing.worker_id === job.worker_id && existing.status === 'processing') {
+        Object.assign(existing, updateFields);
+        existing.attempts = Math.max(0, (existing.attempts || 1) - 1);
+      }
+    }
+  } catch (err) {
+    console.warn(`[WORKER] Note: failed to release claimed job ${job.event_key}:`, err.message);
+  }
+}
+
+/**
  * Starts the persistent background queue worker.
  *
  * @param {object} db - Database module instance
@@ -91,6 +127,7 @@ function startWorker(db, jobExecutor, options = {}) {
 
   isWorkerRunning = true;
   isPolling = false;
+  pollingGeneration = 0;
   wakeUpRequested = false;
   immediatePollPending = false;
   workerGeneration++;
@@ -110,72 +147,97 @@ function startWorker(db, jobExecutor, options = {}) {
     }
 
     isPolling = true;
+    pollingGeneration = currentGen;
     wakeUpRequested = false;
 
-    try {
-      while (isWorkerRunning && workerGeneration === currentGen && activeJobCount < webhookJobQueue.WORKER_CONCURRENCY) {
-        // Build exclusion list for accounts at capacity or currently paused
-        const excludedAccounts = [];
-        for (const [accId, count] of activeJobsByAccount.entries()) {
-          if (count >= webhookJobQueue.ACCOUNT_CONCURRENCY || metaRateLimiter.isAccountPaused(accId)) {
-            excludedAccounts.push(accId);
-          }
-        }
-
-        const job = await webhookJobQueue.claimNextJob(db, {
-          workerId,
-          leaseMs: webhookJobQueue.JOB_LEASE_MS,
-          excludedAccountIds: excludedAccounts
-        });
-
-        if (!job) {
-          // No more eligible jobs in this cycle
-          break;
-        }
-
-        // Increment active concurrency counters
-        activeJobCount++;
-        const accId = job.instagram_account_id || 'unknown';
-        activeJobsByAccount.set(accId, (activeJobsByAccount.get(accId) || 0) + 1);
-
-        // Dispatch job asynchronously within the concurrency pool
-        processClaimedJob(job, jobExecutor, db).finally(() => {
-          activeJobCount = Math.max(0, activeJobCount - 1);
-          const currentAccCount = activeJobsByAccount.get(accId) || 1;
-          if (currentAccCount <= 1) {
-            activeJobsByAccount.delete(accId);
-          } else {
-            activeJobsByAccount.set(accId, currentAccCount - 1);
+    const pollExecution = (async () => {
+      try {
+        while (isWorkerRunning && workerGeneration === currentGen && activeJobCount < webhookJobQueue.WORKER_CONCURRENCY) {
+          // Build exclusion list for accounts at capacity or currently paused
+          const excludedAccounts = [];
+          for (const [accId, count] of activeJobsByAccount.entries()) {
+            if (count >= webhookJobQueue.ACCOUNT_CONCURRENCY || metaRateLimiter.isAccountPaused(accId)) {
+              excludedAccounts.push(accId);
+            }
           }
 
-          // Trigger immediate refill if worker has capacity
-          if (isWorkerRunning && workerGeneration === currentGen && activeJobCount < webhookJobQueue.WORKER_CONCURRENCY) {
-            triggerImmediatePoll();
+          const job = await webhookJobQueue.claimNextJob(db, {
+            workerId,
+            leaseMs: webhookJobQueue.JOB_LEASE_MS,
+            excludedAccountIds: excludedAccounts
+          });
+
+          // Check if worker was stopped or restarted while claim operation was in-flight
+          if (!isWorkerRunning || workerGeneration !== currentGen) {
+            if (job) {
+              await releaseClaimedJob(job, db);
+            }
+            break;
           }
-        });
-      }
-    } catch (err) {
-      console.error('[WORKER ERROR] Unexpected error during claim cycle:', err.message);
-    } finally {
-      isPolling = false;
-      if (isWorkerRunning && workerGeneration === currentGen) {
-        if (wakeUpRequested) {
-          wakeUpRequested = false;
-          if (pollTimer) {
-            clearTimeout(pollTimer);
-            pollTimer = null;
+
+          if (!job) {
+            // No more eligible jobs in this cycle
+            break;
           }
-          immediatePollPending = true;
-          pendingImmediate = setImmediate(() => {
-            immediatePollPending = false;
-            pendingImmediate = null;
-            if (isWorkerRunning && workerGeneration === currentGen && typeof currentPollLoop === 'function') {
-              currentPollLoop();
+
+          // Increment active concurrency counters
+          activeJobCount++;
+          const accId = job.instagram_account_id || 'unknown';
+          activeJobsByAccount.set(accId, (activeJobsByAccount.get(accId) || 0) + 1);
+
+          // Dispatch job asynchronously within the concurrency pool
+          processClaimedJob(job, jobExecutor, db).finally(() => {
+            activeJobCount = Math.max(0, activeJobCount - 1);
+            const currentAccCount = activeJobsByAccount.get(accId) || 1;
+            if (currentAccCount <= 1) {
+              activeJobsByAccount.delete(accId);
+            } else {
+              activeJobsByAccount.set(accId, currentAccCount - 1);
+            }
+
+            // Trigger immediate refill if worker has capacity
+            if (isWorkerRunning && workerGeneration === currentGen && activeJobCount < webhookJobQueue.WORKER_CONCURRENCY) {
+              triggerImmediatePoll();
             }
           });
-        } else {
-          scheduleNextPoll();
         }
+      } catch (err) {
+        console.error('[WORKER ERROR] Unexpected error during claim cycle:', err.message);
+      } finally {
+        // Only reset isPolling if THIS generation still owns the polling lock
+        if (pollingGeneration === currentGen) {
+          isPolling = false;
+          pollingGeneration = 0;
+        }
+
+        if (isWorkerRunning && workerGeneration === currentGen) {
+          if (wakeUpRequested) {
+            wakeUpRequested = false;
+            if (pollTimer) {
+              clearTimeout(pollTimer);
+              pollTimer = null;
+            }
+            immediatePollPending = true;
+            pendingImmediate = setImmediate(() => {
+              immediatePollPending = false;
+              pendingImmediate = null;
+              if (isWorkerRunning && workerGeneration === currentGen && typeof currentPollLoop === 'function') {
+                currentPollLoop();
+              }
+            });
+          } else {
+            scheduleNextPoll();
+          }
+        }
+      }
+    })();
+
+    activePollPromise = pollExecution;
+    try {
+      await pollExecution;
+    } finally {
+      if (activePollPromise === pollExecution) {
+        activePollPromise = null;
       }
     }
   }
@@ -293,8 +355,8 @@ async function processClaimedJob(job, jobExecutor, db) {
 async function stopWorker(timeoutMs = 15000) {
   if (!isWorkerRunning) return;
   console.log(`[WORKER] Stopping worker ${workerId}... Draining ${activeJobCount} in-flight jobs.`);
+  const stoppingGen = workerGeneration;
   isWorkerRunning = false;
-  isPolling = false;
   wakeUpRequested = false;
   immediatePollPending = false;
   workerGeneration++;
@@ -309,10 +371,27 @@ async function stopWorker(timeoutMs = 15000) {
     pendingImmediate = null;
   }
 
+  // Grace period: Wait for in-flight poll cycle to settle if active
+  if (activePollPromise) {
+    try {
+      const pollDrainWait = Math.min(timeoutMs, 2000);
+      await Promise.race([
+        activePollPromise,
+        new Promise(r => setTimeout(r, pollDrainWait))
+      ]);
+    } catch (_) {}
+  }
+
   // Grace period: Wait for in-flight jobs to complete while keeping their heartbeats active!
   const start = Date.now();
   while (activeJobCount > 0 && (Date.now() - start) < timeoutMs) {
     await new Promise(r => setTimeout(r, 100));
+  }
+
+  // Reset polling lock only if this stopping generation still owns it
+  if (pollingGeneration === stoppingGen) {
+    isPolling = false;
+    pollingGeneration = 0;
   }
 
   // Clean up any remaining heartbeat timers after draining
@@ -352,6 +431,8 @@ function getWorkerStatus() {
 function _resetWorkerForTesting() {
   isWorkerRunning = false;
   isPolling = false;
+  pollingGeneration = 0;
+  activePollPromise = null;
   wakeUpRequested = false;
   immediatePollPending = false;
   workerGeneration++;
