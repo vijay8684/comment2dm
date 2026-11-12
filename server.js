@@ -694,7 +694,7 @@ app.post('/api/automations', requireAuth, async (request, response, next) => {
     }
 
     // Entitlement & Tier Quota Check
-    const userEntitlement = await billing.entitlement(request.user.id);
+    const userEntitlement = await billing.entitlement(request.user.id, request);
     const trigger = triggerType === 'all' ? 'all' : 'keyword';
 
     if (trigger === 'all' && !userEntitlement?.limits?.allCommentsTrigger) {
@@ -814,7 +814,7 @@ app.patch('/api/automations/:id', requireAuth, async (request, response, next) =
       targetIgId = instagramUserId.trim();
     }
 
-    const userEntitlement = await billing.entitlement(request.user.id);
+    const userEntitlement = await billing.entitlement(request.user.id, request);
 
     let newTrigger = existing.trigger_type || 'keyword';
     if (triggerType !== undefined) {
@@ -1217,7 +1217,7 @@ async function deliverFinalResource({
 
     // Free branding attribution if not white-label
     try {
-      const userEntitlement = await billing.entitlement(automation.owner_user_id);
+      const userEntitlement = options?.entitlement || await billing.entitlement(automation.owner_user_id, options);
       if (!userEntitlement?.limits?.whiteLabel) {
         if (!deliveryText.includes('Powered by Comment2DM')) {
           deliveryText += '\n\n⚡ Powered by Comment2DM';
@@ -1676,7 +1676,7 @@ async function executeCommentJob(job) {
 
     // Plan-based Free Branding Attribution
     try {
-      const userEntitlement = await billing.entitlement(selectedAuto.owner_user_id);
+      const userEntitlement = await billing.entitlement(selectedAuto.owner_user_id, job);
       if (!userEntitlement?.limits?.whiteLabel) {
         if (!messageToSend.includes('Powered by Comment2DM')) {
           messageToSend += '\n\n⚡ Powered by Comment2DM';
@@ -2056,7 +2056,7 @@ async function executeMessagingJob(job) {
   if (action === 'SEND_LINK') {
     if (!flow.followGate?.enabled) {
       console.log(`[MESSAGING] Follow gate disabled. Delivering resource immediately to ${senderIgsid}...`);
-      await deliverFinalResource({ recipientIgUserId, senderIgsid, automation: targetAutomation, tokenData, flow, commentId, workerId: job?.worker_id });
+      await deliverFinalResource({ recipientIgUserId, senderIgsid, automation: targetAutomation, tokenData, flow, commentId, workerId: job?.worker_id, options: { context: job } });
       return;
     }
 
@@ -2083,7 +2083,7 @@ async function executeMessagingJob(job) {
 
     if (followResult.isFollowing === true && followResult.verified === true) {
       console.log(`[MESSAGING] PATH A: Recipient ${senderIgsid} already follows @${creatorUsername}. Delivering resource immediately.`);
-      await deliverFinalResource({ recipientIgUserId, senderIgsid, automation: targetAutomation, tokenData, flow, commentId, workerId: job?.worker_id });
+      await deliverFinalResource({ recipientIgUserId, senderIgsid, automation: targetAutomation, tokenData, flow, commentId, workerId: job?.worker_id, options: { context: job } });
     } else if (followResult.supported === false || followResult.error || !followResult.verified) {
       console.warn(`[MESSAGING] Meta follow check unavailable or error: ${followResult.error || followResult.note}`);
       const retryNotice = "We couldn't verify your follow status right now due to a network or API delay. Please tap below to retry!";
@@ -2188,7 +2188,9 @@ async function executeMessagingJob(job) {
         tokenData,
         flow,
         commentId,
-        prefixMessage: successPrefix
+        prefixMessage: successPrefix,
+        workerId: job?.worker_id,
+        options: { context: job }
       });
     } else if (recheckResult.supported === false || recheckResult.error || !recheckResult.verified) {
       console.warn(`[MESSAGING] Meta follower recheck error: ${recheckResult.error || recheckResult.note}`);

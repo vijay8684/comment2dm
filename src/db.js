@@ -100,6 +100,10 @@ async function migrateJsonData() {
 }
 
 async function initialize() {
+  if (client && database) {
+    return database;
+  }
+
   const uri = process.env.MONGODB_URI;
   if (!uri) {
     throw new Error('MONGODB_URI must be configured.');
@@ -789,8 +793,27 @@ async function deleteSession(tokenHash) {
   await sessions.deleteOne({ token_hash: tokenHash });
 }
 
+function getDatabase() {
+  return database;
+}
+
+function getClient() {
+  return client;
+}
+
+function _setDatabaseForTesting(mockDb, mockClient = null) {
+  database = mockDb;
+  client = mockClient;
+}
+
 async function close() {
-  if (client) await client.close();
+  if (client) {
+    if (typeof client.close === 'function') {
+      await client.close();
+    }
+    client = null;
+    database = null;
+  }
 }
 
 module.exports = {
@@ -814,5 +837,8 @@ module.exports = {
   deleteSession,
   consumeRateLimit,
   close,
-  collections
+  collections,
+  getDatabase,
+  getClient,
+  _setDatabaseForTesting
 };

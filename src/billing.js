@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const { MongoClient, ServerApiVersion } = require('mongodb');
 const Razorpay = require('razorpay');
 const authService = require('./auth/authService');
+const dbModule = require('./db');
 
 // Subscription Plan Configurations (Prices in INR Paise: 49900 = ₹499)
 const PLANS = {
@@ -130,10 +131,16 @@ const LIMITS = {
   }
 };
 
-let db;
-let mongo;
-let rz;
+let db = null;
+let mongo = null;
+let rz = null;
+let billingIndexesCreated = false;
 const cache = new Map();
+
+function createOperationContext() {
+  return { _entitlementCache: new Map() };
+}
+
 function getAdminEmails() {
   const raw = process.env.ADMIN_EMAIL;
   if (!raw || typeof raw !== 'string') return new Set();
@@ -149,22 +156,60 @@ function isAdminEmail(email) {
   return getAdminEmails().has(email.trim().toLowerCase());
 }
 
+async function ensureBillingIndexes(d) {
+  if (billingIndexesCreated || !d || !d.collection) return;
+  billingIndexesCreated = true;
+  try {
+    await Promise.allSettled([
+      d.collection('subscriptions').createIndex({ user_id: 1, created_at: -1 }),
+      d.collection('subscriptions').createIndex({ razorpay_subscription_id: 1 }, { unique: true, sparse: true }),
+      d.collection('billing_events').createIndex({ event_id: 1 }, { unique: true, sparse: true }),
+      d.collection('billing_plans').createIndex({ plan_key: 1 }, { unique: true })
+    ]);
+  } catch (err) {
+    console.warn('[BILLING INDEXES] Note:', err.message);
+  }
+}
+
 async function store() {
   if (db) return db;
-  mongo = new MongoClient(process.env.MONGODB_URI, {
-    serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true },
-    maxPoolSize: 5
-  });
-  await mongo.connect();
-  db = mongo.db(process.env.MONGODB_DB_NAME || 'nudge');
 
-  await Promise.allSettled([
-    db.collection('subscriptions').createIndex({ user_id: 1, created_at: -1 }),
-    db.collection('subscriptions').createIndex({ razorpay_subscription_id: 1 }, { unique: true, sparse: true }),
-    db.collection('billing_events').createIndex({ event_id: 1 }, { unique: true, sparse: true }),
-    db.collection('billing_plans').createIndex({ plan_key: 1 }, { unique: true })
-  ]);
-  return db;
+  // 1. Primary path: Reuse the existing shared database from src/db
+  const sharedDb = dbModule.getDatabase && dbModule.getDatabase();
+  if (sharedDb) {
+    db = sharedDb;
+    await ensureBillingIndexes(db);
+    return db;
+  }
+
+  // 2. If src/db has not been initialized yet, initialize via src/db so that only ONE MongoClient is created
+  if (process.env.MONGODB_URI && typeof dbModule.initialize === 'function') {
+    try {
+      await dbModule.initialize();
+      const initializedDb = dbModule.getDatabase();
+      if (initializedDb) {
+        db = initializedDb;
+        await ensureBillingIndexes(db);
+        return db;
+      }
+    } catch (initErr) {
+      throw initErr;
+    }
+  }
+
+  // 3. Fallback: If MONGODB_URI is provided but dbModule is unavailable (isolated test environments)
+  if (process.env.MONGODB_URI) {
+    mongo = new MongoClient(process.env.MONGODB_URI, {
+      serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true },
+      maxPoolSize: 5
+    });
+    await mongo.connect();
+    db = mongo.db(process.env.MONGODB_DB_NAME || 'nudge');
+    await ensureBillingIndexes(db);
+    return db;
+  }
+
+  throw new Error('Database not initialized and MONGODB_URI not configured.');
 }
 
 async function auth(req) {
@@ -190,12 +235,47 @@ async function auth(req) {
   }
 }
 
-async function entitlement(uid) {
+async function entitlement(uid, contextOrOptions = null) {
+  if (!uid) {
+    return {
+      plan: 'free',
+      isAdmin: false,
+      limits: LIMITS.free,
+      subscription: null
+    };
+  }
+
+  // 1. Direct entitlement pass-through if already resolved
+  if (contextOrOptions && typeof contextOrOptions === 'object' && contextOrOptions.entitlement) {
+    return contextOrOptions.entitlement;
+  }
+
+  // 2. Identify per-operation cache target (scoped strictly to this operation)
+  let opCache = null;
+  if (contextOrOptions instanceof Map) {
+    opCache = contextOrOptions;
+  } else if (contextOrOptions && typeof contextOrOptions === 'object') {
+    const targetObj = contextOrOptions.context || contextOrOptions.job || contextOrOptions.req || contextOrOptions;
+    if (targetObj) {
+      if (!targetObj._entitlementCache) {
+        targetObj._entitlementCache = new Map();
+      }
+      opCache = targetObj._entitlementCache;
+    }
+  }
+
+  const cacheKey = String(uid);
+  if (opCache && opCache.has(cacheKey)) {
+    return opCache.get(cacheKey);
+  }
+
   try {
     const d = await store();
     const user = await d.collection('users').findOne({ id: uid }, { projection: { email: 1 } });
+    let result;
+
     if (isAdminEmail(user?.email)) {
-      return {
+      result = {
         plan: 'elite',
         isAdmin: true,
         limits: {
@@ -210,16 +290,26 @@ async function entitlement(uid) {
         },
         subscription: null
       };
+    } else {
+      const s = await d.collection('subscriptions').findOne(
+        { user_id: uid, status: 'active' },
+        { sort: { created_at: -1 } }
+      );
+      const rawPlan = s?.plan || 'free';
+      const plan = LIMITS[rawPlan]
+        ? (rawPlan === 'creator' || rawPlan === 'growth' ? 'pro' : rawPlan === 'scale' ? 'elite' : rawPlan)
+        : 'free';
+      result = {
+        plan,
+        limits: LIMITS[plan] || LIMITS.free,
+        subscription: s
+      };
     }
 
-    const s = await d.collection('subscriptions').findOne({ user_id: uid, status: 'active' }, { sort: { created_at: -1 } });
-    const rawPlan = s?.plan || 'free';
-    const plan = LIMITS[rawPlan] ? (rawPlan === 'creator' || rawPlan === 'growth' ? 'pro' : rawPlan === 'scale' ? 'elite' : rawPlan) : 'free';
-    return {
-      plan,
-      limits: LIMITS[plan] || LIMITS.free,
-      subscription: s
-    };
+    if (opCache) {
+      opCache.set(cacheKey, result);
+    }
+    return result;
   } catch (err) {
     return {
       plan: 'free',
@@ -249,8 +339,8 @@ async function counts(uid) {
   return { accounts, automations, dmMonthly };
 }
 
-async function check(uid, resource) {
-  const e = await entitlement(uid);
+async function check(uid, resource, options = {}) {
+  const e = await entitlement(uid, options);
   const c = await counts(uid);
   const used = resource === 'instagramAccounts' ? c.accounts : resource === 'automations' ? c.automations : c.dmMonthly;
   return { ...e, used, allowed: used < e.limits[resource] };
@@ -470,9 +560,9 @@ async function cancel(req, res) {
 // In-memory fallback for local testing when MongoDB is offline
 const localCreditUsageMap = new Map();
 
-async function getAiCreditBalance(uid) {
+async function getAiCreditBalance(uid, options = {}) {
   try {
-    const e = await entitlement(uid);
+    const e = await entitlement(uid, options);
     if (e.isAdmin || e.limits.aiCreditsMonthly === Infinity) {
       return {
         plan: e.plan,
@@ -569,9 +659,9 @@ async function status(req, res) {
   const u = await auth(req);
   if (!u) return res.status(401).json({ error: 'Authentication required.' });
   const [e, c, aiStatus] = await Promise.all([
-    entitlement(u.id),
+    entitlement(u.id, req),
     counts(u.id),
-    getAiCreditBalance(u.id)
+    getAiCreditBalance(u.id, req)
   ]);
 
   return res.json({
@@ -709,6 +799,30 @@ function registerPostParser(app) {
   });
 }
 
+async function close() {
+  if (mongo) {
+    if (typeof mongo.close === 'function') {
+      await mongo.close();
+    }
+    mongo = null;
+  }
+  db = null;
+  billingIndexesCreated = false;
+}
+
+function _setDbForTesting(mockDb) {
+  db = mockDb;
+  billingIndexesCreated = false;
+}
+
+function _getDb() {
+  return db;
+}
+
+function _getClient() {
+  return mongo || (dbModule.getClient && dbModule.getClient());
+}
+
 module.exports = {
   register,
   registerPostParser,
@@ -718,6 +832,11 @@ module.exports = {
   counts,
   getAiCreditBalance,
   deductAiCredits,
+  createOperationContext,
+  close,
+  _setDbForTesting,
+  _getDb,
+  _getClient,
   PLANS,
   LIMITS,
   isAdminEmail,
