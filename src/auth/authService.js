@@ -12,7 +12,8 @@ function publicUser(user) {
     name: user.name,
     email: user.email,
     emailVerified: user.email_verified !== false,
-    createdAt: user.created_at || user.createdAt
+    createdAt: user.created_at || user.createdAt,
+    deletion_state: user.deletion_state || null
   };
 }
 

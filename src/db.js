@@ -157,8 +157,10 @@ async function initialize() {
         // Auto-delete automation event logs after 30 days (saves MongoDB space):
         automationEvents.createIndex({ owner_user_id: 1, created_at: -1 }, { name: 'automation_events_owner_created' }),
         automationEvents.createIndex({ instagram_user_id: 1, created_at: -1 }, { name: 'automation_events_instagram_created' }),
+        automationEvents.createIndex({ comment_id: 1, status: 1 }, { sparse: true, name: 'automation_events_comment_status' }),
         automationEvents.createIndex({ created_at_date: 1 }, { expireAfterSeconds: 30 * 86400, name: 'automation_events_ttl' }),
         // Rate limits auto-expire:
+        rateLimits.createIndex({ key: 1 }, { unique: true, name: 'rate_limits_key_unique' }),
         rateLimits.createIndex({ expires_at: 1 }, { expireAfterSeconds: 0, name: 'rate_limits_ttl' }),
         // Sessions auto-expire:
         sessions.createIndex({ token_hash: 1 }, { unique: true, name: 'sessions_token_unique' }),
@@ -191,6 +193,7 @@ async function initialize() {
         collections().accountRateLimits.createIndex({ paused_until: 1 }, { expireAfterSeconds: 0, name: 'account_rate_limits_ttl' }),
         // Durable Opening DM Idempotency Claims:
         collections().openingDmClaims.createIndex({ claim_key: 1 }, { unique: true, name: 'opening_dm_claims_key_unique' }),
+        collections().openingDmClaims.createIndex({ comment_id: 1, status: 1 }, { sparse: true, name: 'opening_dm_claims_comment_status' }),
         collections().openingDmClaims.createIndex({ status: 1, locked_until: 1 }, { name: 'opening_dm_claims_status_locked' }),
         collections().openingDmClaims.createIndex({ instagram_account_id: 1, created_at: -1 }, { name: 'opening_dm_claims_account_created' }),
         // Safe TTL retention: Only confirmed successfully sent claims carrying completed_at are purged after 30 days.
@@ -740,48 +743,431 @@ async function updateUserPasswordByEmail(email, passwordHash) {
   );
 }
 
-async function deleteUserAccount(userId) {
-  const {
-    users,
-    instagramAccounts,
-    automations,
-    automationEvents,
-    sessions,
-    conversationStates,
-    webhookJobs,
-    openingDmClaims,
-    aiCreditUsage,
-    feedback
-  } = collections();
+// Throttled pruning map to prevent redundant updateOne write roundtrips on active accounts
+const lastLeasePruneByAccount = new Map();
+const LEASE_PRUNE_INTERVAL_MS = 30000;
+
+// Outbound Dispatch Lease Coordination with Individual Lease Ownership
+async function acquireDispatchLease(instagramAccountId, workerId, leaseMs = 15000) {
+  let cols;
+  try {
+    cols = (module.exports && typeof module.exports.collections === 'function')
+      ? module.exports.collections()
+      : collections();
+  } catch (_) {
+    return { success: true, leaseId: 'mock_bypass', expiresAt: new Date(Date.now() + 15000) };
+  }
+  const instagramAccounts = cols?.instagramAccounts || cols?.instagram_accounts;
+  if (!instagramAccounts || typeof instagramAccounts.findOneAndUpdate !== 'function') {
+    return { success: true, leaseId: 'mock_bypass', expiresAt: new Date(Date.now() + 15000) };
+  }
+  const accId = String(instagramAccountId || '').trim();
+  if (!accId) return null;
+
+  const now = new Date();
+  const leaseExpiry = new Date(now.getTime() + Number(leaseMs || 15000));
+  const ids = [accId];
+  if (!isNaN(Number(accId))) ids.push(Number(accId));
+
+  // Generate a unique per-dispatch lease ID
+  const leaseId = `lease_${crypto.randomUUID()}`;
+  const leaseRecord = {
+    lease_id: leaseId,
+    worker_id: String(workerId || 'unknown'),
+    expires_at: leaseExpiry,
+    created_at: now
+  };
+
+  // Periodically prune expired leases from this account (throttled to at most once per 30s)
+  const lastPrune = lastLeasePruneByAccount.get(accId) || 0;
+  if ((now.getTime() - lastPrune) > LEASE_PRUNE_INTERVAL_MS) {
+    lastLeasePruneByAccount.set(accId, now.getTime());
+    try {
+      await instagramAccounts.updateOne(
+        {
+          $or: [
+            { instagram_user_id: { $in: ids } },
+            { id: { $in: ids } }
+          ]
+        },
+        {
+          $pull: {
+            active_dispatch_leases: { expires_at: { $lte: now } }
+          }
+        }
+      );
+    } catch (_) {}
+  }
+
+  // Atomically check deletion_pending: { $ne: true } and record individual lease
+  const account = await instagramAccounts.findOneAndUpdate(
+    {
+      $or: [
+        { instagram_user_id: { $in: ids } },
+        { id: { $in: ids } }
+      ],
+      deletion_pending: { $ne: true },
+      deletion_state: { $ne: 'deleting' }
+    },
+    {
+      $push: { active_dispatch_leases: leaseRecord },
+      $inc: { active_dispatches: 1 },
+      $set: {
+        dispatch_lease_expires_at: leaseExpiry,
+        last_dispatch_worker_id: String(workerId || 'unknown'),
+        last_dispatch_at: now
+      }
+    },
+    { returnDocument: 'after' }
+  );
+
+  const doc = account?.value || account;
+  if (!doc) return null;
+
+  return {
+    success: true,
+    leaseId: leaseId,
+    lease_id: leaseId,
+    expiresAt: leaseExpiry,
+    workerId: String(workerId || 'unknown'),
+    instagramAccountId: accId
+  };
+}
+
+async function releaseDispatchLease(instagramAccountId, leaseIdentifier) {
+  let cols;
+  try {
+    cols = (module.exports && typeof module.exports.collections === 'function')
+      ? module.exports.collections()
+      : collections();
+  } catch (_) {
+    return;
+  }
+  const instagramAccounts = cols?.instagramAccounts || cols?.instagram_accounts;
+  if (!instagramAccounts || typeof instagramAccounts.updateOne !== 'function') return;
+  const accId = String(instagramAccountId || '').trim();
+  if (!accId) return;
+
+  const ids = [accId];
+  if (!isNaN(Number(accId))) ids.push(Number(accId));
+
+  const leaseId = typeof leaseIdentifier === 'object' && leaseIdentifier !== null
+    ? (leaseIdentifier.leaseId || leaseIdentifier.lease_id)
+    : String(leaseIdentifier || '');
+
+  try {
+    if (leaseId) {
+      // Pull ONLY this specific lease ID. Idempotent and cannot affect any other worker's lease!
+      await instagramAccounts.updateOne(
+        {
+          $or: [
+            { instagram_user_id: { $in: ids } },
+            { id: { $in: ids } }
+          ]
+        },
+        {
+          $pull: {
+            active_dispatch_leases: { lease_id: leaseId }
+          },
+          $inc: { active_dispatches: -1 }
+        }
+      );
+    } else {
+      await instagramAccounts.updateOne(
+        {
+          $or: [
+            { instagram_user_id: { $in: ids } },
+            { id: { $in: ids } }
+          ],
+          active_dispatches: { $gt: 0 }
+        },
+        {
+          $inc: { active_dispatches: -1 }
+        }
+      );
+    }
+  } catch (err) {
+    console.warn('[Dispatch Lease] Error releasing dispatch lease:', err.message);
+  }
+}
+
+async function isDispatchLeaseValid(instagramAccountId, leaseIdentifier) {
+  let cols;
+  try {
+    cols = (module.exports && typeof module.exports.collections === 'function')
+      ? module.exports.collections()
+      : collections();
+  } catch (_) {
+    return true;
+  }
+  const instagramAccounts = cols?.instagramAccounts || cols?.instagram_accounts;
+  if (!instagramAccounts || typeof instagramAccounts.findOne !== 'function') return true;
+  const accId = String(instagramAccountId || '').trim();
+  if (!accId) return false;
+
+  const leaseId = typeof leaseIdentifier === 'object' && leaseIdentifier !== null
+    ? (leaseIdentifier.leaseId || leaseIdentifier.lease_id)
+    : String(leaseIdentifier || '');
+  if (!leaseId) return false;
+
+  const ids = [accId];
+  if (!isNaN(Number(accId))) ids.push(Number(accId));
+  const now = new Date();
+
+  const account = await instagramAccounts.findOne(
+    {
+      $or: [
+        { instagram_user_id: { $in: ids } },
+        { id: { $in: ids } }
+      ],
+      deletion_pending: { $ne: true },
+      deletion_state: { $ne: 'deleting' },
+      'active_dispatch_leases.lease_id': leaseId
+    },
+    {
+      projection: {
+        active_dispatch_leases: 1,
+        deletion_pending: 1,
+        deletion_state: 1
+      }
+    }
+  );
+
+  if (!account) return false;
+  const leases = account.active_dispatch_leases || [];
+  const matchingLease = leases.find(l => l.lease_id === leaseId);
+  if (!matchingLease) return false;
+  return new Date(matchingLease.expires_at) > now;
+}
+
+async function renewDispatchLease(instagramAccountId, leaseIdentifier, extendMs = 15000) {
+  let cols;
+  try {
+    cols = (module.exports && typeof module.exports.collections === 'function')
+      ? module.exports.collections()
+      : collections();
+  } catch (_) {
+    return false;
+  }
+  const instagramAccounts = cols?.instagramAccounts || cols?.instagram_accounts;
+  if (!instagramAccounts || typeof instagramAccounts.findOneAndUpdate !== 'function') return false;
+  const accId = String(instagramAccountId || '').trim();
+  if (!accId) return false;
+
+  const leaseId = typeof leaseIdentifier === 'object' && leaseIdentifier !== null
+    ? (leaseIdentifier.leaseId || leaseIdentifier.lease_id)
+    : String(leaseIdentifier || '');
+  if (!leaseId) return false;
+
+  const ids = [accId];
+  if (!isNaN(Number(accId))) ids.push(Number(accId));
+  const now = new Date();
+  const renewedExpiry = new Date(now.getTime() + Number(extendMs || 15000));
+
+  const updated = await instagramAccounts.findOneAndUpdate(
+    {
+      $or: [
+        { instagram_user_id: { $in: ids } },
+        { id: { $in: ids } }
+      ],
+      deletion_pending: { $ne: true },
+      deletion_state: { $ne: 'deleting' },
+      'active_dispatch_leases.lease_id': leaseId
+    },
+    {
+      $set: {
+        'active_dispatch_leases.$.expires_at': renewedExpiry,
+        dispatch_lease_expires_at: renewedExpiry
+      }
+    },
+    { returnDocument: 'after' }
+  );
+  return Boolean(updated?.value || updated);
+}
+
+async function getActiveDispatchLeases(instagramAccountId) {
+  let cols;
+  try {
+    cols = (module.exports && typeof module.exports.collections === 'function')
+      ? module.exports.collections()
+      : collections();
+  } catch (_) {
+    return [];
+  }
+  const instagramAccounts = cols?.instagramAccounts || cols?.instagram_accounts;
+  if (!instagramAccounts || typeof instagramAccounts.findOne !== 'function') return [];
+  const accId = String(instagramAccountId || '').trim();
+  if (!accId) return [];
+  const ids = [accId];
+  if (!isNaN(Number(accId))) ids.push(Number(accId));
+  const now = new Date();
+
+  const account = await instagramAccounts.findOne({
+    $or: [
+      { instagram_user_id: { $in: ids } },
+      { id: { $in: ids } }
+    ]
+  });
+  if (!account || !Array.isArray(account.active_dispatch_leases)) return [];
+  return account.active_dispatch_leases.filter(l => new Date(l.expires_at) > now);
+}
+
+async function deleteUserAccount(userId, options = {}) {
+  let cols;
+  try {
+    cols = (module.exports && typeof module.exports.collections === 'function')
+      ? module.exports.collections()
+      : collections();
+  } catch (_) {
+    cols = collections();
+  }
+  const users = cols?.users;
+  const instagramAccounts = cols?.instagramAccounts || cols?.instagram_accounts;
+  const automations = cols?.automations;
+  const automationEvents = cols?.automationEvents || cols?.automation_events;
+  const sessions = cols?.sessions;
+  const conversationStates = cols?.conversationStates || cols?.conversation_states;
+  const webhookJobs = cols?.webhookJobs || cols?.webhook_jobs;
+  const openingDmClaims = cols?.openingDmClaims || cols?.opening_dm_claims;
+  const aiCreditUsage = cols?.aiCreditUsage || cols?.ai_credit_usage;
+  const feedback = cols?.feedback;
 
   const uid = String(userId);
   const ownerClauses = makeOwnerClauses(uid);
 
-  // Find all Instagram accounts belonging to this user to clean dependent queues
+  // 1. Mark User Record as deletion_state: 'deleting'
+  // Prevents any new user-initiated operations via requireAuth
+  if (users) {
+    await users.updateOne(
+      { id: uid },
+      {
+        $set: {
+          deletion_state: 'deleting',
+          deletion_started_at: new Date().toISOString()
+        }
+      }
+    );
+  }
+
+  // 2. Mark Instagram accounts as deletion_pending to reject ANY new dispatch leases
   let igAccountIds = [];
-  try {
-    const userAccounts = await instagramAccounts.find({ $or: ownerClauses }, { projection: { instagram_user_id: 1, id: 1 } }).toArray();
-    igAccountIds = userAccounts.map(a => a.instagram_user_id || a.id).filter(Boolean);
-  } catch (e) {}
+  if (instagramAccounts) {
+    try {
+      const userAccounts = await instagramAccounts.find(
+        { $or: ownerClauses },
+        { projection: { instagram_user_id: 1, id: 1 } }
+      ).toArray();
+      igAccountIds = userAccounts.map(a => a.instagram_user_id || a.id).filter(Boolean);
 
-  const deleteTasks = [
-    users.deleteOne({ id: uid }),
-    instagramAccounts.deleteMany({ $or: ownerClauses }),
-    automations.deleteMany({ $or: [{ owner_user_id: uid }, { owner_id: uid }] }),
-    automationEvents.deleteMany({ $or: [{ owner_user_id: uid }, { owner_id: uid }] }),
-    sessions.deleteMany({ user_id: uid })
-  ];
+      await instagramAccounts.updateMany(
+        { $or: ownerClauses },
+        {
+          $set: {
+            deletion_pending: true,
+            deletion_state: 'deleting',
+            deletion_started_at: new Date()
+          }
+        }
+      );
+    } catch (e) {
+      console.warn('[Account Deletion] Warning marking accounts deletion_pending:', e.message);
+      throw e;
+    }
 
-  if (conversationStates) deleteTasks.push(conversationStates.deleteMany({ owner_user_id: uid }));
-  if (aiCreditUsage) deleteTasks.push(aiCreditUsage.deleteMany({ user_id: uid }));
-  if (feedback) deleteTasks.push(feedback.deleteMany({ user_id: uid }));
+    // 3. Coordinate in-flight dispatches: allow active dispatches to finish (up to drainTimeoutMs)
+    const drainTimeoutMs = Number(options.drainTimeoutMs !== undefined ? options.drainTimeoutMs : 5000);
+    const pollIntervalMs = 50;
+    const startTime = Date.now();
+    let activeLeasesRemain = false;
+
+    while (Date.now() - startTime < drainTimeoutMs) {
+      const now = new Date();
+
+      // Prune expired leases across user's accounts
+      await instagramAccounts.updateMany(
+        { $or: ownerClauses },
+        {
+          $pull: {
+            active_dispatch_leases: { expires_at: { $lte: now } }
+          }
+        }
+      ).catch(() => {});
+
+      // Check if any unexpired active leases remain on any of user's accounts
+      const accounts = await instagramAccounts.find({
+        $or: ownerClauses
+      }).toArray();
+
+      let totalActive = 0;
+      for (const acc of accounts) {
+        const leases = Array.isArray(acc.active_dispatch_leases)
+          ? acc.active_dispatch_leases.filter(l => new Date(l.expires_at) > now)
+          : [];
+        totalActive += leases.length;
+      }
+
+      if (totalActive === 0) {
+        activeLeasesRemain = false;
+        break; // All dispatches drained!
+      }
+      activeLeasesRemain = true;
+      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+    }
+
+    if (activeLeasesRemain) {
+      // CRITICAL: Active dispatches still running when drain timeout expired!
+      // MUST NOT delete account credentials, user data, or worker state!
+      const drainError = new Error('Account deletion in progress: active outbound dispatches are still draining. Please retry in a few moments.');
+      drainError.code = 'DELETION_DRAIN_TIMEOUT';
+      drainError.statusCode = 503;
+      throw drainError;
+    }
+  }
+
+  // 4. Execute cleanup of dependent data collections idempotently
+  // Financial records (payments, subscriptions, billing_events) are strictly preserved!
+  const deleteTasks = [];
 
   if (igAccountIds.length > 0) {
     if (webhookJobs) deleteTasks.push(webhookJobs.deleteMany({ instagram_account_id: { $in: igAccountIds } }));
     if (openingDmClaims) deleteTasks.push(openingDmClaims.deleteMany({ instagram_account_id: { $in: igAccountIds } }));
   }
 
-  await Promise.allSettled(deleteTasks);
+  if (conversationStates) deleteTasks.push(conversationStates.deleteMany({ owner_user_id: uid }));
+  if (automationEvents) deleteTasks.push(automationEvents.deleteMany({ $or: [{ owner_user_id: uid }, { owner_id: uid }] }));
+  if (automations) deleteTasks.push(automations.deleteMany({ $or: [{ owner_user_id: uid }, { owner_id: uid }] }));
+  if (aiCreditUsage) deleteTasks.push(aiCreditUsage.deleteMany({ user_id: uid }));
+  if (feedback) deleteTasks.push(feedback.deleteMany({ user_id: uid }));
+  if (instagramAccounts) deleteTasks.push(instagramAccounts.deleteMany({ $or: ownerClauses }));
+
+  const results = await Promise.allSettled(deleteTasks);
+  const failures = results.filter(r => r.status === 'rejected');
+  if (failures.length > 0) {
+    const reasons = failures.map(f => f.reason?.message || String(f.reason)).join('; ');
+    // Record failure state on user record so retry is seamless
+    if (users) {
+      await users.updateOne(
+        { id: uid },
+        {
+          $set: {
+            deletion_state: 'deletion_failed',
+            deletion_last_error: reasons,
+            deletion_failed_at: new Date().toISOString()
+          }
+        }
+      ).catch(() => {});
+    }
+    throw new Error(`Account deletion incomplete: ${reasons}`);
+  }
+
+  // 5. Final Step: Purge sessions and delete the user record only after all child data is purged
+  if (sessions) {
+    await sessions.deleteMany({ user_id: uid }).catch(() => {});
+  }
+  if (users) {
+    await users.deleteOne({ id: uid });
+  }
+
   return true;
 }
 
@@ -811,28 +1197,79 @@ async function getInstagramAccount(ownerUserId, instagramUserId) {
 // Rate Limiter
 async function consumeRateLimit(key, windowMs, maxRequests) {
   const { rateLimits } = collections();
-  const now = Date.now();
-  const expiresAt = new Date(now + Number(windowMs || 60000));
+  const now = new Date();
+  const windowDuration = Number(windowMs || 60000);
+  const max = Number(maxRequests || 1);
   const normalizedKey = String(key || '').trim();
   if (!normalizedKey) return true;
 
-  const existing = await rateLimits.findOne({ key: normalizedKey });
-  if (!existing || new Date(existing.expires_at).getTime() <= now) {
-    await rateLimits.updateOne(
-      { key: normalizedKey },
-      { $set: { key: normalizedKey, count: 1, expires_at: expiresAt } },
-      { upsert: true }
-    );
+  const expiresAt = new Date(now.getTime() + windowDuration);
+
+  // 1. Atomically increment an active window that is below max
+  const incRes = await rateLimits.updateOne(
+    {
+      key: normalizedKey,
+      expires_at: { $gt: now },
+      count: { $lt: max }
+    },
+    { $inc: { count: 1 } }
+  );
+
+  if (incRes && incRes.matchedCount > 0) {
     return true;
   }
 
-  if (Number(existing.count || 0) >= Number(maxRequests || 1)) return false;
+  // 2. Check if an active window has reached or exceeded max
+  const activeExceeded = await rateLimits.findOne({
+    key: normalizedKey,
+    expires_at: { $gt: now },
+    count: { $gte: max }
+  });
 
-  await rateLimits.updateOne(
-    { key: normalizedKey },
+  if (activeExceeded) {
+    return false;
+  }
+
+  // 3. Document expired: atomically reset
+  const resetRes = await rateLimits.updateOne(
+    {
+      key: normalizedKey,
+      expires_at: { $lte: now }
+    },
+    {
+      $set: { count: 1, expires_at: expiresAt }
+    }
+  );
+
+  if (resetRes && resetRes.matchedCount > 0) {
+    return true;
+  }
+
+  // 4. Document does not exist: upsert with initial count 1
+  try {
+    const upsertRes = await rateLimits.updateOne(
+      { key: normalizedKey },
+      { $setOnInsert: { key: normalizedKey, count: 1, expires_at: expiresAt } },
+      { upsert: true }
+    );
+    if (upsertRes && (upsertRes.upsertedCount > 0 || upsertRes.upsertedId)) {
+      return true;
+    }
+  } catch (err) {
+    // Concurrent insert conflict, fallback to increment
+  }
+
+  // 5. If another concurrent request just created the record, attempt increment
+  const retryRes = await rateLimits.updateOne(
+    {
+      key: normalizedKey,
+      expires_at: { $gt: now },
+      count: { $lt: max }
+    },
     { $inc: { count: 1 } }
   );
-  return true;
+
+  return Boolean(retryRes && retryRes.matchedCount > 0);
 }
 
 // Sessions
@@ -920,6 +1357,11 @@ module.exports = {
   refreshSession,
   deleteSession,
   consumeRateLimit,
+  acquireDispatchLease,
+  releaseDispatchLease,
+  isDispatchLeaseValid,
+  renewDispatchLease,
+  getActiveDispatchLeases,
   close,
   collections,
   getDatabase,
