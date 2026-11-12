@@ -773,11 +773,19 @@ function createMockDb() {
     let gen2ActiveJobs = 0;
     let maxObservedAggregateJobs = 0;
     let maxObservedAccA = 0;
+    const maxObservedPerAccount = new Map();
 
     const recordMetrics = () => {
       const agg = webhookWorker._getAggregateActiveJobCountForTesting();
       if (agg > maxObservedAggregateJobs) {
         maxObservedAggregateJobs = agg;
+      }
+      for (const accId of ['acc_shared_A', 'acc_shared_B', 'acc_shared_C']) {
+        const count = webhookWorker._getAggregateAccountJobCountForTesting(accId);
+        const prev = maxObservedPerAccount.get(accId) || 0;
+        if (count > prev) {
+          maxObservedPerAccount.set(accId, count);
+        }
       }
     };
 
@@ -854,13 +862,34 @@ function createMockDb() {
       gen1Resolvers.forEach(r => r());
       await stopGen1Promise;
 
-      // Now that Gen 1 jobs drained, Gen 2 should wake up and fill remaining slots
-      const waitGen2Refill = Date.now();
-      while (gen2ActiveJobs < 3 && (Date.now() - waitGen2Refill) < 1500) {
+      // With both generations using a 60-second polling interval, verify Generation 2
+      // immediately wakes and fills the newly available capacity without waiting for the scheduled poll
+      const refillStart = Date.now();
+      const boundedWaitMs = 1500;
+      while (gen2ActiveJobs < 5 && (Date.now() - refillStart) < boundedWaitMs) {
         await new Promise(r => setTimeout(r, 20));
       }
 
-      assert.ok(maxObservedAggregateJobs <= webhookJobQueue.WORKER_CONCURRENCY, `Max aggregate jobs (${maxObservedAggregateJobs}) never exceeded ${webhookJobQueue.WORKER_CONCURRENCY}`);
+      // Assert that Generation 2 reaches the expected active-job count of 5 after the refill
+      assert.strictEqual(
+        gen2ActiveJobs,
+        5,
+        `Generation 2 must immediately wake and refill all available slots to 5 within ${boundedWaitMs}ms without waiting for 60s poll. Actual: ${gen2ActiveJobs}`
+      );
+
+      // Assert that aggregate concurrency never exceeded WORKER_CONCURRENCY (5)
+      assert.ok(
+        maxObservedAggregateJobs <= webhookJobQueue.WORKER_CONCURRENCY,
+        `Max aggregate active jobs (${maxObservedAggregateJobs}) must never exceed WORKER_CONCURRENCY (${webhookJobQueue.WORKER_CONCURRENCY})`
+      );
+
+      // Assert that per-account concurrency never exceeded ACCOUNT_CONCURRENCY (2) for any account
+      for (const [accId, maxCount] of maxObservedPerAccount.entries()) {
+        assert.ok(
+          maxCount <= webhookJobQueue.ACCOUNT_CONCURRENCY,
+          `Account ${accId} concurrency (${maxCount}) must never exceed ACCOUNT_CONCURRENCY (${webhookJobQueue.ACCOUNT_CONCURRENCY})`
+        );
+      }
 
       // Clean up Gen 2 jobs
       gen2Resolvers.forEach(r => r());

@@ -289,8 +289,12 @@ function startWorker(db, jobExecutor, options = {}) {
               activeGenerations.delete(currentGen);
             }
 
-            // Trigger immediate refill if THIS generation is still running and process has aggregate capacity
-            if (isWorkerRunning && workerGeneration === currentGen && getAggregateActiveJobCount() < webhookJobQueue.WORKER_CONCURRENCY) {
+            // Trigger immediate refill when ANY generation finishes a job and process has capacity
+            if (
+              isWorkerRunning &&
+              typeof currentPollLoop === 'function' &&
+              getAggregateActiveJobCount() < webhookJobQueue.WORKER_CONCURRENCY
+            ) {
               triggerImmediatePoll();
             }
           });
@@ -595,5 +599,6 @@ module.exports = {
   _releaseClaimedJobForTesting: releaseClaimedJob,
   _getActiveHeartbeatsForTesting: () => activeHeartbeats,
   _getAggregateActiveJobCountForTesting: getAggregateActiveJobCount,
+  _getAggregateAccountJobCountForTesting: getAggregateAccountJobCount,
   _resetWorkerForTesting
 };
