@@ -122,7 +122,8 @@ function createMockDb() {
       return {
         webhookJobs: col,
         accountRateLimits: {
-          find: () => ({ toArray: async () => [] })
+          find: () => ({ toArray: async () => [] }),
+          findOne: async () => null
         }
       };
     }
@@ -624,6 +625,249 @@ function createMockDb() {
     } finally {
       webhookJobQueue.claimNextJob = origClaim;
       if (gen1ClaimResolve) gen1ClaimResolve();
+      await webhookWorker.stopWorker();
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 9: Heartbeat isolation across generations & graceful shutdown lease retention
+  // -------------------------------------------------------------------------
+  await runTestAsync('Test 9: Heartbeat timers are generation-isolated and preserved during graceful shutdown', async () => {
+    webhookWorker._resetWorkerForTesting();
+    const mockDb = createMockDb();
+
+    // Configure fast heartbeat interval for deterministic test execution
+    webhookJobQueue._heartbeatIntervalMsForTesting = 20;
+
+    let gen1JobResolve = null;
+    let gen2JobResolve = null;
+    let gen1HeartbeatTicks = 0;
+    let gen2HeartbeatTicks = 0;
+    let gen1WorkerId = null;
+    let gen2WorkerId = null;
+
+    const origExtendLease = webhookJobQueue.extendLease;
+    webhookJobQueue.extendLease = async function (job, workerId, extensionMs, db) {
+      if (gen1WorkerId && workerId === gen1WorkerId) {
+        gen1HeartbeatTicks++;
+      } else if (gen2WorkerId && workerId === gen2WorkerId) {
+        gen2HeartbeatTicks++;
+      }
+      return origExtendLease.call(this, job, workerId, extensionMs, db);
+    };
+
+    try {
+      // 1. Ingest job for Generation 1
+      await mockDb.collections().webhookJobs.insertOne({
+        event_key: 'comment:hb_shared_job_id',
+        job_id: 'comment:hb_shared_job_id',
+        instagram_account_id: 'acc_hb_1',
+        status: 'queued',
+        attempts: 0,
+        run_at: new Date(),
+        created_at: new Date()
+      });
+
+      // Start Generation 1
+      webhookWorker.startWorker(mockDb, async (job) => {
+        // In-flight task awaiting resolution
+        await new Promise(r => { gen1JobResolve = r; });
+      }, { pollIntervalMs: 60000 });
+
+      gen1WorkerId = webhookWorker.getWorkerStatus().worker_id;
+
+      // Wait until Gen 1 has claimed and activeHeartbeats contains Gen 1 heartbeat
+      const hbMap = webhookWorker._getActiveHeartbeatsForTesting();
+      const waitHb1 = Date.now();
+      while ((hbMap.size === 0 || typeof gen1JobResolve !== 'function') && (Date.now() - waitHb1) < 1000) {
+        await new Promise(r => setTimeout(r, 10));
+      }
+      assert.strictEqual(hbMap.size, 1, 'Generation 1 heartbeat must be registered in activeHeartbeats');
+      assert.strictEqual(typeof gen1JobResolve, 'function', 'Generation 1 executor must be active');
+
+      const gen1Key = Array.from(hbMap.keys())[0];
+      assert.strictEqual(gen1Key, `${gen1WorkerId}:comment:hb_shared_job_id`, `Key must be generation-specific: ${gen1Key}`);
+
+      // Wait for Gen 1 heartbeat to tick at least once
+      const waitTick1 = Date.now();
+      while (gen1HeartbeatTicks === 0 && (Date.now() - waitTick1) < 1000) {
+        await new Promise(r => setTimeout(r, 10));
+      }
+      assert.ok(gen1HeartbeatTicks >= 1, 'Generation 1 heartbeat must actively renew lease');
+
+      // 2. Initiate graceful shutdown on Generation 1
+      const stopGen1Promise = webhookWorker.stopWorker(2500);
+
+      // Verify Generation 1's heartbeat remains alive during graceful shutdown drain
+      assert.strictEqual(hbMap.has(gen1Key), true, 'Generation 1 heartbeat must remain active during graceful shutdown');
+
+      // 3. Start Generation 2 while Generation 1 is still in graceful shutdown drain
+      await mockDb.collections().webhookJobs.insertOne({
+        event_key: 'comment:hb_job_gen2',
+        job_id: 'comment:hb_job_gen2',
+        instagram_account_id: 'acc_hb_2',
+        status: 'queued',
+        attempts: 0,
+        run_at: new Date(),
+        created_at: new Date()
+      });
+
+      webhookWorker.startWorker(mockDb, async (job) => {
+        await new Promise(r => { gen2JobResolve = r; });
+      }, { pollIntervalMs: 60000 });
+
+      gen2WorkerId = webhookWorker.getWorkerStatus().worker_id;
+
+      // Wait until Gen 2 has claimed its job and registered its heartbeat
+      const waitHb2 = Date.now();
+      while ((hbMap.size < 2 || typeof gen2JobResolve !== 'function') && (Date.now() - waitHb2) < 1000) {
+        await new Promise(r => setTimeout(r, 10));
+      }
+      assert.strictEqual(hbMap.size, 2, 'Both Gen 1 and Gen 2 heartbeats must coexist in activeHeartbeats');
+      assert.strictEqual(typeof gen2JobResolve, 'function', 'Generation 2 executor must be active');
+
+      // 4. Resolve Generation 1's job and await Gen 1 shutdown completion
+      gen1JobResolve();
+      await stopGen1Promise;
+
+      // 5. Verification:
+      // (a) Generation 1's heartbeat was removed upon its job completion
+      assert.strictEqual(hbMap.has(gen1Key), false, 'Generation 1 heartbeat must be cleanly removed after job completion');
+
+      // (b) Generation 2's heartbeat WAS NOT cleared by stopping Generation 1!
+      assert.strictEqual(hbMap.size, 1, 'Generation 2 heartbeat must remain intact in activeHeartbeats');
+      const gen2Key = Array.from(hbMap.keys())[0];
+      assert.strictEqual(gen2Key, `${gen2WorkerId}:comment:hb_job_gen2`, `Gen 2 key must remain: ${gen2Key}`);
+
+      // (c) Generation 2 heartbeat continues to tick
+      const waitTick2 = Date.now();
+      while (gen2HeartbeatTicks === 0 && (Date.now() - waitTick2) < 1000) {
+        await new Promise(r => setTimeout(r, 10));
+      }
+      assert.ok(gen2HeartbeatTicks >= 1, 'Generation 2 heartbeat must actively tick even after Gen 1 stopped');
+
+      // 6. Complete Generation 2 job and stop
+      gen2JobResolve();
+      await webhookWorker.stopWorker();
+      assert.strictEqual(hbMap.size, 0, 'All heartbeats drained');
+    } finally {
+      webhookJobQueue._heartbeatIntervalMsForTesting = null;
+      webhookJobQueue.extendLease = origExtendLease;
+      if (gen1JobResolve) gen1JobResolve();
+      if (gen2JobResolve) gen2JobResolve();
+      await webhookWorker.stopWorker();
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 10: Process-wide aggregate & per-account concurrency protection across generations
+  // -------------------------------------------------------------------------
+  await runTestAsync('Test 10: Aggregate worker concurrency and per-account limits are strictly enforced across overlapping generations', async () => {
+    webhookWorker._resetWorkerForTesting();
+    const mockDb = createMockDb();
+
+    const gen1Resolvers = [];
+    const gen2Resolvers = [];
+
+    let gen1ActiveJobs = 0;
+    let gen2ActiveJobs = 0;
+    let maxObservedAggregateJobs = 0;
+    let maxObservedAccA = 0;
+
+    const recordMetrics = () => {
+      const agg = webhookWorker._getAggregateActiveJobCountForTesting();
+      if (agg > maxObservedAggregateJobs) {
+        maxObservedAggregateJobs = agg;
+      }
+    };
+
+    try {
+      // Ingest 3 jobs for Generation 1: 2 for acc_shared_A (capacity=2), 1 for acc_shared_B
+      const g1Jobs = [
+        { event_key: 'comment:g1_job_1', job_id: 'comment:g1_job_1', instagram_account_id: 'acc_shared_A', status: 'queued', attempts: 0, run_at: new Date(), created_at: new Date() },
+        { event_key: 'comment:g1_job_2', job_id: 'comment:g1_job_2', instagram_account_id: 'acc_shared_A', status: 'queued', attempts: 0, run_at: new Date(), created_at: new Date() },
+        { event_key: 'comment:g1_job_3', job_id: 'comment:g1_job_3', instagram_account_id: 'acc_shared_B', status: 'queued', attempts: 0, run_at: new Date(), created_at: new Date() }
+      ];
+      for (const j of g1Jobs) {
+        await mockDb.collections().webhookJobs.insertOne(j);
+      }
+
+      // Start Generation 1
+      webhookWorker.startWorker(mockDb, async (job) => {
+        gen1ActiveJobs++;
+        recordMetrics();
+        await new Promise(r => { gen1Resolvers.push(r); });
+        gen1ActiveJobs--;
+        recordMetrics();
+      }, { pollIntervalMs: 60000 });
+
+      // Wait until Gen 1 has claimed and is running all 3 jobs
+      const waitG1 = Date.now();
+      while (gen1ActiveJobs < 3 && (Date.now() - waitG1) < 1500) {
+        await new Promise(r => setTimeout(r, 10));
+      }
+      assert.strictEqual(gen1ActiveJobs, 3, 'Generation 1 must have 3 active jobs in flight');
+      assert.strictEqual(webhookWorker._getAggregateActiveJobCountForTesting(), 3);
+
+      // Initiate graceful shutdown on Generation 1 (draining with all 3 jobs in flight)
+      const stopGen1Promise = webhookWorker.stopWorker(1500);
+
+      // Ingest 5 candidate jobs for Generation 2:
+      // - 2 jobs for acc_shared_A (should NOT be claimed because acc_shared_A already has 2 active in Gen 1!)
+      // - 2 jobs for acc_shared_B (1 active in Gen 1, so only 1 more can be claimed!)
+      // - 2 jobs for acc_shared_C
+      const g2Jobs = [
+        { event_key: 'comment:g2_job_A1', job_id: 'comment:g2_job_A1', instagram_account_id: 'acc_shared_A', status: 'queued', attempts: 0, run_at: new Date(), created_at: new Date() },
+        { event_key: 'comment:g2_job_A2', job_id: 'comment:g2_job_A2', instagram_account_id: 'acc_shared_A', status: 'queued', attempts: 0, run_at: new Date(), created_at: new Date() },
+        { event_key: 'comment:g2_job_B1', job_id: 'comment:g2_job_B1', instagram_account_id: 'acc_shared_B', status: 'queued', attempts: 0, run_at: new Date(), created_at: new Date() },
+        { event_key: 'comment:g2_job_C1', job_id: 'comment:g2_job_C1', instagram_account_id: 'acc_shared_C', status: 'queued', attempts: 0, run_at: new Date(), created_at: new Date() },
+        { event_key: 'comment:g2_job_C2', job_id: 'comment:g2_job_C2', instagram_account_id: 'acc_shared_C', status: 'queued', attempts: 0, run_at: new Date(), created_at: new Date() }
+      ];
+      for (const j of g2Jobs) {
+        await mockDb.collections().webhookJobs.insertOne(j);
+      }
+
+      // Start Generation 2 while Generation 1's 3 jobs are still in flight
+      webhookWorker.startWorker(mockDb, async (job) => {
+        gen2ActiveJobs++;
+        if (job.instagram_account_id === 'acc_shared_A') {
+          maxObservedAccA++;
+        }
+        recordMetrics();
+        await new Promise(r => { gen2Resolvers.push(r); });
+        gen2ActiveJobs--;
+        recordMetrics();
+      }, { pollIntervalMs: 60000 });
+
+      // Allow Generation 2 to poll and claim up to remaining capacity
+      // Configured WORKER_CONCURRENCY is 5. With Gen 1 holding 3 jobs, Gen 2 must claim AT MOST 2 jobs!
+      await new Promise(r => setTimeout(r, 100));
+
+      const totalActiveWhileOverlapping = webhookWorker._getAggregateActiveJobCountForTesting();
+      assert.ok(totalActiveWhileOverlapping <= webhookJobQueue.WORKER_CONCURRENCY, `Aggregate active jobs (${totalActiveWhileOverlapping}) must not exceed WORKER_CONCURRENCY (${webhookJobQueue.WORKER_CONCURRENCY})`);
+      assert.strictEqual(gen2ActiveJobs, 2, 'Generation 2 must claim exactly 2 jobs (5 - 3 = 2)');
+
+      // Per-account check: acc_shared_A was at capacity (2 in Gen 1), so Gen 2 must NOT have claimed any jobs for acc_shared_A
+      assert.strictEqual(maxObservedAccA, 0, 'Generation 2 must not claim jobs for acc_shared_A while at aggregate capacity');
+
+      // Now drain Gen 1 jobs
+      gen1Resolvers.forEach(r => r());
+      await stopGen1Promise;
+
+      // Now that Gen 1 jobs drained, Gen 2 should wake up and fill remaining slots
+      const waitGen2Refill = Date.now();
+      while (gen2ActiveJobs < 3 && (Date.now() - waitGen2Refill) < 1500) {
+        await new Promise(r => setTimeout(r, 20));
+      }
+
+      assert.ok(maxObservedAggregateJobs <= webhookJobQueue.WORKER_CONCURRENCY, `Max aggregate jobs (${maxObservedAggregateJobs}) never exceeded ${webhookJobQueue.WORKER_CONCURRENCY}`);
+
+      // Clean up Gen 2 jobs
+      gen2Resolvers.forEach(r => r());
+      await webhookWorker.stopWorker();
+    } finally {
+      gen1Resolvers.forEach(r => r());
+      gen2Resolvers.forEach(r => r());
       await webhookWorker.stopWorker();
     }
   });
