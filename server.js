@@ -713,7 +713,7 @@ app.delete('/api/account/delete', requireAuth, async (request, response, next) =
       await db.deleteUserAccount(request.user.id);
     } catch (delErr) {
       if (delErr.code === 'DELETION_DRAIN_TIMEOUT' || delErr.statusCode === 503) {
-        console.warn(`[Account Deletion] Active dispatches still draining for user ${request.user.id}. Returning 503.`);
+        console.warn(`[Account Deletion] Active dispatches still draining for user (user_ref: ${automationTimeline.hashCorrelationId(request.user.id)}). Returning 503.`);
         return response.status(503).json({
           error: delErr.message,
           retryAfter: 2,
@@ -1264,6 +1264,12 @@ async function safeDispatchOutbound(recipientIgUserId, workerId, dispatchFn, lea
     return { success: false, skipped: true, reason: 'LEASE_API_UNAVAILABLE' };
   }
 
+  // Require the lease validation API to exist before proceeding
+  if (typeof db.isDispatchLeaseValid !== 'function') {
+    console.error(`[DISPATCH LEASE ERROR] isDispatchLeaseValid API unavailable. Aborting dispatch.`);
+    return { success: false, skipped: true, reason: 'LEASE_VALIDATION_API_UNAVAILABLE' };
+  }
+
   let lease;
   let leaseDuration = 0;
   try {
@@ -1280,6 +1286,22 @@ async function safeDispatchOutbound(recipientIgUserId, workerId, dispatchFn, lea
     return { success: false, skipped: true, reason: 'ACCOUNT_DELETED' };
   }
 
+  // Verify the lease immediately before beginning the external Meta request
+  let preValid = false;
+  try {
+    preValid = await db.isDispatchLeaseValid(recipientIgUserId, lease.leaseId);
+  } catch (valErr) {
+    console.error(`[DISPATCH LEASE ERROR] Exception during pre-dispatch lease validation:`, valErr.message);
+    preValid = false;
+  }
+  if (!preValid) {
+    console.warn(`[DISPATCH LEASE LOST] Worker lost dispatch lease before outbound request. Halting.`);
+    const leaseLossErr = new Error(`Dispatch lease expired or reclaimed prior to request processing`);
+    leaseLossErr.code = 'LEASE_LOST';
+    leaseLossErr.retryable = false;
+    throw leaseLossErr;
+  }
+
   if (leaseOptions.stage && typeof automationTimeline?.recordTimelineStage === 'function') {
     automationTimeline.recordTimelineStage({
       stage: leaseOptions.stage,
@@ -1292,12 +1314,16 @@ async function safeDispatchOutbound(recipientIgUserId, workerId, dispatchFn, lea
     });
   }
 
+  let renewalFailed = false;
   let leaseRenewTimer = null;
   if (typeof db.renewDispatchLease === 'function') {
     leaseRenewTimer = setInterval(async () => {
       try {
-        await db.renewDispatchLease(recipientIgUserId, lease.leaseId, 15000);
-      } catch (_) {}
+        const renewed = await db.renewDispatchLease(recipientIgUserId, lease.leaseId, 15000);
+        if (!renewed) renewalFailed = true;
+      } catch (_) {
+        renewalFailed = true;
+      }
     }, 5000);
     if (leaseRenewTimer.unref) leaseRenewTimer.unref();
   }
@@ -1311,29 +1337,10 @@ async function safeDispatchOutbound(recipientIgUserId, workerId, dispatchFn, lea
 
     const res = await dispatchFn(lease);
 
-    // Strictly fail-closed lease validation
-    if (typeof db.isDispatchLeaseValid === 'function') {
-      let stillValid = false;
-      try {
-        stillValid = await db.isDispatchLeaseValid(recipientIgUserId, lease.leaseId);
-      } catch (valErr) {
-        console.error(`[DISPATCH LEASE ERROR] Exception during lease validation:`, valErr.message);
-        stillValid = false;
-      }
-      if (!stillValid) {
-        console.warn(`[DISPATCH LEASE LOST] Worker ${workerId} lost dispatch lease ${lease.leaseId} during network processing. Halting.`);
-        const leaseLossErr = new Error(`Dispatch lease expired or reclaimed during request processing`);
-        leaseLossErr.code = 'LEASE_LOST';
-        leaseLossErr.retryable = false;
-        throw leaseLossErr;
-      }
-    } else {
-      console.error(`[DISPATCH LEASE ERROR] isDispatchLeaseValid API unavailable. Halting.`);
-      const leaseLossErr = new Error(`Dispatch lease validation unavailable`);
-      leaseLossErr.code = 'LEASE_LOST';
-      leaseLossErr.retryable = false;
-      throw leaseLossErr;
+    if (renewalFailed) {
+      console.warn(`[DISPATCH LEASE RENEWAL WARNING] Lease renewal failed during dispatch for lease ${lease.leaseId}`);
     }
+
     return res;
   } finally {
     if (leaseRenewTimer) {
@@ -1376,14 +1383,14 @@ async function deliverFinalResource({
       ]
     });
     if (!accountAlive) {
-      console.warn(`[DELIVERY DELETION GUARD] Instagram account ${recipientIgUserId} was deleted while delivery for ${stateKey} was in-flight. Aborting dispatch.`);
+      console.warn(`[DELIVERY DELETION GUARD] Instagram account was deleted while delivery was in-flight (account_ref: ${automationTimeline.hashCorrelationId(recipientIgUserId)}, state_ref: ${automationTimeline.hashCorrelationId(stateKey)}). Aborting dispatch.`);
       return { success: false, skipped: true, reason: 'ACCOUNT_DELETED' };
     }
   }
 
   // Concurrency guard 1: In-memory lock
   if (processingDeliveryKeys.has(stateKey)) {
-    console.log(`[CONCURRENCY] Resource delivery already in progress for key ${stateKey}. Skipping duplicate.`);
+    console.log(`[CONCURRENCY] Resource delivery already in progress (state_ref: ${automationTimeline.hashCorrelationId(stateKey)}). Skipping duplicate.`);
     return;
   }
   processingDeliveryKeys.add(stateKey);
@@ -1412,12 +1419,12 @@ async function deliverFinalResource({
             }
           );
           if (res.matchedCount === 0) {
-            console.warn(`[DELIVERY LEASE LOSS] Worker ${workerToken} lost delivery lease for ${stateKey}`);
+            console.warn(`[DELIVERY LEASE LOSS] Worker lost delivery lease (state_ref: ${automationTimeline.hashCorrelationId(stateKey)})`);
             stopDeliveryHeartbeat();
           }
         }
       } catch (err) {
-        console.warn(`[DELIVERY HEARTBEAT] Error renewing lease for ${stateKey}:`, err.message);
+        console.warn(`[DELIVERY HEARTBEAT] Error renewing lease (state_ref: ${automationTimeline.hashCorrelationId(stateKey)}):`, err.message);
       }
     }, deliveryHeartbeatIntervalMs);
     if (deliveryHeartbeat.unref) deliveryHeartbeat.unref();
@@ -1498,16 +1505,16 @@ async function deliverFinalResource({
               }
             }
           );
-          console.warn(`[DELIVERY UNCERTAIN] Marked ${stateKey} as unknown: previous worker lease expired after request was dispatched.`);
+          console.warn(`[DELIVERY UNCERTAIN] Marked state_ref=${automationTimeline.hashCorrelationId(stateKey)} as unknown: previous worker lease expired after request was dispatched.`);
           return { success: false, reason: 'UNKNOWN_OUTCOME' };
         }
 
         if (checkDoc && (checkDoc.delivery_state === 'unknown' || checkDoc.delivery_state === 'sent' || checkDoc.resource_delivered === true)) {
-          console.log(`[IDEMPOTENCY] Resource delivery ${checkDoc.delivery_state} for ${stateKey}. Skipping.`);
+          console.log(`[IDEMPOTENCY] Resource delivery ${checkDoc.delivery_state} (state_ref: ${automationTimeline.hashCorrelationId(stateKey)}). Skipping.`);
           return { success: checkDoc.delivery_state === 'sent', reason: checkDoc.delivery_state };
         }
 
-        console.log(`[IDEMPOTENCY] Resource delivery already claimed, in progress or completed for ${stateKey}. Skipping.`);
+        console.log(`[IDEMPOTENCY] Resource delivery already claimed, in progress or completed (state_ref: ${automationTimeline.hashCorrelationId(stateKey)}). Skipping.`);
         return { success: false, reason: 'IN_PROGRESS' };
       }
     }
@@ -1624,7 +1631,7 @@ async function deliverFinalResource({
         // 2. Messaging window expiration (permanent failure: recipient must interact first)
         const errorCategory = metaRateLimiter.classifyMetaError(dmErr).category;
         if (errorCategory === 'MESSAGING_WINDOW') {
-          console.warn(`[DELIVERY WINDOW EXPIRED] 24-hr messaging window closed for ${stateKey}. User must interact first.`);
+          console.warn(`[DELIVERY WINDOW EXPIRED] 24-hr messaging window closed (state_ref: ${automationTimeline.hashCorrelationId(stateKey)}). User must interact first.`);
           if (db.collections && db.collections().conversationStates) {
             await db.collections().conversationStates.updateOne(
               { key: stateKey, delivery_worker_id: workerToken },
@@ -1643,7 +1650,7 @@ async function deliverFinalResource({
           dmErr.statusCode === 504 || dmErr.status === 504;
 
         if (isUnknownOutcome) {
-          console.warn(`[DELIVERY UNCERTAIN] Meta send outcome uncertain for ${stateKey}: ${dmErr.message}`);
+          console.warn(`[DELIVERY UNCERTAIN] Meta send outcome uncertain (state_ref: ${automationTimeline.hashCorrelationId(stateKey)}): ${dmErr.message}`);
           if (db.collections && db.collections().conversationStates) {
             await db.collections().conversationStates.updateOne(
               { key: stateKey, delivery_worker_id: workerToken },
@@ -1722,7 +1729,7 @@ async function deliverFinalResource({
     // 4. Require explicit Meta confirmation (message_id / id)
     const metaMsgId = metaSendResult?.message_id || metaSendResult?.id || null;
     if (!metaMsgId) {
-      console.warn(`[DELIVERY UNCONFIRMED] Meta response did not include message_id for ${stateKey}`);
+      console.warn(`[DELIVERY UNCONFIRMED] Meta response did not include message_id (state_ref: ${automationTimeline.hashCorrelationId(stateKey)})`);
       if (db.collections && db.collections().conversationStates) {
         await db.collections().conversationStates.updateOne(
           { key: stateKey, delivery_worker_id: workerToken },
@@ -1761,7 +1768,7 @@ async function deliverFinalResource({
         }
       );
       if (stateUpdateRes.matchedCount === 0) {
-        console.warn(`[DELIVERY LEASE LOSS] Stale worker ${workerToken} cannot mark ${stateKey} as sent: lease expired or reclaimed.`);
+        console.warn(`[DELIVERY LEASE LOSS] Stale worker lost delivery lease (state_ref: ${automationTimeline.hashCorrelationId(stateKey)})`);
         return { success: false, reason: 'LEASE_LOST' };
       }
     }
@@ -1816,7 +1823,7 @@ async function executeCommentJob(job) {
       status: 'success'
     });
     if (alreadyDone) {
-      console.log(`[DEDUP] Skipping comment ${commentId}: already successfully replied.`);
+      console.log(`[DEDUP] Skipping comment (cmt_ref: ${automationTimeline.hashCorrelationId(commentId)}): already successfully replied.`);
       return { success: true, skipped: true, reason: 'ALREADY_REPLIED' };
     }
   }
@@ -1836,7 +1843,7 @@ async function executeCommentJob(job) {
   }
 
   if (!activeAutomations || activeAutomations.length === 0) {
-    console.log(`No active automations found for Instagram account ${recipientIgUserId}`);
+    console.log(`No active automations found for Instagram account (account_ref: ${automationTimeline.hashCorrelationId(recipientIgUserId)})`);
     return;
   }
 
@@ -1864,7 +1871,7 @@ async function executeCommentJob(job) {
   }
 
   if (!selectedAuto) {
-    console.log(`[TRIGGER] No matching automation keyword for comment "${commentText}" (Media: ${commentMediaId}).`);
+    console.log(`[TRIGGER] No matching automation keyword for comment (cmt_ref: ${automationTimeline.hashCorrelationId(commentId)}).`);
     return;
   }
 
@@ -1892,11 +1899,11 @@ async function executeCommentJob(job) {
     const existingClaim = await claimsCol.findOne({ claim_key: claimKey });
     if (existingClaim) {
       if (existingClaim.status === 'sent') {
-        console.log(`[DEDUP] Opening DM already sent for comment ${commentId} on automation ${selectedAuto.id}. Skipping.`);
+        console.log(`[DEDUP] Opening DM already sent for comment (cmt_ref: ${automationTimeline.hashCorrelationId(commentId)}, auto_ref: ${automationTimeline.hashCorrelationId(selectedAuto.id)}). Skipping.`);
         return { success: true, skipped: true, reason: 'ALREADY_SENT', meta_message_id: existingClaim.meta_message_id };
       }
       if (existingClaim.status === 'unknown') {
-        console.warn(`[IDEMPOTENCY] Opening DM for comment ${commentId} has unknown delivery outcome. Never blindly resending.`);
+        console.warn(`[IDEMPOTENCY] Opening DM for comment (cmt_ref: ${automationTimeline.hashCorrelationId(commentId)}) has unknown delivery outcome. Never blindly resending.`);
         return {
           success: false,
           skipped: true,
@@ -1906,7 +1913,7 @@ async function executeCommentJob(job) {
         };
       }
       if (existingClaim.status === 'failed_permanent' || (existingClaim.status === 'failed' && existingClaim.retryable === false)) {
-        console.log(`[IDEMPOTENCY] Opening DM for comment ${commentId} previously failed permanently. Skipping.`);
+        console.log(`[IDEMPOTENCY] Opening DM for comment (cmt_ref: ${automationTimeline.hashCorrelationId(commentId)}) previously failed permanently. Skipping.`);
         return {
           success: false,
           skipped: true,
@@ -1989,7 +1996,7 @@ async function executeCommentJob(job) {
             }
           }
         );
-        console.warn(`[IDEMPOTENCY UNCERTAIN] Marked ${claimKey} as unknown: previous worker lease expired after request dispatch.`);
+        console.warn(`[IDEMPOTENCY UNCERTAIN] Marked claim_ref=${automationTimeline.hashCorrelationId(claimKey)} as unknown: previous worker lease expired after request dispatch.`);
         return {
           success: false,
           skipped: true,
@@ -2000,7 +2007,7 @@ async function executeCommentJob(job) {
       }
 
       if (checkDoc && checkDoc.status === 'sent') {
-        console.log(`[DEDUP] Opening DM already sent for comment ${commentId}. Skipping.`);
+        console.log(`[DEDUP] Opening DM already sent for comment (cmt_ref: ${automationTimeline.hashCorrelationId(commentId)}). Skipping.`);
         return { success: true, skipped: true, reason: 'ALREADY_SENT' };
       }
       if (checkDoc && checkDoc.status === 'unknown') {
@@ -2022,12 +2029,12 @@ async function executeCommentJob(job) {
         };
       }
 
-      console.log(`[IDEMPOTENCY] Opening DM delivery already in progress or claimed by another worker for ${claimKey}. Skipping.`);
+      console.log(`[IDEMPOTENCY] Opening DM delivery already in progress or claimed by another worker (claim_ref: ${automationTimeline.hashCorrelationId(claimKey)}). Skipping.`);
       return { success: false, skipped: true, status: 'concurrent_claim', reason: 'IN_PROGRESS' };
     }
   }
 
-  console.log(`[TRIGGER] Matched automation ${selectedAuto.id} for comment "${commentText}" (ID: ${commentId}). Sending interactive opening DM...`);
+  console.log(`[TRIGGER] Matched automation (auto_ref: ${automationTimeline.hashCorrelationId(selectedAuto.id)}, cmt_ref: ${automationTimeline.hashCorrelationId(commentId)}). Sending interactive opening DM...`);
 
   try {
     // Ensure flow is loaded
@@ -2148,14 +2155,14 @@ async function executeCommentJob(job) {
     });
 
     if (outboundResult && outboundResult.reason === 'ACCOUNT_DELETED') {
-      console.warn(`[WORKER DELETION GUARD] Instagram account ${recipientIgUserId} was deleted or undergoing deletion. Aborting dispatch.`);
+      console.warn(`[WORKER DELETION GUARD] Instagram account was deleted or undergoing deletion (account_ref: ${automationTimeline.hashCorrelationId(recipientIgUserId)}). Aborting dispatch.`);
       return outboundResult;
     }
 
     const metaMsgId = sendResult?.message_id || sendResult?.id || null;
 
     if (!metaMsgId) {
-      console.warn(`[OPENING DM UNCONFIRMED] Meta response missing message_id for ${claimKey}`);
+      console.warn(`[OPENING DM UNCONFIRMED] Meta response missing message_id (claim_ref: ${automationTimeline.hashCorrelationId(claimKey)})`);
       if (db.collections && db.collections().openingDmClaims) {
         await db.collections().openingDmClaims.updateOne(
           {
@@ -2199,7 +2206,7 @@ async function executeCommentJob(job) {
         }
       );
       if (successRes.matchedCount === 0) {
-        console.warn(`[STALE WORKER] Worker ${workerToken} delivered opening DM for ${claimKey}, but claim was no longer in processing state (e.g. lease expired and transitioned to unknown). Preserving existing claim status.`);
+        console.warn(`[STALE WORKER] Worker delivered opening DM (claim_ref: ${automationTimeline.hashCorrelationId(claimKey)}), but claim was no longer in processing state. Preserving existing claim status.`);
       }
     }
 
@@ -2259,36 +2266,44 @@ async function executeCommentJob(job) {
         [selectedAuto.owner_user_id, recipientIgUserId, selectedAuto.id, commentId, 'private_reply', selectedAuto.keyword, messageToSend, 'success', new Date().toISOString()]
       );
     }
-    console.log(`[TRIGGER SUCCESS] Successfully sent opening DM for comment ID ${commentId}`);
+    console.log(`[TRIGGER SUCCESS] Successfully sent opening DM (cmt_ref: ${automationTimeline.hashCorrelationId(commentId)})`);
 
     // 4. Send Public Comment Reply in an isolated try/catch (if configured)
     if (selectedAuto.reply_template) {
       try {
-        const publicReplyResult = await instagramService.replyToComment(
-          commentId,
-          selectedAuto.reply_template,
-          tokenData.accessToken
-        );
-        if (db.collections && db.collections().automationEvents) {
-          await db.collections().automationEvents.insertOne({
-            event_id: crypto.randomUUID(),
-            owner_user_id: selectedAuto.owner_user_id,
-            instagram_user_id: recipientIgUserId,
-            automation_id: selectedAuto.id,
-            comment_id: commentId,
-            from_username: fromUsername,
-            from_id: fromId,
-            comment_text: commentText,
-            event_type: 'public_reply',
-            message_text: selectedAuto.reply_template,
-            status: 'success',
-            meta_comment_id: publicReplyResult?.id || null,
-            created_at: new Date().toISOString(),
-            created_at_date: new Date()
-          });
-        }
+        await safeDispatchOutbound(recipientIgUserId, workerToken, async (dispatchLease) => {
+          const publicReplyResult = await instagramService.replyToComment(
+            commentId,
+            selectedAuto.reply_template,
+            tokenData.accessToken
+          );
+          if (db.collections && db.collections().automationEvents) {
+            await db.collections().automationEvents.insertOne({
+              event_id: crypto.randomUUID(),
+              owner_user_id: selectedAuto.owner_user_id,
+              instagram_user_id: recipientIgUserId,
+              automation_id: selectedAuto.id,
+              comment_id: commentId,
+              from_username: fromUsername,
+              from_id: fromId,
+              comment_text: commentText,
+              event_type: 'public_reply',
+              message_text: selectedAuto.reply_template,
+              status: 'success',
+              meta_comment_id: publicReplyResult?.id || null,
+              created_at: new Date().toISOString(),
+              created_at_date: new Date()
+            });
+          }
+          return publicReplyResult;
+        }, {
+          stage: 'PUBLIC_REPLY_LEASE_ACQUIRED',
+          job_id: job.job_id || job.event_key || null,
+          automation_id: selectedAuto.id,
+          event_type: 'comment'
+        });
       } catch (publicErr) {
-        console.warn(`[PUBLIC REPLY NOTE] Public comment reply failed for comment ${commentId}: ${publicErr.message}`);
+        console.warn(`[PUBLIC REPLY NOTE] Public comment reply failed for comment (cmt_ref: ${automationTimeline.hashCorrelationId(commentId)}): ${publicErr.message}`);
         if (publicErr.statusCode === 429) {
           metaRateLimiter.pauseAccount(recipientIgUserId, publicErr.retryAfterSeconds || 60, 'Public reply rate limit', db);
         }
@@ -2376,7 +2391,7 @@ async function executeCommentJob(job) {
         }
       );
       if (failRes.matchedCount === 0) {
-        console.warn(`[STALE WORKER] Worker ${workerToken} failed for ${claimKey}, but claim was no longer in processing state (e.g. lease expired and transitioned to unknown). Preserving existing claim status.`);
+        console.warn(`[STALE WORKER] Worker failed for claim_ref: ${automationTimeline.hashCorrelationId(claimKey)}, but claim was no longer in processing state. Preserving existing claim status.`);
       }
     }
 
@@ -2399,7 +2414,7 @@ async function executeCommentJob(job) {
         created_at_date: new Date()
       });
     }
-    console.error(`Failed to execute automation for comment ${commentId}:`, apiErr.message);
+    console.error(`Failed to execute automation for comment (cmt_ref: ${automationTimeline.hashCorrelationId(commentId)}):`, apiErr.message);
     throw apiErr;
   }
 }
@@ -2412,10 +2427,10 @@ async function executeMessagingJob(job) {
   const payload = job.payload || '';
   const incomingText = job.message_text || '';
 
-  console.log(`[MESSAGING] Interactive event: action="${action}", sender="${senderIgsid}", recipient="${recipientIgUserId}"`);
+  console.log(`[MESSAGING] Interactive event: action="${action}", sender_ref="${automationTimeline.hashCorrelationId(senderIgsid)}", account_ref="${automationTimeline.hashCorrelationId(recipientIgUserId)}"`);
 
   if (action === 'UNKNOWN_POSTBACK') {
-    console.warn(`[MESSAGING UNSUPPORTED] Unsupported button/postback payload "${payload}" from sender ${senderIgsid}. Safely ignored.`);
+    console.warn(`[MESSAGING UNSUPPORTED] Unsupported button/postback payload from sender_ref=${automationTimeline.hashCorrelationId(senderIgsid)}. Safely ignored.`);
     return { success: true, handled: false, reason: 'UNSUPPORTED_POSTBACK' };
   }
 
@@ -2482,11 +2497,11 @@ async function executeMessagingJob(job) {
 
         if (matchedCandidates.length === 1) {
           convState = matchedCandidates[0].candidate;
-          console.log(`[CONVERSATION DISAMBIGUATED] Disambiguated multiple pending conversations for sender ${senderIgsid} to automation ${convState.automation_id} based on keyword match for "${incomingText}".`);
+          console.log(`[CONVERSATION DISAMBIGUATED] Disambiguated multiple pending conversations for sender_ref=${automationTimeline.hashCorrelationId(senderIgsid)} to auto_ref=${automationTimeline.hashCorrelationId(convState.automation_id)}.`);
         } else {
           // Cannot determine unambiguously (e.g. generic "LINK" message or multiple/zero matches).
           // MUST NOT deliver arbitrary resource or pick randomly.
-          console.warn(`[AMBIGUOUS_CONVERSATION] Multiple pending automations found for sender ${senderIgsid} (${pendingList.length} pending conversations). Cannot unambiguously determine target resource for message "${incomingText}". Halting safely to prevent arbitrary resource delivery.`);
+          console.warn(`[AMBIGUOUS_CONVERSATION] Multiple pending automations found for sender_ref=${automationTimeline.hashCorrelationId(senderIgsid)} (${pendingList.length} pending conversations). Cannot unambiguously determine target resource. Halting safely to prevent arbitrary resource delivery.`);
           return {
             success: false,
             skipped: true,
@@ -2509,7 +2524,7 @@ async function executeMessagingJob(job) {
   if (convState) {
     resolvedAutoId = resolvedAutoId || convState.automation_id;
     resolvedCommentId = resolvedCommentId || convState.comment_id;
-    console.log(`[CONVERSATION RESTORED] Restored conversation state for sender ${senderIgsid} (State: ${convState.state}, Automation: ${convState.automation_id}, Comment: ${resolvedCommentId})`);
+    console.log(`[CONVERSATION RESTORED] Restored conversation state for sender_ref=${automationTimeline.hashCorrelationId(senderIgsid)} (State: ${convState.state}, auto_ref: ${automationTimeline.hashCorrelationId(convState.automation_id)}, cmt_ref: ${automationTimeline.hashCorrelationId(resolvedCommentId)})`);
   }
 
   let effectiveAction = action;
@@ -2519,13 +2534,13 @@ async function executeMessagingJob(job) {
     } else if (convState?.state === 'FOLLOW_PROMPT_SENT' || convState?.state === 'FOLLOW_RETRY_PROMPT' || convState?.state === 'VERIFICATION_ERROR') {
       effectiveAction = 'CHECK_FOLLOW';
     } else {
-      console.log(`[MESSAGING UNEXPECTED] User ${senderIgsid} sent unexpected message: "${incomingText}". No automated dispatch warranted.`);
+      console.log(`[MESSAGING UNEXPECTED] User (sender_ref: ${automationTimeline.hashCorrelationId(senderIgsid)}) sent unexpected message. No automated dispatch warranted.`);
       return { success: true, handled: false, reason: 'UNEXPECTED_MESSAGE' };
     }
   }
 
   if (effectiveAction !== 'SEND_LINK' && effectiveAction !== 'CHECK_FOLLOW') {
-    console.log(`[MESSAGING UNEXPECTED] Unhandled action "${effectiveAction}" for user ${senderIgsid}.`);
+    console.log(`[MESSAGING UNEXPECTED] Unhandled action "${effectiveAction}" for user (sender_ref: ${automationTimeline.hashCorrelationId(senderIgsid)}).`);
     return { success: true, handled: false, reason: 'UNEXPECTED_MESSAGE' };
   }
 
@@ -2542,7 +2557,7 @@ async function executeMessagingJob(job) {
   }
 
   if (!targetAutomation && !convState) {
-    console.warn(`[CONVERSATION STATE MISSING] Missing conversation state and target automation for sender ${senderIgsid} on account ${recipientIgUserId}`);
+    console.warn(`[CONVERSATION STATE MISSING] Missing conversation state and target automation for sender_ref=${automationTimeline.hashCorrelationId(senderIgsid)} on account_ref=${automationTimeline.hashCorrelationId(recipientIgUserId)}`);
     return { success: false, skipped: true, reason: 'CONVERSATION_STATE_MISSING' };
   }
 
@@ -2565,12 +2580,12 @@ async function executeMessagingJob(job) {
   }
 
   if (!targetAutomation) {
-    console.warn(`[CONVERSATION STATE MISSING] No matching automation for recipient ${recipientIgUserId}`);
+    console.warn(`[CONVERSATION STATE MISSING] No matching automation for account_ref=${automationTimeline.hashCorrelationId(recipientIgUserId)}`);
     return { success: false, skipped: true, reason: 'CONVERSATION_STATE_MISSING' };
   }
 
   if (String(targetAutomation.instagram_user_id) !== String(recipientIgUserId)) {
-    console.log(`[ROUTING] Ignoring cross-account event: automation ${targetAutomation.id} belongs to ${targetAutomation.instagram_user_id}, but delivered to ${recipientIgUserId}`);
+    console.log(`[ROUTING] Ignoring cross-account event: auto_ref=${automationTimeline.hashCorrelationId(targetAutomation.id)} belongs to account_ref=${automationTimeline.hashCorrelationId(targetAutomation.instagram_user_id)}, but delivered to account_ref=${automationTimeline.hashCorrelationId(recipientIgUserId)}`);
     return { success: false, skipped: true, reason: 'CROSS_ACCOUNT_EVENT' };
   }
 
@@ -2595,7 +2610,7 @@ async function executeMessagingJob(job) {
   }));
 
   if (convState && convState.resource_delivered === true) {
-    console.log(`[IDEMPOTENCY] Resource already delivered to ${senderIgsid} for automation ${targetAutomation.id}. Ignoring duplicate trigger.`);
+    console.log(`[IDEMPOTENCY] Resource already delivered (sender_ref: ${automationTimeline.hashCorrelationId(senderIgsid)}, auto_ref: ${automationTimeline.hashCorrelationId(targetAutomation.id)}). Ignoring duplicate trigger.`);
     return { success: true, skipped: true, reason: 'ALREADY_DELIVERED' };
   }
 
@@ -2615,14 +2630,14 @@ async function executeMessagingJob(job) {
       ]
     });
     if (!accountAlive) {
-      console.warn(`[MESSAGING DELETION GUARD] Account ${recipientIgUserId} was deleted while messaging job was in-flight. Aborting dispatch.`);
+      console.warn(`[MESSAGING DELETION GUARD] Account was deleted while messaging job was in-flight (account_ref: ${automationTimeline.hashCorrelationId(recipientIgUserId)}). Aborting dispatch.`);
       return { success: false, skipped: true, reason: 'ACCOUNT_DELETED' };
     }
   }
 
   if (effectiveAction === 'SEND_LINK') {
     if (!flow.followGate?.enabled) {
-      console.log(`[MESSAGING] Follow gate disabled. Delivering resource immediately to ${senderIgsid}...`);
+      console.log(`[MESSAGING] Follow gate disabled. Delivering resource immediately (sender_ref: ${automationTimeline.hashCorrelationId(senderIgsid)})...`);
       await deliverFinalResource({ recipientIgUserId, senderIgsid, automation: targetAutomation, tokenData, flow, commentId: resolvedCommentId, workerId: job?.worker_id, options: { context: job } });
       return { success: true, delivered: true };
     }
@@ -2657,7 +2672,7 @@ async function executeMessagingJob(job) {
     }));
 
     if (followResult.isFollowing === true && followResult.verified === true) {
-      console.log(`[MESSAGING] PATH A: Recipient ${senderIgsid} already follows @${creatorUsername}. Delivering resource immediately.`);
+      console.log(`[MESSAGING] PATH A: Follow confirmed for sender_ref=${automationTimeline.hashCorrelationId(senderIgsid)}. Delivering resource immediately.`);
       await deliverFinalResource({ recipientIgUserId, senderIgsid, automation: targetAutomation, tokenData, flow, commentId: resolvedCommentId, workerId: job?.worker_id, options: { context: job } });
       return { success: true, delivered: true, follow_verified: true };
     } else if (followResult.supported === false || followResult.error || !followResult.verified) {
@@ -2696,7 +2711,7 @@ async function executeMessagingJob(job) {
       });
       return { success: true, delivered: false, follow_prompt_sent: true, retry: true };
     } else {
-      console.log(`[MESSAGING] PATH B: Recipient ${senderIgsid} does not follow @${creatorUsername}. Sending two-button follow prompt.`);
+      console.log(`[MESSAGING] PATH B: Follow not yet detected for sender_ref=${automationTimeline.hashCorrelationId(senderIgsid)}. Sending two-button follow prompt.`);
       const followPrompt = flow.followGate?.message || "Oops! Looks like you haven't followed me yet 👀\n\nIt would mean a lot if you could visit my profile and hit that follow button 😊";
 
       const followPromptPayload = {
@@ -2757,7 +2772,7 @@ async function executeMessagingJob(job) {
       );
     }
 
-    console.log(`[MESSAGING] Fresh follower check on user tap "${confirmBtn}" for ${senderIgsid}...`);
+    console.log(`[MESSAGING] Fresh follower check on user tap for sender_ref=${automationTimeline.hashCorrelationId(senderIgsid)}...`);
     const followStart = Date.now();
     const recheckResult = await instagramService.checkFollowStatus(recipientIgUserId, senderIgsid, tokenData.accessToken);
     const followDuration = Date.now() - followStart;
@@ -2781,7 +2796,7 @@ async function executeMessagingJob(job) {
     }));
 
     if (recheckResult.isFollowing === true && recheckResult.verified === true) {
-      console.log(`[MESSAGING] Follower confirmed! Delivering resource to ${senderIgsid}.`);
+      console.log(`[MESSAGING] Follower confirmed for sender_ref=${automationTimeline.hashCorrelationId(senderIgsid)}. Delivering resource.`);
       const successPrefix = flow.followGate?.successMessage || "You're all set! 🎉\n\nHere is your requested guide:";
       await deliverFinalResource({
         recipientIgUserId,
@@ -2831,7 +2846,7 @@ async function executeMessagingJob(job) {
       });
       return { success: true, delivered: false, retry: true };
     } else {
-      console.log(`[MESSAGING] Follow still not detected for ${senderIgsid}. Sending polite retry prompt.`);
+      console.log(`[MESSAGING] Follow still not detected for sender_ref=${automationTimeline.hashCorrelationId(senderIgsid)}. Sending polite retry prompt.`);
       const retryMsg = flow.followGate?.retryMessage || "Still not seeing that follow yet! 👀 If you just hit follow, please wait a few seconds for Instagram to sync and tap below to retry.";
 
       const retryPromptPayload = {

@@ -1189,12 +1189,18 @@ async function deleteUserAccount(userId, options = {}) {
 
 // Instagram Helpers
 async function getInstagramAccounts(ownerUserId) {
-  const { instagramAccounts } = collections();
+  const cols = (module.exports && typeof module.exports.collections === 'function')
+    ? module.exports.collections()
+    : collections();
+  const { instagramAccounts } = cols;
   return instagramAccounts.find({ $or: makeOwnerClauses(ownerUserId) }).sort({ connected_at: -1 }).toArray();
 }
 
 async function getInstagramAccount(ownerUserId, instagramUserId) {
-  const { instagramAccounts } = collections();
+  const cols = (module.exports && typeof module.exports.collections === 'function')
+    ? module.exports.collections()
+    : collections();
+  const { instagramAccounts } = cols;
   const ownerClauses = makeOwnerClauses(ownerUserId);
   const igClauses = makeIgClauses(instagramUserId);
   let account = await instagramAccounts.findOne({
