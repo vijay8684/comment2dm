@@ -96,8 +96,11 @@ function classifyMetaError(err, statusCode) {
 
   // 2. Messaging Window Policy Restriction (Permanent: User must interact first)
   const isWindowExpired = subcode === 2018278 ||
+    (subcode === 2018001 && (message.includes('window') || message.includes('24'))) ||
     message.includes('24 hours') ||
-    message.includes('outside allowed window');
+    message.includes('outside allowed window') ||
+    message.includes('outside 24 hour') ||
+    message.includes('messaging window');
 
   if (isWindowExpired) {
     return {
@@ -501,6 +504,13 @@ function pauseAccount(instagramAccountId, durationMs = 30000, reason = 'rate_lim
   accountPausedUntil.set(instagramAccountId, pauseUntil);
   sharedPauseCache.set(instagramAccountId, { pausedUntilMs: pauseUntil, lastCheckedAtMs: now });
   rateLimitEventsCount++;
+
+  try {
+    const webhookJobQueue = require('../jobs/webhookJobQueue');
+    if (webhookJobQueue && typeof webhookJobQueue.invalidatePausedAccountsCache === 'function') {
+      webhookJobQueue.invalidatePausedAccountsCache();
+    }
+  } catch (_) {}
 
   // Shared MongoDB persistence abstraction
   if (db && db.collections && db.collections().accountRateLimits) {

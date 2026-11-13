@@ -14,6 +14,8 @@ const { verifyWebhookSignature, verifyGetChallenge } = require('./src/services/w
 const webhookJobQueue = require('./src/jobs/webhookJobQueue');
 const webhookWorker = require('./src/jobs/webhookWorker');
 const metaRateLimiter = require('./src/services/metaRateLimiter');
+const emailService = require('./src/services/emailService');
+const automationTimeline = require('./src/services/automationTimeline');
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
@@ -74,6 +76,23 @@ async function loginRateLimit(request, response, next) {
     return next();
   } catch (error) {
     console.warn('Login rate limiter bypassed due to temporary DB latency:', error.message);
+    return next();
+  }
+}
+
+async function passwordChangeRateLimit(request, response, next) {
+  try {
+    const userId = request.user?.id || 'anon';
+    const ip = request.ip || request.socket.remoteAddress || 'unknown';
+    // Max 5 password update attempts per 15 minutes per user/IP
+    const allowed = await db.consumeRateLimit(`pwchange:${userId}:${ip}`, 15 * 60 * 1000, 5);
+    if (!allowed) {
+      response.setHeader('Retry-After', '900');
+      return response.status(429).json({ error: 'Too many password update attempts. Please try again in 15 minutes.' });
+    }
+    return next();
+  } catch (error) {
+    console.warn('Password change rate limiter bypassed due to temporary DB latency:', error.message);
     return next();
   }
 }
@@ -196,6 +215,23 @@ async function setAuthCookie(response, user, remember = true) {
   return sessionToken;
 }
 
+function attachUserAndCheckDeletion(request, response, user, sessionToken) {
+  if (user && (user.deletion_state === 'deleting' || user.deletion_state === 'deletion_failed')) {
+    if (request.method === 'DELETE' && request.path === '/api/account/delete') {
+      request.user = user;
+      request.sessionToken = sessionToken;
+      return true;
+    }
+    response.status(403).json({
+      error: 'This account is currently being deleted. No new operations can be performed.'
+    });
+    return false;
+  }
+  request.user = user;
+  request.sessionToken = sessionToken;
+  return true;
+}
+
 // Dual Session Auth Middleware: checks Bearer header first, then cookies
 async function requireAuth(request, response, next) {
   // 1. Authorization: Bearer <token>
@@ -205,8 +241,7 @@ async function requireAuth(request, response, next) {
     try {
       const user = await authService.getSessionUser(bearerToken);
       if (user) {
-        request.user = user;
-        request.sessionToken = bearerToken;
+        if (!attachUserAndCheckDeletion(request, response, user, bearerToken)) return;
         return next();
       }
     } catch (e) {}
@@ -218,8 +253,7 @@ async function requireAuth(request, response, next) {
     try {
       const user = await authService.getSessionUser(sessionToken);
       if (user) {
-        request.user = user;
-        request.sessionToken = sessionToken;
+        if (!attachUserAndCheckDeletion(request, response, user, sessionToken)) return;
         return next();
       }
     } catch (error) {
@@ -234,7 +268,7 @@ async function requireAuth(request, response, next) {
       const payload = verifyJwt(token);
       const user = await authService.getUserById(payload.sub);
       if (user) {
-        request.user = user;
+        if (!attachUserAndCheckDeletion(request, response, user, null)) return;
         return next();
       }
     } catch (error) {}
@@ -462,16 +496,54 @@ app.get('/api/me', requireAuth, (request, response) => {
 app.get('/api/settings', requireAuth, async (request, response, next) => {
   try {
     const user = await db.getUserById(request.user.id);
+    if (!user) {
+      return response.status(404).json({ error: 'User not found.' });
+    }
+    const hasPassword = Boolean(user.password_hash);
     return response.json({
       user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
+        id: user.id || (user._id ? user._id.toString() : ''),
+        name: user.name || '',
+        email: user.email || '',
         phone: user.phone || '',
+        bio: user.bio || '',
         avatarUrl: user.avatar_url || '',
-        createdAt: user.created_at || user.createdAt
+        createdAt: user.created_at || user.createdAt || '',
+        hasPassword: hasPassword,
+        isOAuth: !hasPassword
       },
-      preferences: { notifications: true, emailReports: true }
+      preferences: user.notification_preferences || {
+        dm_sent: false,
+        failed: false,
+        weekly: false,
+        billing: false
+      }
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// Legacy / alias endpoint to support callers expecting /api/auth/me
+app.get('/api/auth/me', requireAuth, async (request, response, next) => {
+  try {
+    const user = await db.getUserById(request.user.id);
+    if (!user) {
+      return response.status(404).json({ error: 'User not found.' });
+    }
+    const hasPassword = Boolean(user.password_hash);
+    return response.json({
+      user: {
+        id: user.id || (user._id ? user._id.toString() : ''),
+        name: user.name || '',
+        email: user.email || '',
+        phone: user.phone || '',
+        bio: user.bio || '',
+        avatarUrl: user.avatar_url || '',
+        createdAt: user.created_at || user.createdAt || '',
+        hasPassword: hasPassword,
+        isOAuth: !hasPassword
+      }
     });
   } catch (error) {
     return next(error);
@@ -480,31 +552,73 @@ app.get('/api/settings', requireAuth, async (request, response, next) => {
 
 app.patch('/api/settings/profile', requireAuth, async (request, response, next) => {
   try {
-    const { name, email, phone, avatarUrl } = request.body || {};
-    if (name && (name.length < 2 || name.length > 100)) {
-      return response.status(400).json({ error: 'Name must be between 2 and 100 characters.' });
-    }
-    if (email) {
-      const cleanEmail = email.trim().toLowerCase();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-        return response.status(400).json({ error: 'Enter a valid email address.' });
+    const { name, phone, bio, avatarUrl } = request.body || {};
+
+    if (name !== undefined) {
+      if (typeof name !== 'string') {
+        return response.status(400).json({ error: 'Name must be a text string.' });
       }
-      const existing = await db.getUserByEmail(cleanEmail);
-      if (existing && existing.id !== request.user.id) {
-        return response.status(409).json({ error: 'An account with that email already exists.' });
+      const trimmedName = name.trim();
+      if (trimmedName.length < 2 || trimmedName.length > 100) {
+        return response.status(400).json({ error: 'Name must be between 2 and 100 characters.' });
       }
     }
 
-    await db.updateUserProfile(request.user.id, { name, email, phone, avatarUrl });
+    if (phone !== undefined && phone !== null && phone !== '') {
+      if (typeof phone !== 'string') {
+        return response.status(400).json({ error: 'Phone must be a text string.' });
+      }
+      const trimmedPhone = phone.trim();
+      if (trimmedPhone.length > 20) {
+        return response.status(400).json({ error: 'Phone number cannot exceed 20 characters.' });
+      }
+    }
+
+    if (bio !== undefined && bio !== null && bio !== '') {
+      if (typeof bio !== 'string') {
+        return response.status(400).json({ error: 'Bio must be a text string.' });
+      }
+      const trimmedBio = bio.trim();
+      if (trimmedBio.length > 160) {
+        return response.status(400).json({ error: 'Bio cannot exceed 160 characters.' });
+      }
+    }
+
+    if (avatarUrl !== undefined && avatarUrl !== null && avatarUrl !== '') {
+      if (typeof avatarUrl !== 'string') {
+        return response.status(400).json({ error: 'Invalid avatar format.' });
+      }
+      const trimmedAvatar = avatarUrl.trim();
+      if (trimmedAvatar.length > 60000) {
+        return response.status(400).json({ error: 'Avatar image exceeds maximum allowed size of 40 KB.' });
+      }
+      const avatarMatch = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(trimmedAvatar);
+      if (!avatarMatch) {
+        return response.status(400).json({ error: 'Unsupported avatar format. Only JPEG, PNG, and WebP images are allowed.' });
+      }
+    }
+
+    // Do not allow arbitrary unverified email modification via profile update
+    await db.updateUserProfile(request.user.id, {
+      name,
+      phone,
+      bio,
+      avatarUrl
+    });
+
     const updated = await db.getUserById(request.user.id);
+    const hasPassword = Boolean(updated.password_hash);
     return response.json({
       user: {
-        id: updated.id,
-        name: updated.name,
-        email: updated.email,
+        id: updated.id || (updated._id ? updated._id.toString() : ''),
+        name: updated.name || '',
+        email: updated.email || '',
         phone: updated.phone || '',
+        bio: updated.bio || '',
         avatarUrl: updated.avatar_url || '',
-        createdAt: updated.created_at || updated.createdAt
+        createdAt: updated.created_at || updated.createdAt || '',
+        hasPassword: hasPassword,
+        isOAuth: !hasPassword
       }
     });
   } catch (error) {
@@ -512,14 +626,17 @@ app.patch('/api/settings/profile', requireAuth, async (request, response, next) 
   }
 });
 
-app.post('/api/settings/password', requireAuth, async (request, response, next) => {
+app.post('/api/settings/password', requireAuth, passwordChangeRateLimit, async (request, response, next) => {
   try {
     const { currentPassword, newPassword } = request.body || {};
     if (!currentPassword || !newPassword) {
       return response.status(400).json({ error: 'Current password and new password are required.' });
     }
-    if (newPassword.length < 6) {
-      return response.status(400).json({ error: 'New password must be at least 6 characters.' });
+    if (typeof newPassword !== 'string' || newPassword.length < 8) {
+      return response.status(400).json({ error: 'New password must be at least 8 characters.' });
+    }
+    if (newPassword.length > 128) {
+      return response.status(400).json({ error: 'New password cannot exceed 128 characters.' });
     }
 
     const userRecord = await db.getUserById(request.user.id);
@@ -534,7 +651,35 @@ app.post('/api/settings/password', requireAuth, async (request, response, next) 
 
     const newHash = await bcrypt.hash(newPassword, 12);
     await db.updateUserPassword(request.user.id, newHash);
+
+    // Invalidate other sessions to secure account across devices, preserving current session
+    if (authService.deleteOtherUserSessions) {
+      await authService.deleteOtherUserSessions(request.user.id, request.sessionToken);
+    }
+
+    // Trigger security alert email asynchronously if configured
+    emailService.sendPasswordChangedAlert(userRecord.email, userRecord.name).catch((emailErr) => {
+      console.warn('[Security] Could not dispatch password changed alert:', emailErr.message);
+    });
+
     return response.json({ success: true, message: 'Password updated successfully.' });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.patch('/api/settings/notifications', requireAuth, async (request, response, next) => {
+  try {
+    const body = request.body || {};
+    const prefs = body.preferences || body;
+    const cleanPrefs = {
+      dm_sent: Boolean(prefs.dm_sent),
+      failed: Boolean(prefs.failed),
+      weekly: Boolean(prefs.weekly),
+      billing: Boolean(prefs.billing)
+    };
+    await db.updateUserNotificationPreferences(request.user.id, cleanPrefs);
+    return response.json({ success: true, preferences: cleanPrefs });
   } catch (error) {
     return next(error);
   }
@@ -542,9 +687,44 @@ app.post('/api/settings/password', requireAuth, async (request, response, next) 
 
 app.delete('/api/account/delete', requireAuth, async (request, response, next) => {
   try {
-    await db.deleteUserAccount(request.user.id);
+    const { confirmation } = request.body || {};
+    if (confirmation !== 'DELETE') {
+      return response.status(400).json({ error: 'Confirmation required. Please type DELETE to confirm.' });
+    }
+
+    // Subscription protection: Prevent unsafe deletion if active or pending subscription exists
+    let activeSub;
+    try {
+      activeSub = await billing.getActiveSubscription(request.user.id);
+    } catch (subErr) {
+      console.error('[Account Deletion] Failed to verify subscription status:', subErr.message);
+      return response.status(503).json({
+        error: 'Unable to verify subscription status at this time. Please try again shortly.'
+      });
+    }
+
+    if (activeSub) {
+      return response.status(409).json({
+        error: 'Active subscription detected. Please cancel your subscription in Billing before deleting your account.'
+      });
+    }
+
+    try {
+      await db.deleteUserAccount(request.user.id);
+    } catch (delErr) {
+      if (delErr.code === 'DELETION_DRAIN_TIMEOUT' || delErr.statusCode === 503) {
+        console.warn(`[Account Deletion] Active dispatches still draining for user (user_ref: ${automationTimeline.hashCorrelationId(request.user.id)}). Returning 503.`);
+        return response.status(503).json({
+          error: delErr.message,
+          retryAfter: 2,
+          inProgress: true
+        });
+      }
+      throw delErr;
+    }
     response.clearCookie('comment2dm_session', { path: '/' });
     response.clearCookie('nudge_session', { path: '/' });
+    response.clearCookie('nudge_token', { path: '/' });
     return response.json({ success: true, message: 'Account deleted successfully.' });
   } catch (error) {
     return next(error);
@@ -1077,6 +1257,143 @@ const processingCommentIds = new Set();
 // In-memory set to deduplicate concurrent webhook postbacks / deliveries
 const processingDeliveryKeys = new Set();
 
+// Outbound Dispatch Lease Coordination helper with Unique Lease ID Tracking (Strictly Fail-Closed)
+async function safeDispatchOutbound(recipientIgUserId, workerId, dispatchFn, leaseOptions = {}) {
+  if (!db || typeof db.acquireDispatchLease !== 'function') {
+    console.error(`[DISPATCH LEASE REJECTED] Dispatch lease API unavailable for Instagram account. Aborting dispatch.`);
+    return { success: false, skipped: true, reason: 'LEASE_API_UNAVAILABLE' };
+  }
+
+  // Require the lease validation API to exist before proceeding
+  if (typeof db.isDispatchLeaseValid !== 'function') {
+    console.error(`[DISPATCH LEASE ERROR] isDispatchLeaseValid API unavailable. Aborting dispatch.`);
+    return { success: false, skipped: true, reason: 'LEASE_VALIDATION_API_UNAVAILABLE' };
+  }
+
+  // Require the lease release API to exist before proceeding
+  if (typeof db.releaseDispatchLease !== 'function') {
+    console.error(`[DISPATCH LEASE ERROR] releaseDispatchLease API unavailable. Aborting dispatch.`);
+    return { success: false, skipped: true, reason: 'LEASE_RELEASE_API_UNAVAILABLE' };
+  }
+
+  let lease;
+  let leaseDuration = 0;
+  try {
+    const leaseStart = Date.now();
+    lease = await db.acquireDispatchLease(recipientIgUserId, workerId);
+    leaseDuration = Date.now() - leaseStart;
+  } catch (leaseAcquireErr) {
+    console.error(`[DISPATCH LEASE ERROR] Exception during lease acquisition:`, leaseAcquireErr.message);
+    return { success: false, skipped: true, reason: 'LEASE_ACQUISITION_FAILED', error: leaseAcquireErr.message };
+  }
+
+  if (!lease || !lease.leaseId) {
+    console.warn(`[DISPATCH LEASE REJECTED] Instagram account is deleted, undergoing deletion, or database is unavailable. Aborting outbound dispatch.`);
+    return { success: false, skipped: true, reason: 'ACCOUNT_DELETED' };
+  }
+
+  // Once a lease has been acquired, put all subsequent validation, timing,
+  // dispatch and fallback work inside a try/finally block so the exact lease is always released.
+  let renewalFailed = false;
+  let leaseRenewTimer = null;
+
+  try {
+    // Verify the lease immediately before beginning the external Meta request
+    let preValid = false;
+    try {
+      preValid = await db.isDispatchLeaseValid(recipientIgUserId, lease.leaseId);
+    } catch (valErr) {
+      console.error(`[DISPATCH LEASE ERROR] Exception during pre-dispatch lease validation:`, valErr.message);
+      preValid = false;
+    }
+    if (!preValid) {
+      console.warn(`[DISPATCH LEASE LOST] Worker lost dispatch lease before outbound request. Halting.`);
+      const leaseLossErr = new Error(`Dispatch lease expired or reclaimed prior to request processing`);
+      leaseLossErr.code = 'LEASE_LOST';
+      leaseLossErr.retryable = false;
+      throw leaseLossErr;
+    }
+
+    if (leaseOptions.stage && typeof automationTimeline?.recordTimelineStage === 'function') {
+      automationTimeline.recordTimelineStage({
+        stage: leaseOptions.stage,
+        duration_ms: leaseDuration,
+        job_id: leaseOptions.job_id || null,
+        automation_id: leaseOptions.automation_id || null,
+        instagram_account_id: recipientIgUserId,
+        event_type: leaseOptions.event_type || null,
+        success: true
+      });
+    }
+
+    if (typeof db.renewDispatchLease === 'function') {
+      leaseRenewTimer = setInterval(async () => {
+        try {
+          const renewed = await db.renewDispatchLease(recipientIgUserId, lease.leaseId, 15000);
+          if (!renewed) renewalFailed = true;
+        } catch (_) {
+          renewalFailed = true;
+        }
+      }, 5000);
+      if (leaseRenewTimer.unref) leaseRenewTimer.unref();
+    }
+
+    console.log(`[STAGE: DISPATCH_LEASE_ACQUIRED]`, JSON.stringify({
+      worker_id: String(workerId || 'unknown'),
+      lease_id: lease.leaseId,
+      expires_at: lease.expiresAt
+    }));
+
+    const dispatchLease = {
+      ...lease,
+      isRenewalFailed: () => renewalFailed,
+      assertValid: async () => {
+        if (renewalFailed) {
+          const err = new Error('Dispatch lease renewal failed; halting outbound dispatch.');
+          err.code = 'LEASE_LOST';
+          err.retryable = false;
+          throw err;
+        }
+        let valid = false;
+        try {
+          valid = await db.isDispatchLeaseValid(recipientIgUserId, lease.leaseId);
+        } catch (_) {
+          valid = false;
+        }
+        if (!valid) {
+          const err = new Error('Dispatch lease expired or reclaimed prior to request processing.');
+          err.code = 'LEASE_LOST';
+          err.retryable = false;
+          throw err;
+        }
+        return true;
+      }
+    };
+
+    const res = await dispatchFn(dispatchLease);
+
+    if (renewalFailed) {
+      console.warn(`[DISPATCH LEASE RENEWAL WARNING] Lease renewal failed during dispatch for lease ${lease.leaseId}`);
+    }
+
+    return res;
+  } finally {
+    if (leaseRenewTimer) {
+      clearInterval(leaseRenewTimer);
+    }
+    try {
+      if (typeof db.releaseDispatchLease === 'function') {
+        await db.releaseDispatchLease(recipientIgUserId, lease.leaseId);
+        console.log(`[STAGE: DISPATCH_LEASE_RELEASED]`, JSON.stringify({
+          lease_id: lease.leaseId
+        }));
+      }
+    } catch (releaseErr) {
+      console.error(`[DISPATCH LEASE RELEASE ERROR] Failed to release dispatch lease safely:`, releaseErr.message);
+    }
+  }
+}
+
 // Deliver final resource helper (guaranteed idempotent)
 async function deliverFinalResource({
   recipientIgUserId,
@@ -1096,9 +1413,23 @@ async function deliverFinalResource({
   const deliveryHeartbeatIntervalMs = Number(options.deliveryHeartbeatIntervalMs) || Math.min(15000, Math.floor(deliveryLeaseMs / 2));
   const leaseExpiresAt = new Date(now.getTime() + deliveryLeaseMs);
 
+  // Safety check: ensure account was not deleted while delivery was queued or in-flight
+  if (db.collections && db.collections().instagramAccounts) {
+    const accountAlive = await db.collections().instagramAccounts.countDocuments({
+      $or: [
+        { instagram_user_id: recipientIgUserId },
+        { id: recipientIgUserId }
+      ]
+    });
+    if (!accountAlive) {
+      console.warn(`[DELIVERY DELETION GUARD] Instagram account was deleted while delivery was in-flight (account_ref: ${automationTimeline.hashCorrelationId(recipientIgUserId)}, state_ref: ${automationTimeline.hashCorrelationId(stateKey)}). Aborting dispatch.`);
+      return { success: false, skipped: true, reason: 'ACCOUNT_DELETED' };
+    }
+  }
+
   // Concurrency guard 1: In-memory lock
   if (processingDeliveryKeys.has(stateKey)) {
-    console.log(`[CONCURRENCY] Resource delivery already in progress for key ${stateKey}. Skipping duplicate.`);
+    console.log(`[CONCURRENCY] Resource delivery already in progress (state_ref: ${automationTimeline.hashCorrelationId(stateKey)}). Skipping duplicate.`);
     return;
   }
   processingDeliveryKeys.add(stateKey);
@@ -1127,12 +1458,12 @@ async function deliverFinalResource({
             }
           );
           if (res.matchedCount === 0) {
-            console.warn(`[DELIVERY LEASE LOSS] Worker ${workerToken} lost delivery lease for ${stateKey}`);
+            console.warn(`[DELIVERY LEASE LOSS] Worker lost delivery lease (state_ref: ${automationTimeline.hashCorrelationId(stateKey)})`);
             stopDeliveryHeartbeat();
           }
         }
       } catch (err) {
-        console.warn(`[DELIVERY HEARTBEAT] Error renewing lease for ${stateKey}:`, err.message);
+        console.warn(`[DELIVERY HEARTBEAT] Error renewing lease (state_ref: ${automationTimeline.hashCorrelationId(stateKey)}):`, err.message);
       }
     }, deliveryHeartbeatIntervalMs);
     if (deliveryHeartbeat.unref) deliveryHeartbeat.unref();
@@ -1213,16 +1544,16 @@ async function deliverFinalResource({
               }
             }
           );
-          console.warn(`[DELIVERY UNCERTAIN] Marked ${stateKey} as unknown: previous worker lease expired after request was dispatched.`);
+          console.warn(`[DELIVERY UNCERTAIN] Marked state_ref=${automationTimeline.hashCorrelationId(stateKey)} as unknown: previous worker lease expired after request was dispatched.`);
           return { success: false, reason: 'UNKNOWN_OUTCOME' };
         }
 
         if (checkDoc && (checkDoc.delivery_state === 'unknown' || checkDoc.delivery_state === 'sent' || checkDoc.resource_delivered === true)) {
-          console.log(`[IDEMPOTENCY] Resource delivery ${checkDoc.delivery_state} for ${stateKey}. Skipping.`);
+          console.log(`[IDEMPOTENCY] Resource delivery ${checkDoc.delivery_state} (state_ref: ${automationTimeline.hashCorrelationId(stateKey)}). Skipping.`);
           return { success: checkDoc.delivery_state === 'sent', reason: checkDoc.delivery_state };
         }
 
-        console.log(`[IDEMPOTENCY] Resource delivery already claimed, in progress or completed for ${stateKey}. Skipping.`);
+        console.log(`[IDEMPOTENCY] Resource delivery already claimed, in progress or completed (state_ref: ${automationTimeline.hashCorrelationId(stateKey)}). Skipping.`);
         return { success: false, reason: 'IN_PROGRESS' };
       }
     }
@@ -1288,103 +1619,165 @@ async function deliverFinalResource({
       );
     }
 
+    console.log(`[STAGE: META_REQUEST_STARTED]`, JSON.stringify({
+      auto_ref: automationTimeline.hashCorrelationId(automation.id),
+      account_ref: automationTimeline.hashCorrelationId(recipientIgUserId),
+      method: 'POST'
+    }));
+
     let metaSendResult;
-    try {
-      metaSendResult = await instagramService.sendDirectMessage(
-        recipientIgUserId,
-        senderIgsid,
-        deliveryPayload,
-        tokenData.accessToken
-      );
-    } catch (dmErr) {
-      // 1. Rate-limit errors: release lease, mark failed for retry, and rethrow
-      if (dmErr.statusCode === 429 || dmErr?.metaError?.code === 4 || dmErr?.metaError?.code === 17 || dmErr?.metaError?.code === 32 || dmErr?.metaError?.code === 613) {
-        if (db.collections && db.collections().conversationStates) {
-          await db.collections().conversationStates.updateOne(
-            { key: stateKey, delivery_worker_id: workerToken },
-            { $set: { delivery_state: 'failed', delivery_locked_until: null, last_delivery_error: dmErr.message, updated_at: new Date().toISOString() } }
-          );
+    const outboundResult = await safeDispatchOutbound(recipientIgUserId, workerToken, async (dispatchLease) => {
+      automationTimeline.recordTimelineStage({
+        stage: 'META_REQUEST_STARTED',
+        duration_ms: 0,
+        job_id: options?.context?.job_id || options?.context?.event_key || null,
+        automation_id: automation.id,
+        instagram_account_id: recipientIgUserId,
+        event_type: options?.context?.event_type || 'messaging_postback',
+        success: true
+      });
+      const metaStart = Date.now();
+      try {
+        metaSendResult = await instagramService.sendDirectMessage(
+          recipientIgUserId,
+          senderIgsid,
+          deliveryPayload,
+          tokenData.accessToken
+        );
+        const metaDuration = Date.now() - metaStart;
+        automationTimeline.recordTimelineStage({
+          stage: 'FINAL_MESSAGE_SENT',
+          duration_ms: metaDuration,
+          job_id: options?.context?.job_id || options?.context?.event_key || null,
+          automation_id: automation.id,
+          instagram_account_id: recipientIgUserId,
+          event_type: options?.context?.event_type || 'messaging_postback',
+          success: true,
+          status_code: 200
+        });
+      } catch (dmErr) {
+        // 1. Rate-limit errors: release lease, mark failed for retry, and rethrow
+        if (dmErr.statusCode === 429 || dmErr?.metaError?.code === 4 || dmErr?.metaError?.code === 17 || dmErr?.metaError?.code === 32 || dmErr?.metaError?.code === 613) {
+          if (db.collections && db.collections().conversationStates) {
+            await db.collections().conversationStates.updateOne(
+              { key: stateKey, delivery_worker_id: workerToken },
+              { $set: { delivery_state: 'failed', delivery_locked_until: null, last_delivery_error: dmErr.message, updated_at: new Date().toISOString() } }
+            );
+          }
+          throw dmErr;
         }
-        throw dmErr;
-      }
 
-      // 2. Unknown outcome (network timeout while awaiting response, socket hangup, connection drop)
-      const isUnknownOutcome = dmErr?.uncertainDelivery === true ||
-        dmErr?.requestDispatched === true ||
-        /timeout|socket hang up|econnreset|esockettimedout|network timeout|fetch failed/i.test(dmErr.message || '') ||
-        dmErr.statusCode === 504 || dmErr.status === 504;
-
-      if (isUnknownOutcome) {
-        console.warn(`[DELIVERY UNCERTAIN] Meta send outcome uncertain for ${stateKey}: ${dmErr.message}`);
-        if (db.collections && db.collections().conversationStates) {
-          await db.collections().conversationStates.updateOne(
-            { key: stateKey, delivery_worker_id: workerToken },
-            {
-              $set: {
-                delivery_state: 'unknown',
-                delivery_locked_until: null,
-                last_delivery_error: dmErr.message,
-                updated_at: new Date().toISOString()
-              }
-            }
-          );
+        // 2. Messaging window expiration (permanent failure: recipient must interact first)
+        const errorCategory = metaRateLimiter.classifyMetaError(dmErr).category;
+        if (errorCategory === 'MESSAGING_WINDOW') {
+          console.warn(`[DELIVERY WINDOW EXPIRED] 24-hr messaging window closed (state_ref: ${automationTimeline.hashCorrelationId(stateKey)}). User must interact first.`);
+          if (db.collections && db.collections().conversationStates) {
+            await db.collections().conversationStates.updateOne(
+              { key: stateKey, delivery_worker_id: workerToken },
+              { $set: { delivery_state: 'failed_permanent', delivery_locked_until: null, last_delivery_error: dmErr.message, updated_at: new Date().toISOString() } }
+            );
+          }
+          throw dmErr;
         }
-        throw dmErr;
-      }
 
-      // 3. Graceful fallback to text ONLY if template was definitely rejected by format error (400)
-      const isTemplateFormatRejection = (dmErr.statusCode === 400 || dmErr?.metaError?.code === 100) &&
-        deliveryPayload.attachment &&
-        (/template|button|attachment|format/i.test(dmErr.message || '') || /template|button|attachment|format/i.test(dmErr?.metaError?.message || ''));
+        // 3. Unknown outcome (network timeout while awaiting response, socket hangup, connection drop)
+        const isUnknownOutcome = dmErr?.uncertainDelivery === true ||
+          dmErr?.requestDispatched === true ||
+          dmErr?.name === 'TimeoutError' ||
+          dmErr?.name === 'AbortError' ||
+          /timeout|socket hang up|econnreset|esockettimedout|network timeout|fetch failed|aborted/i.test(dmErr.message || '') ||
+          dmErr.statusCode === 504 || dmErr.status === 504;
 
-      if (isTemplateFormatRejection) {
-        let fallbackText = deliveryText;
-        if (resourceUrl && !fallbackText.includes(resourceUrl)) {
-          fallbackText += `\n\n🔗 ${buttonText}: ${resourceUrl}`;
-        }
-        try {
-          metaSendResult = await instagramService.sendDirectMessage(
-            recipientIgUserId,
-            senderIgsid,
-            { text: fallbackText },
-            tokenData.accessToken
-          );
-        } catch (fallbackErr) {
-          const isFallbackUnknown = fallbackErr?.uncertainDelivery === true ||
-            fallbackErr?.requestDispatched === true ||
-            /timeout|socket hang up|econnreset|esockettimedout|network timeout|fetch failed/i.test(fallbackErr.message || '') ||
-            fallbackErr.statusCode === 504 || fallbackErr.status === 504;
-
+        if (isUnknownOutcome) {
+          console.warn(`[DELIVERY UNCERTAIN] Meta send outcome uncertain (state_ref: ${automationTimeline.hashCorrelationId(stateKey)}): ${dmErr.message}`);
           if (db.collections && db.collections().conversationStates) {
             await db.collections().conversationStates.updateOne(
               { key: stateKey, delivery_worker_id: workerToken },
               {
                 $set: {
-                  delivery_state: isFallbackUnknown ? 'unknown' : 'failed',
+                  delivery_state: 'unknown',
                   delivery_locked_until: null,
-                  last_delivery_error: fallbackErr.message,
+                  last_delivery_error: dmErr.message,
                   updated_at: new Date().toISOString()
                 }
               }
             );
           }
-          throw fallbackErr;
+          throw dmErr;
         }
-      } else {
-        if (db.collections && db.collections().conversationStates) {
-          await db.collections().conversationStates.updateOne(
-            { key: stateKey, delivery_worker_id: workerToken },
-            { $set: { delivery_state: 'failed', delivery_locked_until: null, last_delivery_error: dmErr.message, updated_at: new Date().toISOString() } }
-          );
+
+        // 3. Graceful fallback to text ONLY if template was definitely rejected by format error (400)
+        const isTemplateFormatRejection = (dmErr.statusCode === 400 || dmErr?.metaError?.code === 100) &&
+          deliveryPayload.attachment &&
+          (/template|button|attachment|format/i.test(dmErr.message || '') || /template|button|attachment|format/i.test(dmErr?.metaError?.message || ''));
+
+        if (isTemplateFormatRejection) {
+          let fallbackText = deliveryText;
+          if (resourceUrl && !fallbackText.includes(resourceUrl)) {
+            fallbackText += `\n\n🔗 ${buttonText}: ${resourceUrl}`;
+          }
+          try {
+            if (dispatchLease && typeof dispatchLease.assertValid === 'function') {
+              const isValid = await dispatchLease.assertValid();
+              if (isValid === false) {
+                const leaseLostErr = new Error('Dispatch lease expired or reclaimed prior to fallback send');
+                leaseLostErr.code = 'LEASE_LOST';
+                leaseLostErr.retryable = false;
+                throw leaseLostErr;
+              }
+            }
+            metaSendResult = await instagramService.sendDirectMessage(
+              recipientIgUserId,
+              senderIgsid,
+              { text: fallbackText },
+              tokenData.accessToken
+            );
+          } catch (fallbackErr) {
+            const isFallbackUnknown = fallbackErr?.uncertainDelivery === true ||
+              fallbackErr?.requestDispatched === true ||
+              /timeout|socket hang up|econnreset|esockettimedout|network timeout|fetch failed/i.test(fallbackErr.message || '') ||
+              fallbackErr.statusCode === 504 || fallbackErr.status === 504;
+
+            if (db.collections && db.collections().conversationStates) {
+              await db.collections().conversationStates.updateOne(
+                { key: stateKey, delivery_worker_id: workerToken },
+                {
+                  $set: {
+                    delivery_state: isFallbackUnknown ? 'unknown' : 'failed',
+                    delivery_locked_until: null,
+                    last_delivery_error: fallbackErr.message,
+                    updated_at: new Date().toISOString()
+                  }
+                }
+              );
+            }
+            throw fallbackErr;
+          }
+        } else {
+          if (db.collections && db.collections().conversationStates) {
+            await db.collections().conversationStates.updateOne(
+              { key: stateKey, delivery_worker_id: workerToken },
+              { $set: { delivery_state: 'failed', delivery_locked_until: null, last_delivery_error: dmErr.message, updated_at: new Date().toISOString() } }
+            );
+          }
+          throw dmErr;
         }
-        throw dmErr;
       }
+    }, {
+      stage: 'FINAL_RESOURCE_LEASE_ACQUIRED',
+      job_id: options?.context?.job_id || options?.context?.event_key || null,
+      automation_id: automation.id,
+      event_type: options?.context?.event_type || 'messaging_postback'
+    });
+
+    if (outboundResult && outboundResult.reason === 'ACCOUNT_DELETED') {
+      return outboundResult;
     }
 
     // 4. Require explicit Meta confirmation (message_id / id)
     const metaMsgId = metaSendResult?.message_id || metaSendResult?.id || null;
     if (!metaMsgId) {
-      console.warn(`[DELIVERY UNCONFIRMED] Meta response did not include message_id for ${stateKey}`);
+      console.warn(`[DELIVERY UNCONFIRMED] Meta response did not include message_id (state_ref: ${automationTimeline.hashCorrelationId(stateKey)})`);
       if (db.collections && db.collections().conversationStates) {
         await db.collections().conversationStates.updateOne(
           { key: stateKey, delivery_worker_id: workerToken },
@@ -1423,10 +1816,17 @@ async function deliverFinalResource({
         }
       );
       if (stateUpdateRes.matchedCount === 0) {
-        console.warn(`[DELIVERY LEASE LOSS] Stale worker ${workerToken} cannot mark ${stateKey} as sent: lease expired or reclaimed.`);
+        console.warn(`[DELIVERY LEASE LOSS] Stale worker lost delivery lease (state_ref: ${automationTimeline.hashCorrelationId(stateKey)})`);
         return { success: false, reason: 'LEASE_LOST' };
       }
     }
+
+    console.log(`[STAGE: META_REQUEST_COMPLETED]`, JSON.stringify({
+      auto_ref: automationTimeline.hashCorrelationId(automation.id),
+      account_ref: automationTimeline.hashCorrelationId(recipientIgUserId),
+      meta_message_id: metaMsgId,
+      delivery_result: 'DELIVERED'
+    }));
 
     // Log in automation_events
     if (db.collections && db.collections().automationEvents) {
@@ -1471,8 +1871,8 @@ async function executeCommentJob(job) {
       status: 'success'
     });
     if (alreadyDone) {
-      console.log(`[DEDUP] Skipping comment ${commentId}: already successfully replied.`);
-      return;
+      console.log(`[DEDUP] Skipping comment (cmt_ref: ${automationTimeline.hashCorrelationId(commentId)}): already successfully replied.`);
+      return { success: true, skipped: true, reason: 'ALREADY_REPLIED' };
     }
   }
 
@@ -1491,7 +1891,7 @@ async function executeCommentJob(job) {
   }
 
   if (!activeAutomations || activeAutomations.length === 0) {
-    console.log(`No active automations found for Instagram account ${recipientIgUserId}`);
+    console.log(`No active automations found for Instagram account (account_ref: ${automationTimeline.hashCorrelationId(recipientIgUserId)})`);
     return;
   }
 
@@ -1519,9 +1919,19 @@ async function executeCommentJob(job) {
   }
 
   if (!selectedAuto) {
-    console.log(`[TRIGGER] No matching automation keyword for comment "${commentText}" (Media: ${commentMediaId}).`);
+    console.log(`[TRIGGER] No matching automation keyword for comment (cmt_ref: ${automationTimeline.hashCorrelationId(commentId)}).`);
     return;
   }
+
+  automationTimeline.recordTimelineStage({
+    stage: 'AUTOMATION_CONFIG_RETRIEVED',
+    duration_ms: 0,
+    job_id: job.job_id || job.event_key || null,
+    automation_id: selectedAuto.id,
+    instagram_account_id: recipientIgUserId,
+    event_type: 'comment',
+    success: true
+  });
 
   // 4. Durable Opening DM Idempotency Claim before sending opening DM
   const claimKey = `${recipientIgUserId}:${commentId}:${selectedAuto.id}`;
@@ -1537,11 +1947,11 @@ async function executeCommentJob(job) {
     const existingClaim = await claimsCol.findOne({ claim_key: claimKey });
     if (existingClaim) {
       if (existingClaim.status === 'sent') {
-        console.log(`[DEDUP] Opening DM already sent for comment ${commentId} on automation ${selectedAuto.id}. Skipping.`);
+        console.log(`[DEDUP] Opening DM already sent for comment (cmt_ref: ${automationTimeline.hashCorrelationId(commentId)}, auto_ref: ${automationTimeline.hashCorrelationId(selectedAuto.id)}). Skipping.`);
         return { success: true, skipped: true, reason: 'ALREADY_SENT', meta_message_id: existingClaim.meta_message_id };
       }
       if (existingClaim.status === 'unknown') {
-        console.warn(`[IDEMPOTENCY] Opening DM for comment ${commentId} has unknown delivery outcome. Never blindly resending.`);
+        console.warn(`[IDEMPOTENCY] Opening DM for comment (cmt_ref: ${automationTimeline.hashCorrelationId(commentId)}) has unknown delivery outcome. Never blindly resending.`);
         return {
           success: false,
           skipped: true,
@@ -1551,7 +1961,7 @@ async function executeCommentJob(job) {
         };
       }
       if (existingClaim.status === 'failed_permanent' || (existingClaim.status === 'failed' && existingClaim.retryable === false)) {
-        console.log(`[IDEMPOTENCY] Opening DM for comment ${commentId} previously failed permanently. Skipping.`);
+        console.log(`[IDEMPOTENCY] Opening DM for comment (cmt_ref: ${automationTimeline.hashCorrelationId(commentId)}) previously failed permanently. Skipping.`);
         return {
           success: false,
           skipped: true,
@@ -1634,7 +2044,7 @@ async function executeCommentJob(job) {
             }
           }
         );
-        console.warn(`[IDEMPOTENCY UNCERTAIN] Marked ${claimKey} as unknown: previous worker lease expired after request dispatch.`);
+        console.warn(`[IDEMPOTENCY UNCERTAIN] Marked claim_ref=${automationTimeline.hashCorrelationId(claimKey)} as unknown: previous worker lease expired after request dispatch.`);
         return {
           success: false,
           skipped: true,
@@ -1645,7 +2055,7 @@ async function executeCommentJob(job) {
       }
 
       if (checkDoc && checkDoc.status === 'sent') {
-        console.log(`[DEDUP] Opening DM already sent for comment ${commentId}. Skipping.`);
+        console.log(`[DEDUP] Opening DM already sent for comment (cmt_ref: ${automationTimeline.hashCorrelationId(commentId)}). Skipping.`);
         return { success: true, skipped: true, reason: 'ALREADY_SENT' };
       }
       if (checkDoc && checkDoc.status === 'unknown') {
@@ -1667,12 +2077,12 @@ async function executeCommentJob(job) {
         };
       }
 
-      console.log(`[IDEMPOTENCY] Opening DM delivery already in progress or claimed by another worker for ${claimKey}. Skipping.`);
+      console.log(`[IDEMPOTENCY] Opening DM delivery already in progress or claimed by another worker (claim_ref: ${automationTimeline.hashCorrelationId(claimKey)}). Skipping.`);
       return { success: false, skipped: true, status: 'concurrent_claim', reason: 'IN_PROGRESS' };
     }
   }
 
-  console.log(`[TRIGGER] Matched automation ${selectedAuto.id} for comment "${commentText}" (ID: ${commentId}). Sending interactive opening DM...`);
+  console.log(`[TRIGGER] Matched automation (auto_ref: ${automationTimeline.hashCorrelationId(selectedAuto.id)}, cmt_ref: ${automationTimeline.hashCorrelationId(commentId)}). Sending interactive opening DM...`);
 
   try {
     // Ensure flow is loaded
@@ -1687,8 +2097,15 @@ async function executeCommentJob(job) {
     const flow = selectedAuto.flow || {};
     const isFollowGateEnabled = Boolean(flow.followGate?.enabled);
 
+    console.log(`[STAGE: COMMENT_RECEIVED]`, JSON.stringify({
+      auto_ref: automationTimeline.hashCorrelationId(selectedAuto.id),
+      job_ref: automationTimeline.hashCorrelationId(job.job_id || job.event_key),
+      account_ref: automationTimeline.hashCorrelationId(recipientIgUserId),
+      follow_gate_enabled: isFollowGateEnabled
+    }));
+
     // Prepare opening message text
-    let messageToSend = flow.openingMessage || selectedAuto.dm_message || "Hey! I'm so glad you're here — thanks for your interest 😊\n\nTap below and I'll send you the link in just a moment ✨";
+    let messageToSend = flow.openingMessage || selectedAuto.dm_message || "Hey! I'm so glad you're here — thanks for your interest 😊\n\nTap below or reply 'LINK' and I'll send you the link in just a moment ✨";
 
     if (fromUsername) {
       messageToSend = messageToSend.replace(/\{username\}/gi, `@${fromUsername}`);
@@ -1746,18 +2163,54 @@ async function executeCommentJob(job) {
       }
     }
 
-    // 1. Send Interactive Private DM
-    const sendResult = await instagramService.sendPrivateReply(
-      recipientIgUserId,
-      commentId,
-      msgPayload,
-      tokenData.accessToken
-    );
+    // Safety check & outbound lease coordination
+    let sendResult;
+    const outboundResult = await safeDispatchOutbound(recipientIgUserId, workerToken, async () => {
+      // 1. Send Interactive Private DM
+      automationTimeline.recordTimelineStage({
+        stage: 'META_REQUEST_STARTED',
+        duration_ms: 0,
+        job_id: job.job_id || job.event_key || null,
+        automation_id: selectedAuto.id,
+        instagram_account_id: recipientIgUserId,
+        event_type: 'comment',
+        success: true
+      });
+      const metaStart = Date.now();
+      sendResult = await instagramService.sendPrivateReply(
+        recipientIgUserId,
+        commentId,
+        msgPayload,
+        tokenData.accessToken
+      );
+      const metaDuration = Date.now() - metaStart;
+      automationTimeline.recordTimelineStage({
+        stage: 'META_RESPONSE_RECEIVED',
+        duration_ms: metaDuration,
+        job_id: job.job_id || job.event_key || null,
+        automation_id: selectedAuto.id,
+        instagram_account_id: recipientIgUserId,
+        event_type: 'comment',
+        success: true,
+        status_code: 200
+      });
+      return sendResult;
+    }, {
+      stage: 'OPENING_DM_LEASE_ACQUIRED',
+      job_id: job.job_id || job.event_key || null,
+      automation_id: selectedAuto.id,
+      event_type: 'comment'
+    });
+
+    if (outboundResult && outboundResult.reason === 'ACCOUNT_DELETED') {
+      console.warn(`[WORKER DELETION GUARD] Instagram account was deleted or undergoing deletion (account_ref: ${automationTimeline.hashCorrelationId(recipientIgUserId)}). Aborting dispatch.`);
+      return outboundResult;
+    }
 
     const metaMsgId = sendResult?.message_id || sendResult?.id || null;
 
     if (!metaMsgId) {
-      console.warn(`[OPENING DM UNCONFIRMED] Meta response missing message_id for ${claimKey}`);
+      console.warn(`[OPENING DM UNCONFIRMED] Meta response missing message_id (claim_ref: ${automationTimeline.hashCorrelationId(claimKey)})`);
       if (db.collections && db.collections().openingDmClaims) {
         await db.collections().openingDmClaims.updateOne(
           {
@@ -1801,7 +2254,7 @@ async function executeCommentJob(job) {
         }
       );
       if (successRes.matchedCount === 0) {
-        console.warn(`[STALE WORKER] Worker ${workerToken} delivered opening DM for ${claimKey}, but claim was no longer in processing state (e.g. lease expired and transitioned to unknown). Preserving existing claim status.`);
+        console.warn(`[STALE WORKER] Worker delivered opening DM (claim_ref: ${automationTimeline.hashCorrelationId(claimKey)}), but claim was no longer in processing state. Preserving existing claim status.`);
       }
     }
 
@@ -1824,6 +2277,7 @@ async function executeCommentJob(job) {
             button_title: openingBtnTitle,
             follow_gate_required: isFollowGateEnabled,
             resource_delivered: false,
+            delivery_state: 'not_started',
             meta_message_id: metaMsgId,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
@@ -1860,36 +2314,44 @@ async function executeCommentJob(job) {
         [selectedAuto.owner_user_id, recipientIgUserId, selectedAuto.id, commentId, 'private_reply', selectedAuto.keyword, messageToSend, 'success', new Date().toISOString()]
       );
     }
-    console.log(`[TRIGGER SUCCESS] Successfully sent opening DM for comment ID ${commentId}`);
+    console.log(`[TRIGGER SUCCESS] Successfully sent opening DM (cmt_ref: ${automationTimeline.hashCorrelationId(commentId)})`);
 
     // 4. Send Public Comment Reply in an isolated try/catch (if configured)
     if (selectedAuto.reply_template) {
       try {
-        const publicReplyResult = await instagramService.replyToComment(
-          commentId,
-          selectedAuto.reply_template,
-          tokenData.accessToken
-        );
-        if (db.collections && db.collections().automationEvents) {
-          await db.collections().automationEvents.insertOne({
-            event_id: crypto.randomUUID(),
-            owner_user_id: selectedAuto.owner_user_id,
-            instagram_user_id: recipientIgUserId,
-            automation_id: selectedAuto.id,
-            comment_id: commentId,
-            from_username: fromUsername,
-            from_id: fromId,
-            comment_text: commentText,
-            event_type: 'public_reply',
-            message_text: selectedAuto.reply_template,
-            status: 'success',
-            meta_comment_id: publicReplyResult?.id || null,
-            created_at: new Date().toISOString(),
-            created_at_date: new Date()
-          });
-        }
+        await safeDispatchOutbound(recipientIgUserId, workerToken, async (dispatchLease) => {
+          const publicReplyResult = await instagramService.replyToComment(
+            commentId,
+            selectedAuto.reply_template,
+            tokenData.accessToken
+          );
+          if (db.collections && db.collections().automationEvents) {
+            await db.collections().automationEvents.insertOne({
+              event_id: crypto.randomUUID(),
+              owner_user_id: selectedAuto.owner_user_id,
+              instagram_user_id: recipientIgUserId,
+              automation_id: selectedAuto.id,
+              comment_id: commentId,
+              from_username: fromUsername,
+              from_id: fromId,
+              comment_text: commentText,
+              event_type: 'public_reply',
+              message_text: selectedAuto.reply_template,
+              status: 'success',
+              meta_comment_id: publicReplyResult?.id || null,
+              created_at: new Date().toISOString(),
+              created_at_date: new Date()
+            });
+          }
+          return publicReplyResult;
+        }, {
+          stage: 'PUBLIC_REPLY_LEASE_ACQUIRED',
+          job_id: job.job_id || job.event_key || null,
+          automation_id: selectedAuto.id,
+          event_type: 'comment'
+        });
       } catch (publicErr) {
-        console.warn(`[PUBLIC REPLY NOTE] Public comment reply failed for comment ${commentId}: ${publicErr.message}`);
+        console.warn(`[PUBLIC REPLY NOTE] Public comment reply failed for comment (cmt_ref: ${automationTimeline.hashCorrelationId(commentId)}): ${publicErr.message}`);
         if (publicErr.statusCode === 429) {
           metaRateLimiter.pauseAccount(recipientIgUserId, publicErr.retryAfterSeconds || 60, 'Public reply rate limit', db);
         }
@@ -1977,7 +2439,7 @@ async function executeCommentJob(job) {
         }
       );
       if (failRes.matchedCount === 0) {
-        console.warn(`[STALE WORKER] Worker ${workerToken} failed for ${claimKey}, but claim was no longer in processing state (e.g. lease expired and transitioned to unknown). Preserving existing claim status.`);
+        console.warn(`[STALE WORKER] Worker failed for claim_ref: ${automationTimeline.hashCorrelationId(claimKey)}, but claim was no longer in processing state. Preserving existing claim status.`);
       }
     }
 
@@ -2000,7 +2462,7 @@ async function executeCommentJob(job) {
         created_at_date: new Date()
       });
     }
-    console.error(`Failed to execute automation for comment ${commentId}:`, apiErr.message);
+    console.error(`Failed to execute automation for comment (cmt_ref: ${automationTimeline.hashCorrelationId(commentId)}):`, apiErr.message);
     throw apiErr;
   }
 }
@@ -2013,38 +2475,166 @@ async function executeMessagingJob(job) {
   const payload = job.payload || '';
   const incomingText = job.message_text || '';
 
-  console.log(`[MESSAGING] Interactive event: action="${action}", sender="${senderIgsid}", recipient="${recipientIgUserId}"`);
+  console.log(`[MESSAGING] Interactive event: action="${action}", sender_ref="${automationTimeline.hashCorrelationId(senderIgsid)}", account_ref="${automationTimeline.hashCorrelationId(recipientIgUserId)}"`);
 
-  let targetAutomation = null;
-  if (autoId) {
-    targetAutomation = await db.get('SELECT * FROM automations WHERE id = ?', [autoId]);
-    if (!targetAutomation && db.collections && db.collections().automations) {
-      targetAutomation = await db.collections().automations.findOne({ id: autoId });
+  if (action === 'UNKNOWN_POSTBACK') {
+    console.warn(`[MESSAGING UNSUPPORTED] Unsupported button/postback payload from sender_ref=${automationTimeline.hashCorrelationId(senderIgsid)}. Safely ignored.`);
+    return { success: true, handled: false, reason: 'UNSUPPORTED_POSTBACK' };
+  }
+
+  // 1. Restore conversation state
+  let convState = null;
+  let resolvedAutoId = autoId;
+  let resolvedCommentId = commentId;
+
+  if (db.collections && db.collections().conversationStates) {
+    if (resolvedAutoId) {
+      const directKey = `${resolvedAutoId}:${recipientIgUserId}:${senderIgsid}`;
+      convState = await db.collections().conversationStates.findOne({
+        $or: [
+          { key: directKey },
+          { automation_id: resolvedAutoId, sender_igsid: senderIgsid },
+          { automation_id: resolvedAutoId, commenter_id: senderIgsid }
+        ]
+      });
+    }
+
+    if (!convState) {
+      const pendingQuery = {
+        instagram_user_id: recipientIgUserId,
+        $or: [
+          { sender_igsid: senderIgsid },
+          { commenter_id: senderIgsid }
+        ],
+        resource_delivered: { $ne: true }
+      };
+
+      let pendingList = [];
+      if (typeof db.collections().conversationStates.find === 'function') {
+        const cursor = db.collections().conversationStates.find(pendingQuery);
+        const sortCursor = cursor && typeof cursor.sort === 'function' ? cursor.sort({ updated_at: -1 }) : cursor;
+        pendingList = typeof sortCursor?.toArray === 'function' ? await sortCursor.toArray() : (Array.isArray(sortCursor) ? sortCursor : []);
+      }
+
+      if (pendingList.length === 1) {
+        // Exactly one pending conversation exists: deterministic & unambiguous
+        convState = pendingList[0];
+      } else if (pendingList.length > 1) {
+        // Multiple pending conversations exist (e.g. user commented on Reel A and Reel B).
+        // Try deterministic disambiguation using automation trigger keywords
+        const matchedCandidates = [];
+        for (const cand of pendingList) {
+          let candAuto = null;
+          if (cand.automation_id) {
+            if (db.collections && db.collections().automations) {
+              candAuto = await db.collections().automations.findOne({ id: cand.automation_id });
+            }
+            if (!candAuto && db.get) {
+              try {
+                candAuto = await db.get('SELECT * FROM automations WHERE id = ?', [cand.automation_id]);
+              } catch (_) {}
+            }
+          }
+          if (candAuto && incomingText && keywordMatches(incomingText, candAuto.keyword, candAuto.trigger_type)) {
+            const isWildcard = !candAuto.keyword || candAuto.keyword.trim() === '*' || candAuto.keyword.trim().toLowerCase() === 'all';
+            if (!isWildcard) {
+              matchedCandidates.push({ candidate: cand, auto: candAuto });
+            }
+          }
+        }
+
+        if (matchedCandidates.length === 1) {
+          convState = matchedCandidates[0].candidate;
+          console.log(`[CONVERSATION DISAMBIGUATED] Disambiguated multiple pending conversations for sender_ref=${automationTimeline.hashCorrelationId(senderIgsid)} to auto_ref=${automationTimeline.hashCorrelationId(convState.automation_id)}.`);
+        } else {
+          // Cannot determine unambiguously (e.g. generic "LINK" message or multiple/zero matches).
+          // MUST NOT deliver arbitrary resource or pick randomly.
+          console.warn(`[AMBIGUOUS_CONVERSATION] Multiple pending automations found for sender_ref=${automationTimeline.hashCorrelationId(senderIgsid)} (${pendingList.length} pending conversations). Cannot unambiguously determine target resource. Halting safely to prevent arbitrary resource delivery.`);
+          return {
+            success: false,
+            skipped: true,
+            reason: 'AMBIGUOUS_CONVERSATION',
+            candidate_count: pendingList.length
+          };
+        }
+      } else {
+        convState = await db.collections().conversationStates.findOne({
+          instagram_user_id: recipientIgUserId,
+          $or: [
+            { sender_igsid: senderIgsid },
+            { commenter_id: senderIgsid }
+          ]
+        }, { sort: { updated_at: -1 } });
+      }
     }
   }
 
+  if (convState) {
+    resolvedAutoId = resolvedAutoId || convState.automation_id;
+    resolvedCommentId = resolvedCommentId || convState.comment_id;
+    console.log(`[CONVERSATION RESTORED] Restored conversation state for sender_ref=${automationTimeline.hashCorrelationId(senderIgsid)} (State: ${convState.state}, auto_ref: ${automationTimeline.hashCorrelationId(convState.automation_id)}, cmt_ref: ${automationTimeline.hashCorrelationId(resolvedCommentId)})`);
+  }
+
+  let effectiveAction = action;
+  if (action === 'USER_RESPONSE') {
+    if (convState?.state === 'OPENING_DM_SENT') {
+      effectiveAction = 'SEND_LINK';
+    } else if (convState?.state === 'FOLLOW_PROMPT_SENT' || convState?.state === 'FOLLOW_RETRY_PROMPT' || convState?.state === 'VERIFICATION_ERROR') {
+      effectiveAction = 'CHECK_FOLLOW';
+    } else {
+      console.log(`[MESSAGING UNEXPECTED] User (sender_ref: ${automationTimeline.hashCorrelationId(senderIgsid)}) sent unexpected message. No automated dispatch warranted.`);
+      return { success: true, handled: false, reason: 'UNEXPECTED_MESSAGE' };
+    }
+  }
+
+  if (effectiveAction !== 'SEND_LINK' && effectiveAction !== 'CHECK_FOLLOW') {
+    console.log(`[MESSAGING UNEXPECTED] Unhandled action "${effectiveAction}" for user (sender_ref: ${automationTimeline.hashCorrelationId(senderIgsid)}).`);
+    return { success: true, handled: false, reason: 'UNEXPECTED_MESSAGE' };
+  }
+
+  let targetAutomation = null;
+  if (resolvedAutoId) {
+    if (db.collections && db.collections().automations) {
+      targetAutomation = await db.collections().automations.findOne({ id: resolvedAutoId });
+    }
+    if (!targetAutomation && db.get) {
+      try {
+        targetAutomation = await db.get('SELECT * FROM automations WHERE id = ?', [resolvedAutoId]);
+      } catch (_) {}
+    }
+  }
+
+  if (!targetAutomation && !convState) {
+    console.warn(`[CONVERSATION STATE MISSING] Missing conversation state and target automation for sender_ref=${automationTimeline.hashCorrelationId(senderIgsid)} on account_ref=${automationTimeline.hashCorrelationId(recipientIgUserId)}`);
+    return { success: false, skipped: true, reason: 'CONVERSATION_STATE_MISSING' };
+  }
+
   if (!targetAutomation) {
-    const active = await db.all(
-      'SELECT * FROM automations WHERE instagram_user_id = ? AND enabled = 1 ORDER BY updated_at DESC LIMIT 1',
-      [recipientIgUserId]
-    );
-    targetAutomation = active?.[0];
-    if (!targetAutomation && db.collections && db.collections().automations) {
+    if (db.collections && db.collections().automations) {
       targetAutomation = await db.collections().automations.findOne(
         { instagram_user_id: recipientIgUserId, enabled: { $in: [true, 1, '1'] } },
         { sort: { updated_at: -1 } }
       );
     }
+    if (!targetAutomation && db.all) {
+      try {
+        const active = await db.all(
+          'SELECT * FROM automations WHERE instagram_user_id = ? AND enabled = 1 ORDER BY updated_at DESC LIMIT 1',
+          [recipientIgUserId]
+        );
+        targetAutomation = active?.[0];
+      } catch (_) {}
+    }
   }
 
   if (!targetAutomation) {
-    console.log(`[MESSAGING] No matching automation for recipient ${recipientIgUserId}`);
-    return;
+    console.warn(`[CONVERSATION STATE MISSING] No matching automation for account_ref=${automationTimeline.hashCorrelationId(recipientIgUserId)}`);
+    return { success: false, skipped: true, reason: 'CONVERSATION_STATE_MISSING' };
   }
 
   if (String(targetAutomation.instagram_user_id) !== String(recipientIgUserId)) {
-    console.log(`[ROUTING] Ignoring cross-account event: automation ${targetAutomation.id} belongs to ${targetAutomation.instagram_user_id}, but delivered to ${recipientIgUserId}`);
-    return;
+    console.log(`[ROUTING] Ignoring cross-account event: auto_ref=${automationTimeline.hashCorrelationId(targetAutomation.id)} belongs to account_ref=${automationTimeline.hashCorrelationId(targetAutomation.instagram_user_id)}, but delivered to account_ref=${automationTimeline.hashCorrelationId(recipientIgUserId)}`);
+    return { success: false, skipped: true, reason: 'CROSS_ACCOUNT_EVENT' };
   }
 
   const tokenData = await instagramService.getDecryptedTokenByInstagramUserId(recipientIgUserId, targetAutomation.owner_user_id);
@@ -2052,20 +2642,24 @@ async function executeMessagingJob(job) {
   const creatorUsername = tokenData.username || 'creator';
   const stateKey = `${targetAutomation.id}:${targetAutomation.instagram_user_id}:${senderIgsid}`;
 
-  let convState = null;
-  if (db.collections && db.collections().conversationStates) {
-    convState = await db.collections().conversationStates.findOne({
-      $or: [
-        { key: stateKey },
-        { automation_id: targetAutomation.id, sender_igsid: senderIgsid },
-        { automation_id: targetAutomation.id, commenter_id: senderIgsid }
-      ]
-    });
-  }
+  const logContext = {
+    auto_ref: automationTimeline.hashCorrelationId(targetAutomation.id),
+    job_ref: automationTimeline.hashCorrelationId(job.job_id || job.event_key),
+    account_ref: automationTimeline.hashCorrelationId(recipientIgUserId),
+    action: effectiveAction
+  };
+
+  console.log(`[STAGE: INCOMING_MESSAGE_RECEIVED]`, JSON.stringify(logContext));
+  console.log(`[STAGE: CONVERSATION_STATE_CHECK]`, JSON.stringify({
+    ...logContext,
+    conversation_state_found: Boolean(convState),
+    conversation_state: convState?.state || null,
+    resource_delivered: convState?.resource_delivered || false
+  }));
 
   if (convState && convState.resource_delivered === true) {
-    console.log(`[IDEMPOTENCY] Resource already delivered to ${senderIgsid} for automation ${targetAutomation.id}. Ignoring duplicate trigger.`);
-    return;
+    console.log(`[IDEMPOTENCY] Resource already delivered (sender_ref: ${automationTimeline.hashCorrelationId(senderIgsid)}, auto_ref: ${automationTimeline.hashCorrelationId(targetAutomation.id)}). Ignoring duplicate trigger.`);
+    return { success: true, skipped: true, reason: 'ALREADY_DELIVERED' };
   }
 
   const profileBtn = (flow.followGate?.profileBtnText || flow.followGate?.buttonText || "Visit Profile").trim().slice(0, 20);
@@ -2075,11 +2669,25 @@ async function executeMessagingJob(job) {
     profileUrl = `https://instagram.com/${profileUrl.replace(/^@/, '')}`;
   }
 
-  if (action === 'SEND_LINK') {
+  // Safety check: ensure account was not deleted while messaging job was queued or in-flight
+  if (db.collections && db.collections().instagramAccounts) {
+    const accountAlive = await db.collections().instagramAccounts.countDocuments({
+      $or: [
+        { instagram_user_id: recipientIgUserId },
+        { id: recipientIgUserId }
+      ]
+    });
+    if (!accountAlive) {
+      console.warn(`[MESSAGING DELETION GUARD] Account was deleted while messaging job was in-flight (account_ref: ${automationTimeline.hashCorrelationId(recipientIgUserId)}). Aborting dispatch.`);
+      return { success: false, skipped: true, reason: 'ACCOUNT_DELETED' };
+    }
+  }
+
+  if (effectiveAction === 'SEND_LINK') {
     if (!flow.followGate?.enabled) {
-      console.log(`[MESSAGING] Follow gate disabled. Delivering resource immediately to ${senderIgsid}...`);
-      await deliverFinalResource({ recipientIgUserId, senderIgsid, automation: targetAutomation, tokenData, flow, commentId, workerId: job?.worker_id, options: { context: job } });
-      return;
+      console.log(`[MESSAGING] Follow gate disabled. Delivering resource immediately (sender_ref: ${automationTimeline.hashCorrelationId(senderIgsid)})...`);
+      await deliverFinalResource({ recipientIgUserId, senderIgsid, automation: targetAutomation, tokenData, flow, commentId: resolvedCommentId, workerId: job?.worker_id, options: { context: job } });
+      return { success: true, delivered: true };
     }
 
     if (db.collections && db.collections().conversationStates) {
@@ -2103,9 +2711,18 @@ async function executeMessagingJob(job) {
 
     const followResult = await instagramService.checkFollowStatus(recipientIgUserId, senderIgsid, tokenData.accessToken);
 
+    console.log(`[STAGE: FOLLOW_VERIFICATION]`, JSON.stringify({
+      ...logContext,
+      supported: followResult.supported,
+      is_following: followResult.isFollowing,
+      verified: followResult.verified,
+      error: followResult.error || null
+    }));
+
     if (followResult.isFollowing === true && followResult.verified === true) {
-      console.log(`[MESSAGING] PATH A: Recipient ${senderIgsid} already follows @${creatorUsername}. Delivering resource immediately.`);
-      await deliverFinalResource({ recipientIgUserId, senderIgsid, automation: targetAutomation, tokenData, flow, commentId, workerId: job?.worker_id, options: { context: job } });
+      console.log(`[MESSAGING] PATH A: Follow confirmed for sender_ref=${automationTimeline.hashCorrelationId(senderIgsid)}. Delivering resource immediately.`);
+      await deliverFinalResource({ recipientIgUserId, senderIgsid, automation: targetAutomation, tokenData, flow, commentId: resolvedCommentId, workerId: job?.worker_id, options: { context: job } });
+      return { success: true, delivered: true, follow_verified: true };
     } else if (followResult.supported === false || followResult.error || !followResult.verified) {
       console.warn(`[MESSAGING] Meta follow check unavailable or error: ${followResult.error || followResult.note}`);
       const retryNotice = "We couldn't verify your follow status right now due to a network or API delay. Please tap below to retry!";
@@ -2117,7 +2734,7 @@ async function executeMessagingJob(job) {
             text: retryNotice,
             buttons: [
               { type: 'web_url', url: profileUrl, title: profileBtn },
-              { type: 'postback', title: 'Retry Check 🔄'.slice(0, 20), payload: `CHECK_FOLLOW:${targetAutomation.id}:${commentId}` }
+              { type: 'postback', title: 'Retry Check 🔄'.slice(0, 20), payload: `CHECK_FOLLOW:${targetAutomation.id}:${resolvedCommentId || ''}` }
             ]
           }
         }
@@ -2130,16 +2747,22 @@ async function executeMessagingJob(job) {
         );
       }
 
-      try {
-        await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, retryPayload, tokenData.accessToken);
-      } catch (_) {
-        await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, {
-          text: `${retryNotice}\n\n👉 Profile: ${profileUrl}`,
-          quick_replies: [{ content_type: 'text', title: 'Retry Check 🔄'.slice(0, 20), payload: `CHECK_FOLLOW:${targetAutomation.id}:${commentId}` }]
-        }, tokenData.accessToken);
-      }
+      await safeDispatchOutbound(recipientIgUserId, job?.worker_id, async (dispatchLease) => {
+        try {
+          await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, retryPayload, tokenData.accessToken);
+        } catch (_) {
+          if (dispatchLease && typeof dispatchLease.assertValid === 'function') {
+            await dispatchLease.assertValid();
+          }
+          await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, {
+            text: `${retryNotice}\n\n👉 Profile: ${profileUrl}`,
+            quick_replies: [{ content_type: 'text', title: 'Retry Check 🔄'.slice(0, 20), payload: `CHECK_FOLLOW:${targetAutomation.id}:${resolvedCommentId || ''}` }]
+          }, tokenData.accessToken);
+        }
+      });
+      return { success: true, delivered: false, follow_prompt_sent: true, retry: true };
     } else {
-      console.log(`[MESSAGING] PATH B: Recipient ${senderIgsid} does not follow @${creatorUsername}. Sending two-button follow prompt.`);
+      console.log(`[MESSAGING] PATH B: Follow not yet detected for sender_ref=${automationTimeline.hashCorrelationId(senderIgsid)}. Sending two-button follow prompt.`);
       const followPrompt = flow.followGate?.message || "Oops! Looks like you haven't followed me yet 👀\n\nIt would mean a lot if you could visit my profile and hit that follow button 😊";
 
       const followPromptPayload = {
@@ -2150,7 +2773,7 @@ async function executeMessagingJob(job) {
             text: followPrompt,
             buttons: [
               { type: 'web_url', url: profileUrl, title: profileBtn },
-              { type: 'postback', title: confirmBtn, payload: `CHECK_FOLLOW:${targetAutomation.id}:${commentId}` }
+              { type: 'postback', title: confirmBtn, payload: `CHECK_FOLLOW:${targetAutomation.id}:${resolvedCommentId || ''}` }
             ]
           }
         }
@@ -2175,21 +2798,27 @@ async function executeMessagingJob(job) {
         );
       }
 
-      try {
-        await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, followPromptPayload, tokenData.accessToken);
-      } catch (dmErr) {
-        await instagramService.sendDirectMessage(
-          recipientIgUserId,
-          senderIgsid,
-          {
-            text: `${followPrompt}\n\n👉 ${profileBtn}: ${profileUrl}`,
-            quick_replies: [{ content_type: 'text', title: confirmBtn, payload: `CHECK_FOLLOW:${targetAutomation.id}:${commentId}` }]
-          },
-          tokenData.accessToken
-        );
-      }
+      await safeDispatchOutbound(recipientIgUserId, job?.worker_id, async (dispatchLease) => {
+        try {
+          await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, followPromptPayload, tokenData.accessToken);
+        } catch (dmErr) {
+          if (dispatchLease && typeof dispatchLease.assertValid === 'function') {
+            await dispatchLease.assertValid();
+          }
+          await instagramService.sendDirectMessage(
+            recipientIgUserId,
+            senderIgsid,
+            {
+              text: `${followPrompt}\n\n👉 ${profileBtn}: ${profileUrl}`,
+              quick_replies: [{ content_type: 'text', title: confirmBtn, payload: `CHECK_FOLLOW:${targetAutomation.id}:${resolvedCommentId || ''}` }]
+            },
+            tokenData.accessToken
+          );
+        }
+      });
+      return { success: true, delivered: false, follow_prompt_sent: true };
     }
-  } else if (action === 'CHECK_FOLLOW') {
+  } else if (effectiveAction === 'CHECK_FOLLOW') {
     if (db.collections && db.collections().conversationStates) {
       await db.collections().conversationStates.updateOne(
         { key: stateKey },
@@ -2197,11 +2826,31 @@ async function executeMessagingJob(job) {
       );
     }
 
-    console.log(`[MESSAGING] Fresh follower check on user tap "${confirmBtn}" for ${senderIgsid}...`);
+    console.log(`[MESSAGING] Fresh follower check on user tap for sender_ref=${automationTimeline.hashCorrelationId(senderIgsid)}...`);
+    const followStart = Date.now();
     const recheckResult = await instagramService.checkFollowStatus(recipientIgUserId, senderIgsid, tokenData.accessToken);
+    const followDuration = Date.now() - followStart;
+    automationTimeline.recordTimelineStage({
+      stage: 'FOLLOW_VERIFICATION_COMPLETED',
+      duration_ms: followDuration,
+      job_id: job.job_id || job.event_key || null,
+      automation_id: targetAutomation.id,
+      instagram_account_id: recipientIgUserId,
+      event_type: 'messaging_postback',
+      success: Boolean(recheckResult && recheckResult.isFollowing && recheckResult.verified),
+      status_code: 200
+    });
+
+    console.log(`[STAGE: FOLLOW_VERIFICATION]`, JSON.stringify({
+      ...logContext,
+      supported: recheckResult.supported,
+      is_following: recheckResult.isFollowing,
+      verified: recheckResult.verified,
+      error: recheckResult.error || null
+    }));
 
     if (recheckResult.isFollowing === true && recheckResult.verified === true) {
-      console.log(`[MESSAGING] Follower confirmed! Delivering resource to ${senderIgsid}.`);
+      console.log(`[MESSAGING] Follower confirmed for sender_ref=${automationTimeline.hashCorrelationId(senderIgsid)}. Delivering resource.`);
       const successPrefix = flow.followGate?.successMessage || "You're all set! 🎉\n\nHere is your requested guide:";
       await deliverFinalResource({
         recipientIgUserId,
@@ -2209,11 +2858,12 @@ async function executeMessagingJob(job) {
         automation: targetAutomation,
         tokenData,
         flow,
-        commentId,
+        commentId: resolvedCommentId,
         prefixMessage: successPrefix,
         workerId: job?.worker_id,
         options: { context: job }
       });
+      return { success: true, delivered: true, follow_verified: true };
     } else if (recheckResult.supported === false || recheckResult.error || !recheckResult.verified) {
       console.warn(`[MESSAGING] Meta follower recheck error: ${recheckResult.error || recheckResult.note}`);
       const retryNotice = "We couldn't verify your follow status right now due to a network or API delay. Please tap below to retry!";
@@ -2225,7 +2875,7 @@ async function executeMessagingJob(job) {
             text: retryNotice,
             buttons: [
               { type: 'web_url', url: profileUrl, title: profileBtn },
-              { type: 'postback', title: 'Retry Check 🔄'.slice(0, 20), payload: `CHECK_FOLLOW:${targetAutomation.id}:${commentId}` }
+              { type: 'postback', title: 'Retry Check 🔄'.slice(0, 20), payload: `CHECK_FOLLOW:${targetAutomation.id}:${resolvedCommentId || ''}` }
             ]
           }
         }
@@ -2238,16 +2888,22 @@ async function executeMessagingJob(job) {
         );
       }
 
-      try {
-        await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, retryPayload, tokenData.accessToken);
-      } catch (_) {
-        await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, {
-          text: `${retryNotice}\n\n👉 Profile: ${profileUrl}`,
-          quick_replies: [{ content_type: 'text', title: 'Retry Check 🔄'.slice(0, 20), payload: `CHECK_FOLLOW:${targetAutomation.id}:${commentId}` }]
-        }, tokenData.accessToken);
-      }
+      await safeDispatchOutbound(recipientIgUserId, job?.worker_id, async (dispatchLease) => {
+        try {
+          await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, retryPayload, tokenData.accessToken);
+        } catch (_) {
+          if (dispatchLease && typeof dispatchLease.assertValid === 'function') {
+            await dispatchLease.assertValid();
+          }
+          await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, {
+            text: `${retryNotice}\n\n👉 Profile: ${profileUrl}`,
+            quick_replies: [{ content_type: 'text', title: 'Retry Check 🔄'.slice(0, 20), payload: `CHECK_FOLLOW:${targetAutomation.id}:${resolvedCommentId || ''}` }]
+          }, tokenData.accessToken);
+        }
+      });
+      return { success: true, delivered: false, retry: true };
     } else {
-      console.log(`[MESSAGING] Follow still not detected for ${senderIgsid}. Sending polite retry prompt.`);
+      console.log(`[MESSAGING] Follow still not detected for sender_ref=${automationTimeline.hashCorrelationId(senderIgsid)}. Sending polite retry prompt.`);
       const retryMsg = flow.followGate?.retryMessage || "Still not seeing that follow yet! 👀 If you just hit follow, please wait a few seconds for Instagram to sync and tap below to retry.";
 
       const retryPromptPayload = {
@@ -2258,7 +2914,7 @@ async function executeMessagingJob(job) {
             text: retryMsg,
             buttons: [
               { type: 'web_url', url: profileUrl, title: profileBtn },
-              { type: 'postback', title: confirmBtn, payload: `CHECK_FOLLOW:${targetAutomation.id}:${commentId}` }
+              { type: 'postback', title: confirmBtn, payload: `CHECK_FOLLOW:${targetAutomation.id}:${resolvedCommentId || ''}` }
             ]
           }
         }
@@ -2271,14 +2927,20 @@ async function executeMessagingJob(job) {
         );
       }
 
-      try {
-        await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, retryPromptPayload, tokenData.accessToken);
-      } catch (_) {
-        await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, {
-          text: `${retryMsg}\n\n👉 Visit Profile: ${profileUrl}`,
-          quick_replies: [{ content_type: 'text', title: confirmBtn, payload: `CHECK_FOLLOW:${targetAutomation.id}:${commentId}` }]
-        }, tokenData.accessToken);
-      }
+      await safeDispatchOutbound(recipientIgUserId, job?.worker_id, async (dispatchLease) => {
+        try {
+          await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, retryPromptPayload, tokenData.accessToken);
+        } catch (_) {
+          if (dispatchLease && typeof dispatchLease.assertValid === 'function') {
+            await dispatchLease.assertValid();
+          }
+          await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, {
+            text: `${retryMsg}\n\n👉 Visit Profile: ${profileUrl}`,
+            quick_replies: [{ content_type: 'text', title: confirmBtn, payload: `CHECK_FOLLOW:${targetAutomation.id}:${resolvedCommentId || ''}` }]
+          }, tokenData.accessToken);
+        }
+      });
+      return { success: true, delivered: false, follow_retry_sent: true };
     }
   }
 }
@@ -3259,4 +3921,4 @@ if (require.main === module) {
   process.on('SIGINT', () => handleGracefulShutdown('SIGINT'));
 }
 // Export handlers for automated testing
-module.exports = { app, deliverFinalResource, executeCommentJob, executeMessagingJob, executeWebhookJob, isAdminEmail, getAdminEmails };
+module.exports = { app, deliverFinalResource, executeCommentJob, executeMessagingJob, executeWebhookJob, safeDispatchOutbound, isAdminEmail, getAdminEmails };

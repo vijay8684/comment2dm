@@ -4,6 +4,7 @@
 const crypto = require('crypto');
 const webhookJobQueue = require('./webhookJobQueue');
 const metaRateLimiter = require('../services/metaRateLimiter');
+const automationTimeline = require('../services/automationTimeline');
 
 let isWorkerRunning = false;
 let isPolling = false;
@@ -234,6 +235,12 @@ function startWorker(db, jobExecutor, options = {}) {
 
     const pollExecution = (async () => {
       try {
+        automationTimeline.recordTimelineStage({
+          stage: 'WORKER_WOKE_UP',
+          duration_ms: 0,
+          success: true
+        });
+
         while (
           isWorkerRunning &&
           workerGeneration === currentGen &&
@@ -242,11 +249,13 @@ function startWorker(db, jobExecutor, options = {}) {
           // Build exclusion list combining aggregate per-account concurrency and rate-limit pauses across generations
           const excludedAccounts = getAggregateExcludedAccounts();
 
+          const claimStart = Date.now();
           const job = await webhookJobQueue.claimNextJob(db, {
             workerId: currentWorkerId,
             leaseMs: webhookJobQueue.JOB_LEASE_MS,
             excludedAccountIds: excludedAccounts
           });
+          const claimDuration = Date.now() - claimStart;
 
           // Check if worker was stopped or restarted while claim operation was in-flight
           if (!isWorkerRunning || workerGeneration !== currentGen) {
@@ -260,6 +269,15 @@ function startWorker(db, jobExecutor, options = {}) {
             // No more eligible jobs in this cycle
             break;
           }
+
+          automationTimeline.recordTimelineStage({
+            stage: 'JOB_CLAIMED',
+            duration_ms: claimDuration,
+            job_id: job.event_key || job.job_id,
+            instagram_account_id: job.instagram_account_id,
+            event_type: job.event_type,
+            success: true
+          });
 
           // Double check aggregate concurrency limits before dispatch
           if (
@@ -418,7 +436,17 @@ async function processClaimedJob(job, jobExecutor, db, explicitWorkerId, explici
     }
 
     // 2. Pacing Guard: respects global and account micro-pacing
+    const paceStart = Date.now();
     await metaRateLimiter.paceRequest(accId, db);
+    const paceDuration = Date.now() - paceStart;
+    automationTimeline.recordTimelineStage({
+      stage: 'META_RATE_LIMIT_CHECKED',
+      duration_ms: paceDuration,
+      job_id: jobId,
+      instagram_account_id: accId,
+      event_type: job.event_type,
+      success: true
+    });
 
     // 3. Execute business logic
     const execRes = await jobExecutor(job);
@@ -445,10 +473,20 @@ async function processClaimedJob(job, jobExecutor, db, explicitWorkerId, explici
     }
 
     // 4. Mark success with explicit targetWorkerId ownership and lease verification
+    const successStart = Date.now();
     const successRes = await webhookJobQueue.handleJobSuccess(job, { worker_id: targetWorkerId }, db);
+    const successDuration = Date.now() - successStart;
     if (!successRes || successRes === false || successRes.success === false || successRes.status === 'stale_worker') {
       console.warn(`[WORKER LEASE LOSS] Worker ${targetWorkerId} executed job ${jobId}, but lease was lost before committing success.`);
     } else {
+      automationTimeline.recordTimelineStage({
+        stage: 'JOB_COMPLETED',
+        duration_ms: successDuration,
+        job_id: jobId,
+        instagram_account_id: accId,
+        event_type: job.event_type,
+        success: true
+      });
       totalProcessedCount++;
     }
   } catch (err) {

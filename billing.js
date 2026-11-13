@@ -188,14 +188,18 @@
       }
 
       // Then fetch user billing status
-      const res = await fetch('/api/billing/status', { headers: window.getAuthHeaders ? window.getAuthHeaders() : {} });
+      const res = await fetch('/api/billing/status', {
+        headers: window.getAuthHeaders ? window.getAuthHeaders() : {},
+        credentials: 'same-origin'
+      });
       if (!res.ok) { renderPlanCards(); return; }
       
       const data = await res.json();
       currentPlan = (data.plan || 'free').toLowerCase();
       const used = data.usage?.dmMonthly || 0;
-      const limit = data.limits?.dmMonthly || 300;
-      const pct = Math.min(100, Math.round((used / limit) * 100));
+      const isUnlimited = data.isAdmin || data.limits?.dmMonthly === null || data.limits?.dmMonthly === Infinity;
+      const limit = isUnlimited ? 'Unlimited' : (data.limits?.dmMonthly || (currentPlan === 'elite' ? 50000 : currentPlan === 'pro' ? 5000 : 300));
+      const pct = isUnlimited ? 0 : Math.min(100, Math.round((used / (typeof limit === 'number' ? limit : 300)) * 100));
       const planName = currentPlan.charAt(0).toUpperCase() + currentPlan.slice(1);
 
       const pn = document.getElementById('currentPlanName');
@@ -203,9 +207,9 @@
       const bar = document.getElementById('dmUsageBar');
       const txt = document.getElementById('dmUsageText');
       if (pn) pn.textContent = planName;
-      if (pb) { pb.textContent = planName; pb.className = `plan-badge ${currentPlan}`; }
+      if (pb) { pb.textContent = currentPlan.toUpperCase(); pb.className = `plan-badge ${currentPlan}`; }
       if (bar) bar.style.width = pct + '%';
-      if (txt) txt.textContent = `${used.toLocaleString()} / ${limit.toLocaleString()}`;
+      if (txt) txt.textContent = `${used.toLocaleString()} / ${typeof limit === 'number' ? limit.toLocaleString() : limit}`;
 
       renderPlanCards();
     } catch {
@@ -216,7 +220,10 @@
   // ── Load user email ────────────────────────────────────────────────────────
   async function loadUser() {
     try {
-      const res = await fetch('/api/auth/me', { headers: window.getAuthHeaders ? window.getAuthHeaders() : {} });
+      const res = await fetch('/api/settings', {
+        headers: window.getAuthHeaders ? window.getAuthHeaders() : {},
+        credentials: 'same-origin'
+      });
       if (!res.ok) return;
       const data = await res.json();
       userEmail = (data.user || data).email || '';
@@ -226,7 +233,10 @@
   // ── Load payment history ───────────────────────────────────────────────────
   async function loadHistory() {
     try {
-      const res = await fetch('/api/billing/history', { headers: window.getAuthHeaders ? window.getAuthHeaders() : {} });
+      const res = await fetch('/api/billing/history', {
+        headers: window.getAuthHeaders ? window.getAuthHeaders() : {},
+        credentials: 'same-origin'
+      });
       if (!res.ok) return;
       const data = await res.json();
       const payments = data.payments || data || [];

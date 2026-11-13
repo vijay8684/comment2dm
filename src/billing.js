@@ -220,11 +220,12 @@ async function auth(req) {
       const user = await authService.getSessionUser(token);
       if (user) return user;
     }
-    if (req.cookies?.nudge_session) {
-      const user = await authService.getSessionUser(req.cookies.nudge_session);
+    const sessionToken = req.cookies?.comment2dm_session || req.cookies?.nudge_session;
+    if (sessionToken) {
+      const user = await authService.getSessionUser(sessionToken);
       if (user) return user;
     }
-    const token = req.cookies?.nudge_token;
+    const token = req.cookies?.comment2dm_token || req.cookies?.nudge_token;
     if (token) {
       const p = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'], issuer: 'nudge-app', audience: 'nudge-web' });
       return p?.sub ? await authService.getUserById(p.sub) : null;
@@ -234,6 +235,10 @@ async function auth(req) {
     return null;
   }
 }
+
+// In-memory short-lived entitlement cache to avoid redundant database reads during high-frequency automation processing
+const globalEntitlementCache = new Map();
+const GLOBAL_ENTITLEMENT_TTL_MS = 15000;
 
 async function entitlement(uid, contextOrOptions = null) {
   if (!uid) {
@@ -365,13 +370,12 @@ async function billingRateLimit(req, res, next) {
 }
 
 async function razor() {
+  if (rz) return rz;
   if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) return null;
-  if (!rz) {
-    rz = new Razorpay({
-      key_id: process.env.RAZORPAY_KEY_ID,
-      key_secret: process.env.RAZORPAY_KEY_SECRET
-    });
-  }
+  rz = new Razorpay({
+    key_id: process.env.RAZORPAY_KEY_ID,
+    key_secret: process.env.RAZORPAY_KEY_SECRET
+  });
   return rz;
 }
 
@@ -544,17 +548,60 @@ async function cancel(req, res) {
 
   const d = await store();
   const s = await d.collection('subscriptions').findOne(
-    { user_id: u.id, status: { $in: ['created', 'authenticated', 'active', 'pending'] } },
+    { user_id: u.id, status: { $in: ['created', 'authenticated', 'active', 'pending', 'halted'] } },
     { sort: { created_at: -1 } }
   );
   if (!s) return res.status(404).json({ error: 'No active subscription found.' });
 
-  const r = await razor();
-  if (r && s.razorpay_subscription_id) {
-    await r.subscriptions.cancel(s.razorpay_subscription_id, false).catch(() => {});
+  if (s.razorpay_subscription_id) {
+    const r = await razor();
+    if (!r) {
+      console.warn('[Billing Cancel] Payment provider unavailable for subscription:', s.razorpay_subscription_id);
+      return res.status(503).json({
+        error: 'Payment provider is currently unavailable. Please try again later.'
+      });
+    }
+
+    try {
+      const cancelRes = await r.subscriptions.cancel(s.razorpay_subscription_id, false);
+      if (!cancelRes || (cancelRes.status && cancelRes.status !== 'cancelled' && cancelRes.status !== 'completed')) {
+        console.warn('[Billing Cancel] Razorpay cancellation unconfirmed:', cancelRes);
+        return res.status(502).json({
+          error: 'Payment provider did not confirm subscription cancellation. Your subscription remains active. Please try again or contact support.'
+        });
+      }
+    } catch (rzErr) {
+      console.error('[Billing Cancel] Razorpay cancellation failed:', rzErr.message);
+      return res.status(502).json({
+        error: 'Unable to cancel subscription with payment provider. Your subscription remains active. Please try again or contact support.'
+      });
+    }
   }
-  await d.collection('subscriptions').updateOne({ _id: s._id }, { $set: { status: 'cancelled', updated_at: new Date().toISOString() } });
+
+  try {
+    const updateRes = await d.collection('subscriptions').updateOne(
+      { _id: s._id },
+      { $set: { status: 'cancelled', updated_at: new Date().toISOString() } }
+    );
+    if (!updateRes || (updateRes.matchedCount === 0 && updateRes.modifiedCount === 0)) {
+      throw new Error('Local database update matched 0 documents');
+    }
+  } catch (dbErr) {
+    console.error('[Billing Cancel] Failed to update local subscription record:', dbErr.message);
+    return res.status(500).json({
+      error: 'Subscription was cancelled with payment provider, but failed to update local records. Please refresh or contact support.'
+    });
+  }
+
   return res.json({ cancelled: true });
+}
+
+async function getActiveSubscription(uid) {
+  const d = await store();
+  return await d.collection('subscriptions').findOne({
+    user_id: String(uid),
+    status: { $in: ['created', 'authenticated', 'active', 'pending', 'halted'] }
+  });
 }
 
 // In-memory fallback for local testing when MongoDB is offline
@@ -671,10 +718,10 @@ async function status(req, res) {
     aiCreditsRemaining: aiStatus.balance,
     aiCreditsUsed: aiStatus.used,
     limits: {
-      instagramAccounts: e.limits.instagramAccounts,
+      instagramAccounts: Number.isFinite(e.limits.instagramAccounts) ? e.limits.instagramAccounts : null,
       automations: Number.isFinite(e.limits.automations) ? e.limits.automations : null,
-      dmMonthly: e.limits.dmMonthly,
-      aiCreditsMonthly: e.limits.aiCreditsMonthly,
+      dmMonthly: Number.isFinite(e.limits.dmMonthly) ? e.limits.dmMonthly : null,
+      aiCreditsMonthly: Number.isFinite(e.limits.aiCreditsMonthly) ? e.limits.aiCreditsMonthly : null,
       allCommentsTrigger: e.limits.allCommentsTrigger
     },
     usage: {
@@ -823,6 +870,10 @@ function _getClient() {
   return mongo || (dbModule.getClient && dbModule.getClient());
 }
 
+function _setRazorpayForTesting(mockRz) {
+  rz = mockRz;
+}
+
 module.exports = {
   register,
   registerPostParser,
@@ -837,8 +888,11 @@ module.exports = {
   _setDbForTesting,
   _getDb,
   _getClient,
+  _setRazorpayForTesting,
+  _clearEntitlementCacheForTesting: () => globalEntitlementCache.clear(),
   PLANS,
   LIMITS,
   isAdminEmail,
-  getAdminEmails
+  getAdminEmails,
+  getActiveSubscription
 };

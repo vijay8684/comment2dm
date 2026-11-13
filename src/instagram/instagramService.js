@@ -221,7 +221,7 @@ async function fetchProfile(accessToken) {
 
 async function subscribeToWebhooks(instagramUserId, accessToken) {
   const url = new URL(`https://graph.instagram.com/${apiVersion}/${instagramUserId}/subscribed_apps`);
-  url.searchParams.set('subscribed_fields', 'comments,messages');
+  url.searchParams.set('subscribed_fields', 'comments,messages,messaging_postbacks');
 
   const response = await fetch(url, {
     method: 'POST',
@@ -231,7 +231,7 @@ async function subscribeToWebhooks(instagramUserId, accessToken) {
 
   if (!response.ok || data.success !== true) {
     const fallbackUrl = new URL(`https://graph.facebook.com/${apiVersion}/${instagramUserId}/subscribed_apps`);
-    fallbackUrl.searchParams.set('subscribed_fields', 'comments,messages');
+    fallbackUrl.searchParams.set('subscribed_fields', 'comments,messages,messaging_postbacks');
     const fbRes = await fetch(fallbackUrl, {
       method: 'POST',
       headers: { Authorization: `Bearer ${accessToken}` }
@@ -250,6 +250,29 @@ async function subscribeToWebhooks(instagramUserId, accessToken) {
   return data;
 }
 
+async function checkWebhookSubscription(instagramUserId, accessToken) {
+  const url = new URL(`https://graph.instagram.com/${apiVersion}/${instagramUserId}/subscribed_apps`);
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok || !data.data) {
+    const fallbackUrl = new URL(`https://graph.facebook.com/${apiVersion}/${instagramUserId}/subscribed_apps`);
+    const fbRes = await fetch(fallbackUrl, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    const fbData = await fbRes.json().catch(() => ({}));
+    if (fbRes.ok && Array.isArray(fbData.data)) {
+      return fbData;
+    }
+  }
+
+  return data;
+}
+
 async function saveAccount(userId, profile, token) {
   const encrypted = encryptToken(token.accessToken);
   await db.run(
@@ -258,6 +281,7 @@ async function saveAccount(userId, profile, token) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [userId, profile.userId, profile.username, encrypted.ciphertext, encrypted.iv, encrypted.tag, Date.now() + token.expiresIn * 1000, new Date().toISOString()]
   );
+  tokenCache.clear();
   await subscribeToWebhooks(profile.userId, token.accessToken);
 }
 
@@ -781,30 +805,189 @@ function analyzeManualReel(input = {}) {
   };
 }
 
-async function disconnect(userId, instagramUserId) {
-  if (db.collections) {
-    const { instagramAccounts, automations } = db.collections();
-    const ids = [String(instagramUserId)];
-    if (!isNaN(Number(instagramUserId))) ids.push(Number(instagramUserId));
-    await Promise.allSettled([
-      instagramAccounts.deleteMany({
-        $or: [
-          { instagram_user_id: { $in: ids }, owner_user_id: String(userId) },
-          { instagram_user_id: { $in: ids } }
-        ]
-      }),
-      automations.deleteMany({
-        $or: [
-          { instagram_user_id: { $in: ids }, owner_user_id: String(userId) },
-          { instagram_user_id: { $in: ids } }
-        ]
-      })
-    ]);
-  } else {
-    await db.run('DELETE FROM instagram_accounts WHERE owner_user_id = ? AND instagram_user_id = ?', [userId, instagramUserId]);
-    await db.run('DELETE FROM automations WHERE owner_user_id = ? AND instagram_user_id = ?', [userId, instagramUserId]);
+async function disconnect(userId, instagramUserId, options = {}) {
+  let cols;
+  try {
+    cols = (db && typeof db.collections === 'function') ? db.collections() : null;
+  } catch (_) {
+    cols = null;
   }
+
+  const instagramAccounts = cols?.instagramAccounts || cols?.instagram_accounts;
+  if (!cols || !instagramAccounts ||
+      typeof instagramAccounts.updateMany !== 'function' ||
+      typeof instagramAccounts.find !== 'function' ||
+      typeof instagramAccounts.deleteMany !== 'function') {
+    const unavailErr = new Error('Database safety checks unavailable for Instagram disconnect. Please retry in a few moments.');
+    unavailErr.code = 'DATABASE_SAFETY_UNAVAILABLE';
+    unavailErr.statusCode = 503;
+    unavailErr.retryable = true;
+    throw unavailErr;
+  }
+
+  const { automations, webhookJobs, openingDmClaims } = cols;
+  const ids = [String(instagramUserId)];
+  if (!isNaN(Number(instagramUserId))) ids.push(Number(instagramUserId));
+
+  const ownerClauses = [{ owner_user_id: String(userId) }, { owner_id: String(userId) }];
+  if (!isNaN(Number(userId))) {
+    ownerClauses.push({ owner_user_id: Number(userId) });
+    ownerClauses.push({ owner_id: Number(userId) });
+  }
+
+  const accountFilter = {
+    $and: [
+      { $or: ownerClauses },
+      {
+        $or: [
+          { instagram_user_id: { $in: ids } },
+          { id: { $in: ids } }
+        ]
+      }
+    ]
+  };
+
+  // 1. Atomically mark the account deletion_pending: true to reject ALL new dispatch leases
+  let markResult;
+  try {
+    markResult = await instagramAccounts.updateMany(
+      accountFilter,
+      {
+        $set: {
+          deletion_pending: true,
+          deletion_state: 'deleting',
+          deletion_started_at: new Date()
+        }
+      }
+    );
+  } catch (markErr) {
+    const safetyErr = new Error(`Failed to set deletion-pending safety guard on Instagram account: ${markErr.message}`);
+    safetyErr.code = 'DATABASE_SAFETY_UNAVAILABLE';
+    safetyErr.statusCode = 503;
+    safetyErr.retryable = true;
+    throw safetyErr;
+  }
+
+  // Require successful marking before starting the drain
+  if (!markResult || (markResult.matchedCount === 0 && markResult.modifiedCount === 0)) {
+    let existingCount = 0;
+    try {
+      if (typeof instagramAccounts.countDocuments === 'function') {
+        existingCount = await instagramAccounts.countDocuments(accountFilter);
+      } else {
+        const found = await instagramAccounts.find(accountFilter).toArray();
+        existingCount = found.length;
+      }
+    } catch (_) {}
+
+    if (existingCount > 0) {
+      const markFailErr = new Error('Failed to set deletion-pending safety guard on account. Preserving credentials.');
+      markFailErr.code = 'DATABASE_SAFETY_UNAVAILABLE';
+      markFailErr.statusCode = 503;
+      markFailErr.retryable = true;
+      throw markFailErr;
+    }
+    // If account does not exist at all, invalidate local cache and return cleanly
+    reelsCache.delete(`${userId}:${instagramUserId}`);
+    tokenCache.clear();
+    return;
+  }
+
+  // 2. Coordinate with active outbound dispatch leases: wait for existing leases to drain
+  const drainTimeoutMs = Number(options.drainTimeoutMs !== undefined ? options.drainTimeoutMs : 5000);
+  const pollIntervalMs = options.pollIntervalMs || 50;
+  const startTime = Date.now();
+  let activeLeasesRemain = false;
+
+  while (Date.now() - startTime < drainTimeoutMs) {
+    const now = new Date();
+
+    // Safe pruning of expired leases
+    try {
+      await instagramAccounts.updateMany(
+        accountFilter,
+        {
+          $pull: {
+            active_dispatch_leases: { expires_at: { $lte: now } }
+          }
+        }
+      );
+    } catch (_) {}
+
+    // Check if any active unexpired leases remain
+    let accounts;
+    try {
+      accounts = await instagramAccounts.find(accountFilter).toArray();
+    } catch (checkErr) {
+      const checkFailErr = new Error(`Database error while checking active dispatch leases: ${checkErr.message}. Preserving credentials.`);
+      checkFailErr.code = 'DATABASE_SAFETY_UNAVAILABLE';
+      checkFailErr.statusCode = 503;
+      checkFailErr.retryable = true;
+      throw checkFailErr;
+    }
+
+    let totalActive = 0;
+    for (const acc of accounts) {
+      const leases = Array.isArray(acc.active_dispatch_leases)
+        ? acc.active_dispatch_leases.filter(l => new Date(l.expires_at) > now)
+        : [];
+      totalActive += leases.length;
+    }
+
+    if (totalActive === 0) {
+      activeLeasesRemain = false;
+      break; // All dispatches drained!
+    }
+    activeLeasesRemain = true;
+    await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+  }
+
+  if (activeLeasesRemain) {
+    // Leases did not drain within bounded timeout!
+    // DO NOT delete credentials or automations.
+    // Return clear retryable error (503).
+    const drainError = new Error('Instagram account disconnect in progress: active outbound dispatches are still draining. Please retry in a few moments.');
+    drainError.code = 'DISCONNECT_DRAIN_TIMEOUT';
+    drainError.statusCode = 503;
+    drainError.retryable = true;
+    throw drainError;
+  }
+
+  // 3. Delete dependent data first: automations, webhook jobs, opening DM claims.
+  // Await successful completion of all dependent cleanup before deleting the Instagram account document.
+  // If dependent cleanup fails, the account document is preserved with its deletion-pending marker so operation can be retried.
+  const dependentTasks = [];
+  if (automations && typeof automations.deleteMany === 'function') {
+    dependentTasks.push(automations.deleteMany({
+      $and: [
+        { $or: ownerClauses },
+        {
+          $or: [
+            { instagram_user_id: { $in: ids } },
+            { id: { $in: ids } }
+          ]
+        }
+      ]
+    }));
+  }
+  if (webhookJobs && typeof webhookJobs.deleteMany === 'function') {
+    dependentTasks.push(webhookJobs.deleteMany({ instagram_account_id: { $in: ids } }));
+  }
+  if (openingDmClaims && typeof openingDmClaims.deleteMany === 'function') {
+    dependentTasks.push(openingDmClaims.deleteMany({ instagram_account_id: { $in: ids } }));
+  }
+
+  // Await all dependent cleanup operations; if any throw, error propagates and account is preserved!
+  if (dependentTasks.length > 0) {
+    await Promise.all(dependentTasks);
+  }
+
+  // Only after all dependent cleanup succeeds, delete the Instagram account document.
+  await instagramAccounts.deleteMany(accountFilter);
+
+  // 4. Invalidate local caches after successful disconnect
   reelsCache.delete(`${userId}:${instagramUserId}`);
+  tokenCache.clear();
 }
 
 async function listAllAccounts() {
@@ -845,7 +1028,33 @@ async function getDecryptedTokenForAccount(ownerUserId, instagramUserId) {
   return decryptToken(account.ciphertext, account.iv, account.tag);
 }
 
+// In-memory decrypted token cache to avoid redundant database reads and AES decryption during rapid automation flows.
+// Cache Architecture & Multi-Instance Consistency:
+// 1. Process-Local Cache: Caches decrypted token objects for up to 30 seconds within this Node.js process.
+// 2. Local Invalidation: Immediately invalidated upon connect/reconnect (saveAccount) or disconnect (disconnect).
+// 3. Cross-Instance Safety: Enforced authoritatively at the database layer by MongoDB's atomic acquireDispatchLease()
+//    inside safeDispatchOutbound(). Even if a separate Node.js instance has a token in its in-memory cache,
+//    attempting to dispatch any message requires acquiring a lease on instagramAccounts in MongoDB. If the account
+//    was disconnected or deleted by another instance, acquireDispatchLease() atomically fails (ACCOUNT_DELETED),
+//    halting outbound dispatch immediately. Thus, disconnected accounts cannot send messages across any instance.
+const tokenCache = new Map();
+const TOKEN_CACHE_TTL_MS = 30000;
+
+function clearTokenCache() {
+  tokenCache.clear();
+}
+
 async function getDecryptedTokenByInstagramUserId(instagramUserId, ownerUserId) {
+  const cacheKey = `${instagramUserId}:${ownerUserId || ''}`;
+  const now = Date.now();
+  const cached = tokenCache.get(cacheKey);
+  if (cached) {
+    if (cached.expiresAt > now && (!cached.tokenExpiresAt || cached.tokenExpiresAt > now)) {
+      return cached.data;
+    }
+    tokenCache.delete(cacheKey);
+  }
+
   let account;
   if (ownerUserId) {
     account = await db.getInstagramAccount(ownerUserId, instagramUserId);
@@ -869,26 +1078,46 @@ async function getDecryptedTokenByInstagramUserId(instagramUserId, ownerUserId) 
     }
   }
   if (!account) {
+    tokenCache.delete(cacheKey);
     const error = new Error(`Connected Instagram account ${instagramUserId} not found.`);
     error.statusCode = 404;
     throw error;
   }
-  if (account.expires_at <= Date.now()) {
+  const tokenExpiresAt = account.expires_at ? new Date(account.expires_at).getTime() : Infinity;
+  if (tokenExpiresAt <= now) {
+    tokenCache.delete(cacheKey);
     const error = new Error('Instagram access token has expired.');
     error.statusCode = 401;
     throw error;
   }
-  return {
+  const result = {
     accessToken: decryptToken(account.ciphertext, account.iv, account.tag),
     ownerUserId: account.owner_user_id,
     username: account.username
   };
+  const cacheExpiry = Math.min(now + TOKEN_CACHE_TTL_MS, tokenExpiresAt);
+  tokenCache.set(cacheKey, {
+    data: result,
+    expiresAt: cacheExpiry,
+    tokenExpiresAt: tokenExpiresAt
+  });
+  return result;
 }
 
 function redactToken(token) {
   if (!token || typeof token !== 'string') return '[NONE]';
   if (token.length <= 14) return '***';
   return `${token.slice(0, 8)}...${token.slice(-6)}`;
+}
+
+// Bounded network request timeout: strictly under the 15-second dispatch lease
+const META_REQUEST_TIMEOUT_MS = Number(process.env.META_REQUEST_TIMEOUT_MS || 10000);
+
+function getMetaTimeoutSignal() {
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+    return AbortSignal.timeout(META_REQUEST_TIMEOUT_MS);
+  }
+  return undefined;
 }
 
 // 1. Send Private DM Reply to Commenter
@@ -908,7 +1137,8 @@ async function sendPrivateReply(instagramUserId, commentId, messageContent, acce
   let response = await fetch(url1, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-    body: JSON.stringify(bodyData)
+    body: JSON.stringify(bodyData),
+    signal: getMetaTimeoutSignal()
   });
   let data = await response.json().catch(() => ({}));
   console.log(`[META PRIVATE REPLY RESPONSE 1] Status: ${response.status} ${response.statusText}, Body: ${JSON.stringify(data)}`);
@@ -953,7 +1183,8 @@ async function sendPrivateReply(instagramUserId, commentId, messageContent, acce
     const retryRes = await fetch(url1, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify(fallbackBody)
+      body: JSON.stringify(fallbackBody),
+      signal: getMetaTimeoutSignal()
     });
     const retryData = await retryRes.json().catch(() => ({}));
     if (retryRes.ok && (retryData.message_id || retryData.id || retryData.recipient_id)) {
@@ -975,7 +1206,8 @@ async function sendPrivateReply(instagramUserId, commentId, messageContent, acce
   const response2 = await fetch(url2, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-    body: JSON.stringify(bodyData)
+    body: JSON.stringify(bodyData),
+    signal: getMetaTimeoutSignal()
   });
   const data2 = await response2.json().catch(() => ({}));
   console.log(`[META PRIVATE REPLY RESPONSE 2] Status: ${response2.status} ${response2.statusText}, Body: ${JSON.stringify(data2)}`);
@@ -992,7 +1224,8 @@ async function sendPrivateReply(instagramUserId, commentId, messageContent, acce
   const response3 = await fetch(url3, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-    body: JSON.stringify(bodyData)
+    body: JSON.stringify(bodyData),
+    signal: getMetaTimeoutSignal()
   });
   const data3 = await response3.json().catch(() => ({}));
   console.log(`[META PRIVATE REPLY RESPONSE 3] Status: ${response3.status} ${response3.statusText}, Body: ${JSON.stringify(data3)}`);
@@ -1027,7 +1260,8 @@ async function sendDirectMessage(instagramUserId, recipientIgsid, messageContent
   let response = await fetch(url1, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-    body: JSON.stringify(bodyData)
+    body: JSON.stringify(bodyData),
+    signal: getMetaTimeoutSignal()
   });
   let data = await response.json().catch(() => ({}));
   console.log(`[META DIRECT DM RESPONSE 1] Status: ${response.status} ${response.statusText}, Body: ${JSON.stringify(data)}`);
@@ -1064,7 +1298,8 @@ async function sendDirectMessage(instagramUserId, recipientIgsid, messageContent
   const response2 = await fetch(url2, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-    body: JSON.stringify(bodyData)
+    body: JSON.stringify(bodyData),
+    signal: getMetaTimeoutSignal()
   });
   const data2 = await response2.json().catch(() => ({}));
   console.log(`[META DIRECT DM RESPONSE 2] Status: ${response2.status} ${response2.statusText}, Body: ${JSON.stringify(data2)}`);
@@ -1079,7 +1314,8 @@ async function sendDirectMessage(instagramUserId, recipientIgsid, messageContent
   const response3 = await fetch(url3, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-    body: JSON.stringify(bodyData)
+    body: JSON.stringify(bodyData),
+    signal: getMetaTimeoutSignal()
   });
   const data3 = await response3.json().catch(() => ({}));
 
@@ -1105,7 +1341,8 @@ async function replyToComment(commentId, messageText, accessToken) {
   let response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-    body: JSON.stringify(bodyData)
+    body: JSON.stringify(bodyData),
+    signal: getMetaTimeoutSignal()
   });
   let data = await response.json().catch(() => ({}));
 
@@ -1131,7 +1368,8 @@ async function replyToComment(commentId, messageText, accessToken) {
     const fallbackResponse = await fetch(fallbackUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify(bodyData)
+      body: JSON.stringify(bodyData),
+      signal: getMetaTimeoutSignal()
     });
     const fallbackData = await fallbackResponse.json().catch(() => ({}));
     if (fallbackResponse.ok && fallbackData.id) return { success: true, id: fallbackData.id };
@@ -1159,7 +1397,7 @@ async function checkFollowStatus(instagramUserId, userIgsid, accessToken) {
   try {
     // Attempt 1: graph.facebook.com query for is_user_follow_business & username
     const url1 = `https://graph.facebook.com/${apiVersion}/${userIgsid}?fields=name,username,is_user_follow_business&access_token=${accessToken}`;
-    let response = await fetch(url1);
+    let response = await fetch(url1, { signal: getMetaTimeoutSignal() });
     let data = await response.json().catch(() => ({}));
 
     if (response.ok && data && typeof data.is_user_follow_business === 'boolean') {
@@ -1175,7 +1413,7 @@ async function checkFollowStatus(instagramUserId, userIgsid, accessToken) {
 
     // Attempt 2: graph.instagram.com query
     const url2 = `https://graph.instagram.com/${apiVersion}/${userIgsid}?fields=username,is_user_follow_business&access_token=${accessToken}`;
-    const response2 = await fetch(url2);
+    const response2 = await fetch(url2, { signal: getMetaTimeoutSignal() });
     const data2 = await response2.json().catch(() => ({}));
 
     if (response2.ok && data2 && typeof data2.is_user_follow_business === 'boolean') {
@@ -1214,6 +1452,7 @@ module.exports = {
   fetchProfile,
   saveAccount,
   subscribeToWebhooks,
+  checkWebhookSubscription,
   listAccounts,
   listReels,
   resolveReelUrl,
@@ -1230,5 +1469,7 @@ module.exports = {
   calculateReelEngagement,
   getReelInsights,
   analyzeAccountReels,
-  analyzeManualReel
+  analyzeManualReel,
+  clearTokenCache,
+  _tokenCache: tokenCache
 };

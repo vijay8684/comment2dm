@@ -2,6 +2,7 @@
 // Durable Webhook Ingestion, Crash Recovery, Concurrency Control & Queue Management
 const crypto = require('crypto');
 const metaRateLimiter = require('../services/metaRateLimiter');
+const automationTimeline = require('../services/automationTimeline');
 
 // Configurable Queue Parameters (with conservative, documented defaults)
 const WORKER_POLL_INTERVAL_MS = Number(process.env.WORKER_POLL_INTERVAL_MS) || 1000; // 1s poll interval
@@ -117,10 +118,22 @@ function normalizeWebhookPayload(payload) {
         const parts = payloadStr.split(':');
         autoId = parts[1] || null;
         commentId = parts[2] || null;
-      } else if (/send.*(link|access)/i.test(incomingText) || /^(link|access|yes|send|send\s*link)$/i.test(incomingText)) {
+      } else if (payloadStr) {
+        // Unrecognized postback or quick reply payload
+        action = 'UNKNOWN_POSTBACK';
+      } else if (
+        /send.*link/i.test(incomingText) ||
+        /\blink\b/i.test(incomingText) ||
+        /\baccess\b/i.test(incomingText) ||
+        /^(link|access|yes|send|send\s*link)$/i.test(incomingText) ||
+        /^(give\s*link|get\s*link|please\s*send|link\s*please|i\s*want\s*link|send\s*me\s*the\s*link)$/i.test(incomingText)
+      ) {
         action = 'SEND_LINK';
-      } else if (/(follow|following|followed|done|checked)/i.test(incomingText)) {
+      } else if (/(follow|following|followed|done|checked)/i.test(incomingText) || /(i'm following|im following)/i.test(incomingText)) {
         action = 'CHECK_FOLLOW';
+      } else if (incomingText) {
+        // Natural user text response (e.g. unexpected words, greetings, or questions)
+        action = 'USER_RESPONSE';
       }
 
       if (!action) continue;
@@ -129,7 +142,7 @@ function normalizeWebhookPayload(payload) {
       const timestamp = msgEvent.timestamp || Date.now();
       const eventKey = mid
         ? `msg:${mid}`
-        : `postback:${recipientId}:${senderIgsid}:${action}:${timestamp}`;
+        : (postbackPayload ? `postback:${recipientId}:${senderIgsid}:${action}:${timestamp}` : `msg:${recipientId}:${senderIgsid}:${timestamp}`);
 
       const eventType = quickReplyPayload
         ? 'messaging_quick_reply'
@@ -180,9 +193,54 @@ const memoryJobsStore = new Map();
  * @returns {Promise<{ count: number, duplicates: number, jobs: Array<object> }>}
  */
 async function ingestWebhookPayload(payload, db) {
+  const normStart = Date.now();
   const normalizedJobs = normalizeWebhookPayload(payload);
+  const normDuration = Date.now() - normStart;
   if (normalizedJobs.length === 0) {
     return { count: 0, duplicates: 0, jobs: [] };
+  }
+
+  // Record webhook reception and normalization
+  for (const job of normalizedJobs) {
+    if (job.event_type === 'comment') {
+      automationTimeline.recordTimelineStage({
+        stage: 'COMMENT_WEBHOOK_RECEIVED',
+        duration_ms: 0,
+        job_id: job.event_key,
+        automation_id: job.automation_id,
+        instagram_account_id: job.instagram_account_id,
+        event_type: 'comment',
+        success: true
+      });
+      automationTimeline.recordTimelineStage({
+        stage: 'WEBHOOK_NORMALIZED',
+        duration_ms: normDuration,
+        job_id: job.event_key,
+        automation_id: job.automation_id,
+        instagram_account_id: job.instagram_account_id,
+        event_type: 'comment',
+        success: true
+      });
+    } else if (job.event_type === 'messaging_postback' || job.event_type === 'messaging_quick_reply') {
+      automationTimeline.recordTimelineStage({
+        stage: 'BUTTON_POSTBACK_RECEIVED',
+        duration_ms: 0,
+        job_id: job.event_key,
+        automation_id: job.automation_id,
+        instagram_account_id: job.instagram_account_id,
+        event_type: 'messaging_postback',
+        success: true
+      });
+      automationTimeline.recordTimelineStage({
+        stage: 'WEBHOOK_NORMALIZED',
+        duration_ms: normDuration,
+        job_id: job.event_key,
+        automation_id: job.automation_id,
+        instagram_account_id: job.instagram_account_id,
+        event_type: 'messaging_postback',
+        success: true
+      });
+    }
   }
 
   let count = 0;
@@ -195,9 +253,33 @@ async function ingestWebhookPayload(payload, db) {
     const col = db.collections().webhookJobs;
     for (const job of normalizedJobs) {
       try {
+        const insertStart = Date.now();
         await col.insertOne(job);
+        const insertDuration = Date.now() - insertStart;
         count++;
         persistedJobs.push(job);
+
+        if (job.event_type === 'comment') {
+          automationTimeline.recordTimelineStage({
+            stage: 'JOB_INSERTED',
+            duration_ms: insertDuration,
+            job_id: job.event_key,
+            automation_id: job.automation_id,
+            instagram_account_id: job.instagram_account_id,
+            event_type: 'comment',
+            success: true
+          });
+        } else if (job.event_type === 'messaging_postback' || job.event_type === 'messaging_quick_reply') {
+          automationTimeline.recordTimelineStage({
+            stage: 'POSTBACK_JOB_QUEUED',
+            duration_ms: insertDuration,
+            job_id: job.event_key,
+            automation_id: job.automation_id,
+            instagram_account_id: job.instagram_account_id,
+            event_type: 'messaging_postback',
+            success: true
+          });
+        }
       } catch (err) {
         if (err.code === 11000 || (err.message && err.message.includes('E11000'))) {
           // Atomic deduplication: record already existed in MongoDB!
@@ -217,6 +299,28 @@ async function ingestWebhookPayload(payload, db) {
         memoryJobsStore.set(job.event_key, { ...job, _id: crypto.randomUUID() });
         count++;
         persistedJobs.push(job);
+
+        if (job.event_type === 'comment') {
+          automationTimeline.recordTimelineStage({
+            stage: 'JOB_INSERTED',
+            duration_ms: 0,
+            job_id: job.event_key,
+            automation_id: job.automation_id,
+            instagram_account_id: job.instagram_account_id,
+            event_type: 'comment',
+            success: true
+          });
+        } else if (job.event_type === 'messaging_postback' || job.event_type === 'messaging_quick_reply') {
+          automationTimeline.recordTimelineStage({
+            stage: 'POSTBACK_JOB_QUEUED',
+            duration_ms: 0,
+            job_id: job.event_key,
+            automation_id: job.automation_id,
+            instagram_account_id: job.instagram_account_id,
+            event_type: 'messaging_postback',
+            success: true
+          });
+        }
       }
     }
   }
@@ -227,6 +331,11 @@ async function ingestWebhookPayload(payload, db) {
     jobs: persistedJobs
   };
 }
+
+// Short-lived cache of paused account IDs to prevent pounding accountRateLimits on every single claim tick
+let cachedPausedAccountIds = [];
+let cachedPausedExpiryTime = 0;
+const PAUSED_ACCOUNTS_CACHE_TTL_MS = 1500;
 
 /**
  * Atomically claims the next eligible job from the database for processing.
@@ -283,21 +392,25 @@ async function claimNextJob(db, options = {}) {
       ]
     };
 
-    // Dynamic exclusion of paused accounts from shared MongoDB rate limit collection
+    // Dynamic exclusion of paused accounts from shared MongoDB rate limit collection (with in-memory cache)
     let activeExcluded = [...excludedAccounts];
     if (db.collections().accountRateLimits) {
-      try {
-        const pausedDocs = await db.collections().accountRateLimits.find({
-          paused_until: { $gt: now }
-        }).toArray();
-        if (Array.isArray(pausedDocs)) {
-          for (const p of pausedDocs) {
-            if (p.account_id && !activeExcluded.includes(p.account_id)) {
-              activeExcluded.push(p.account_id);
-            }
-          }
+      if (now.getTime() > cachedPausedExpiryTime) {
+        try {
+          const pausedDocs = await db.collections().accountRateLimits.find({
+            paused_until: { $gt: now }
+          }).toArray();
+          cachedPausedAccountIds = Array.isArray(pausedDocs)
+            ? pausedDocs.map(p => p.account_id).filter(Boolean)
+            : [];
+          cachedPausedExpiryTime = now.getTime() + PAUSED_ACCOUNTS_CACHE_TTL_MS;
+        } catch (_) {}
+      }
+      for (const accId of cachedPausedAccountIds) {
+        if (!activeExcluded.includes(accId)) {
+          activeExcluded.push(accId);
         }
-      } catch (_) {}
+      }
     }
     if (activeExcluded.length > 0) {
       baseFilter.instagram_account_id = { $nin: activeExcluded };
@@ -752,5 +865,6 @@ module.exports = {
   rescheduleJobForPause,
   updateJobStatus,
   getQueueMetrics,
+  invalidatePausedAccountsCache: () => { cachedPausedExpiryTime = 0; cachedPausedAccountIds = []; },
   memoryJobsStore
 };

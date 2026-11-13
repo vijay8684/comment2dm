@@ -157,9 +157,10 @@
         planBadge.className = 'plan-badge ' + plan;
       }
 
-      const dmMax = data.limits?.dmMonthly || 300;
+      const isUnlimited = data.isAdmin || data.limits?.dmMonthly === null || data.limits?.dmMonthly === Infinity;
+      const dmMax = isUnlimited ? 'Unlimited' : (data.limits?.dmMonthly || (plan === 'elite' ? 50000 : plan === 'pro' ? 5000 : 300));
       const dmUsed = data.usage?.dmMonthly || 0;
-      const pct = Math.min(100, Math.round((dmUsed / dmMax) * 100));
+      const pct = isUnlimited ? 0 : Math.min(100, Math.round((dmUsed / (typeof dmMax === 'number' ? dmMax : 300)) * 100));
 
       const limitText = document.getElementById('dmLimitText');
       const progressFill = document.getElementById('dmProgressFill');
@@ -167,7 +168,7 @@
       const pieCircle = document.getElementById('pieGaugeCircle');
       const pieGaugeCollapsed = document.getElementById('pieGaugeCollapsed');
 
-      if (limitText) limitText.textContent = `${dmUsed.toLocaleString()} / ${dmMax.toLocaleString()}`;
+      if (limitText) limitText.textContent = `${dmUsed.toLocaleString()} / ${typeof dmMax === 'number' ? dmMax.toLocaleString() : dmMax}`;
       if (progressFill) progressFill.style.width = `${Math.max(5, pct)}%`;
       if (pieInner) pieInner.textContent = `${pct}%`;
       if (pieCircle) {
