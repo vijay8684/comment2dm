@@ -1626,7 +1626,7 @@ async function deliverFinalResource({
     }));
 
     let metaSendResult;
-    const outboundResult = await safeDispatchOutbound(recipientIgUserId, workerToken, async () => {
+    const outboundResult = await safeDispatchOutbound(recipientIgUserId, workerToken, async (dispatchLease) => {
       automationTimeline.recordTimelineStage({
         stage: 'META_REQUEST_STARTED',
         duration_ms: 0,
@@ -1717,6 +1717,15 @@ async function deliverFinalResource({
             fallbackText += `\n\n🔗 ${buttonText}: ${resourceUrl}`;
           }
           try {
+            if (dispatchLease && typeof dispatchLease.assertValid === 'function') {
+              const isValid = await dispatchLease.assertValid();
+              if (isValid === false) {
+                const leaseLostErr = new Error('Dispatch lease expired or reclaimed prior to fallback send');
+                leaseLostErr.code = 'LEASE_LOST';
+                leaseLostErr.retryable = false;
+                throw leaseLostErr;
+              }
+            }
             metaSendResult = await instagramService.sendDirectMessage(
               recipientIgUserId,
               senderIgsid,

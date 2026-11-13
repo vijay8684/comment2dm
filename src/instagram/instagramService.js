@@ -953,13 +953,12 @@ async function disconnect(userId, instagramUserId, options = {}) {
     throw drainError;
   }
 
-  // 3. Delete the account and associated automations only after active leases have drained.
-  // Propagate database deletion errors instead of swallowing them!
-  const deleteTasks = [
-    instagramAccounts.deleteMany(accountFilter)
-  ];
+  // 3. Delete dependent data first: automations, webhook jobs, opening DM claims.
+  // Await successful completion of all dependent cleanup before deleting the Instagram account document.
+  // If dependent cleanup fails, the account document is preserved with its deletion-pending marker so operation can be retried.
+  const dependentTasks = [];
   if (automations && typeof automations.deleteMany === 'function') {
-    deleteTasks.push(automations.deleteMany({
+    dependentTasks.push(automations.deleteMany({
       $and: [
         { $or: ownerClauses },
         {
@@ -972,14 +971,19 @@ async function disconnect(userId, instagramUserId, options = {}) {
     }));
   }
   if (webhookJobs && typeof webhookJobs.deleteMany === 'function') {
-    deleteTasks.push(webhookJobs.deleteMany({ instagram_account_id: { $in: ids } }));
+    dependentTasks.push(webhookJobs.deleteMany({ instagram_account_id: { $in: ids } }));
   }
   if (openingDmClaims && typeof openingDmClaims.deleteMany === 'function') {
-    deleteTasks.push(openingDmClaims.deleteMany({ instagram_account_id: { $in: ids } }));
+    dependentTasks.push(openingDmClaims.deleteMany({ instagram_account_id: { $in: ids } }));
   }
 
-  // Await all delete operations; any rejection will throw and propagate!
-  await Promise.all(deleteTasks);
+  // Await all dependent cleanup operations; if any throw, error propagates and account is preserved!
+  if (dependentTasks.length > 0) {
+    await Promise.all(dependentTasks);
+  }
+
+  // Only after all dependent cleanup succeeds, delete the Instagram account document.
+  await instagramAccounts.deleteMany(accountFilter);
 
   // 4. Invalidate local caches after successful disconnect
   reelsCache.delete(`${userId}:${instagramUserId}`);

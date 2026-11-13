@@ -15,7 +15,7 @@ process.env.META_APP_ID = process.env.META_APP_ID || 'mock_meta_app_id';
 process.env.META_APP_SECRET = process.env.META_APP_SECRET || 'mock_meta_app_secret';
 process.env.META_REDIRECT_URI = process.env.META_REDIRECT_URI || 'https://test.example.com/callback';
 const db = require('./src/db');
-const { safeDispatchOutbound, app } = require('./server');
+const { safeDispatchOutbound, deliverFinalResource, app } = require('./server');
 const instagramService = require('./src/instagram/instagramService');
 const automationTimeline = require('./src/services/automationTimeline');
 
@@ -312,8 +312,10 @@ function createMockDb() {
         }
       }
       if (opts.upsert) {
-        const newDoc = { ...(update.$setOnInsert || {}), ...(update.$set || {}) };
-        conversationStates.set(newDoc.key || crypto.randomUUID(), newDoc);
+        const newDoc = { ...(query || {}), ...(update.$setOnInsert || {}), ...(update.$set || {}) };
+        const docKey = newDoc.key || query?.key || crypto.randomUUID();
+        newDoc.key = docKey;
+        conversationStates.set(docKey, newDoc);
         return { value: JSON.parse(JSON.stringify(newDoc)) };
       }
       return { value: null };
@@ -326,8 +328,10 @@ function createMockDb() {
         }
       }
       if (opts.upsert) {
-        const newDoc = { ...(update.$set || {}) };
-        conversationStates.set(newDoc.key || crypto.randomUUID(), newDoc);
+        const newDoc = { ...(query || {}), ...(update.$setOnInsert || {}), ...(update.$set || {}) };
+        const docKey = newDoc.key || query?.key || crypto.randomUUID();
+        newDoc.key = docKey;
+        conversationStates.set(docKey, newDoc);
         return { matchedCount: 0, modifiedCount: 0, upsertedCount: 1 };
       }
       return { matchedCount: 0, modifiedCount: 0 };
@@ -361,6 +365,9 @@ function createMockDb() {
     raw: accounts,
     automationsRaw: automations,
     eventsRaw: automationEvents,
+    webhookJobsRaw: webhookJobs,
+    openingDmClaimsRaw: openingDmClaims,
+    conversationStatesRaw: conversationStates,
     getQueryCount: () => findQueryCount,
     resetQueryCount: () => { findQueryCount = 0; }
   };
@@ -1473,13 +1480,201 @@ function encryptTestToken(plain) {
     assert(errorCaught.message.includes('disk full'), 'Error message must propagate from database');
   });
 
+  // Test 34: Successful dependent cleanup is followed by account deletion
+  await runTestAsync('Test 34: Successful dependent cleanup is followed by account deletion', async () => {
+    const mockDb = createMockDb();
+    mockDb.raw.set('ig_ord_success', {
+      id: 'ig_ord_success',
+      instagram_user_id: 'ig_ord_success',
+      owner_user_id: 'usr_ord',
+      active_dispatches: 0,
+      active_dispatch_leases: []
+    });
+    mockDb.automationsRaw.set('auto_ord_1', {
+      id: 'auto_ord_1',
+      owner_user_id: 'usr_ord',
+      instagram_user_id: 'ig_ord_success'
+    });
+    mockDb.webhookJobsRaw.set('job_ord_1', {
+      id: 'job_ord_1',
+      instagram_account_id: 'ig_ord_success'
+    });
+    mockDb.openingDmClaimsRaw.set('claim_ord_1', {
+      id: 'claim_ord_1',
+      instagram_account_id: 'ig_ord_success'
+    });
+    db.collections = mockDb.collections;
+
+    const deletionOrder = [];
+    const origAutoDel = mockDb.collections().automations.deleteMany;
+    const origJobDel = mockDb.collections().webhookJobs.deleteMany;
+    const origClaimDel = mockDb.collections().openingDmClaims.deleteMany;
+    const origAccDel = mockDb.collections().instagramAccounts.deleteMany;
+
+    mockDb.collections().automations.deleteMany = async (q) => {
+      deletionOrder.push('automations');
+      return origAutoDel(q);
+    };
+    mockDb.collections().webhookJobs.deleteMany = async (q) => {
+      deletionOrder.push('webhookJobs');
+      return origJobDel(q);
+    };
+    mockDb.collections().openingDmClaims.deleteMany = async (q) => {
+      deletionOrder.push('openingDmClaims');
+      return origClaimDel(q);
+    };
+    mockDb.collections().instagramAccounts.deleteMany = async (q) => {
+      deletionOrder.push('instagramAccounts');
+      return origAccDel(q);
+    };
+
+    await instagramService.disconnect('usr_ord', 'ig_ord_success');
+
+    // Verify ordering: all dependents deleted BEFORE instagramAccounts
+    assert(deletionOrder.includes('automations'), 'automations must be deleted');
+    assert(deletionOrder.includes('webhookJobs'), 'webhookJobs must be deleted');
+    assert(deletionOrder.includes('openingDmClaims'), 'openingDmClaims must be deleted');
+    assert.strictEqual(deletionOrder[deletionOrder.length - 1], 'instagramAccounts', 'instagramAccounts MUST be the last collection deleted');
+
+    // Verify documents removed
+    assert.strictEqual(mockDb.raw.has('ig_ord_success'), false, 'Account document must be deleted');
+    assert.strictEqual(mockDb.automationsRaw.has('auto_ord_1'), false, 'Automation must be deleted');
+    assert.strictEqual(mockDb.webhookJobsRaw.has('job_ord_1'), false, 'Webhook job must be deleted');
+    assert.strictEqual(mockDb.openingDmClaimsRaw.has('claim_ord_1'), false, 'Claim must be deleted');
+  });
+
+  // Test 35: Automation deletion failure preserves the Instagram account document
+  await runTestAsync('Test 35: Automation deletion failure preserves the Instagram account document', async () => {
+    const mockDb = createMockDb();
+    mockDb.raw.set('ig_fail_auto_del', {
+      id: 'ig_fail_auto_del',
+      instagram_user_id: 'ig_fail_auto_del',
+      owner_user_id: 'usr_fail_dep',
+      active_dispatches: 0,
+      active_dispatch_leases: []
+    });
+    mockDb.automationsRaw.set('auto_fail_dep_1', {
+      id: 'auto_fail_dep_1',
+      owner_user_id: 'usr_fail_dep',
+      instagram_user_id: 'ig_fail_auto_del'
+    });
+    db.collections = mockDb.collections;
+
+    mockDb.collections().automations.deleteMany = async () => {
+      throw new Error('Simulated database write error during automations deletion');
+    };
+
+    let errorCaught = null;
+    try {
+      await instagramService.disconnect('usr_fail_dep', 'ig_fail_auto_del');
+    } catch (err) {
+      errorCaught = err;
+    }
+
+    assert(errorCaught, 'Disconnect must throw and propagate automation deletion failure');
+    assert(errorCaught.message.includes('automations deletion'), 'Error message must propagate');
+
+    // Instagram account document MUST be preserved with deletion-pending marker
+    assert.strictEqual(mockDb.raw.has('ig_fail_auto_del'), true, 'Instagram account document MUST be preserved on automation deletion failure');
+    const acc = mockDb.raw.get('ig_fail_auto_del');
+    assert.strictEqual(acc.deletion_pending, true, 'Account document must retain deletion_pending: true');
+    assert.strictEqual(acc.deletion_state, 'deleting', 'Account document must retain deletion_state: deleting');
+  });
+
+  // Test 36: Webhook-job cleanup failure preserves the Instagram account document
+  await runTestAsync('Test 36: Webhook-job cleanup failure preserves the Instagram account document', async () => {
+    const mockDb = createMockDb();
+    mockDb.raw.set('ig_fail_job_del', {
+      id: 'ig_fail_job_del',
+      instagram_user_id: 'ig_fail_job_del',
+      owner_user_id: 'usr_fail_dep2',
+      active_dispatches: 0,
+      active_dispatch_leases: []
+    });
+    mockDb.webhookJobsRaw.set('job_fail_dep_1', {
+      id: 'job_fail_dep_1',
+      instagram_account_id: 'ig_fail_job_del'
+    });
+    db.collections = mockDb.collections;
+
+    mockDb.collections().webhookJobs.deleteMany = async () => {
+      throw new Error('Simulated database cluster timeout during webhookJobs deletion');
+    };
+
+    let errorCaught = null;
+    try {
+      await instagramService.disconnect('usr_fail_dep2', 'ig_fail_job_del');
+    } catch (err) {
+      errorCaught = err;
+    }
+
+    assert(errorCaught, 'Disconnect must throw and propagate webhook job deletion failure');
+    assert(errorCaught.message.includes('webhookJobs deletion'), 'Error message must propagate');
+
+    // Instagram account document MUST be preserved with deletion-pending marker
+    assert.strictEqual(mockDb.raw.has('ig_fail_job_del'), true, 'Instagram account document MUST be preserved on webhook-job deletion failure');
+    const acc = mockDb.raw.get('ig_fail_job_del');
+    assert.strictEqual(acc.deletion_pending, true, 'Account document must retain deletion_pending: true');
+    assert.strictEqual(acc.deletion_state, 'deleting', 'Account document must retain deletion_state: deleting');
+  });
+
+  // Test 37: Retry after a partial cleanup can complete safely
+  await runTestAsync('Test 37: Retry after a partial cleanup can complete safely', async () => {
+    const mockDb = createMockDb();
+    mockDb.raw.set('ig_retry_partial', {
+      id: 'ig_retry_partial',
+      instagram_user_id: 'ig_retry_partial',
+      owner_user_id: 'usr_retry_part',
+      active_dispatches: 0,
+      active_dispatch_leases: []
+    });
+    mockDb.automationsRaw.set('auto_part_1', {
+      id: 'auto_part_1',
+      owner_user_id: 'usr_retry_part',
+      instagram_user_id: 'ig_retry_partial'
+    });
+    mockDb.webhookJobsRaw.set('job_part_1', {
+      id: 'job_part_1',
+      instagram_account_id: 'ig_retry_partial'
+    });
+    db.collections = mockDb.collections;
+
+    // First attempt: webhookJobs.deleteMany fails
+    let failWebhookDelete = true;
+    const realWebhookDel = mockDb.collections().webhookJobs.deleteMany;
+    mockDb.collections().webhookJobs.deleteMany = async (q) => {
+      if (failWebhookDelete) {
+        throw new Error('Temporary failure during webhook cleanup');
+      }
+      return realWebhookDel(q);
+    };
+
+    let firstErr = null;
+    try {
+      await instagramService.disconnect('usr_retry_part', 'ig_retry_partial');
+    } catch (err) {
+      firstErr = err;
+    }
+    assert(firstErr, 'First attempt must fail due to webhook cleanup error');
+    assert.strictEqual(mockDb.raw.has('ig_retry_partial'), true, 'Account document preserved after attempt 1');
+
+    // Second attempt (retry): DB connection restored, failure is resolved
+    failWebhookDelete = false;
+    await instagramService.disconnect('usr_retry_part', 'ig_retry_partial');
+
+    // Account and all dependents must now be completely deleted
+    assert.strictEqual(mockDb.raw.has('ig_retry_partial'), false, 'Account document must be deleted after retry');
+    assert.strictEqual(mockDb.automationsRaw.has('auto_part_1'), false, 'Automations must be deleted after retry');
+    assert.strictEqual(mockDb.webhookJobsRaw.has('job_part_1'), false, 'Webhook jobs must be deleted after retry');
+  });
+
   // ====================================================================
   // 7. OUTBOUND OPERATIONS LEASE PROTECTION
   // ====================================================================
   console.log('\n--- 7. OUTBOUND OPERATIONS LEASE PROTECTION ---');
 
-  // Test 34: Public comment reply requires dispatch lease and records stage
-  await runTestAsync('Test 34: Public comment reply is routed through safeDispatchOutbound with PUBLIC_REPLY_LEASE_ACQUIRED', async () => {
+  // Test 38: Public comment reply requires dispatch lease and records stage
+  await runTestAsync('Test 38: Public comment reply is routed through safeDispatchOutbound with PUBLIC_REPLY_LEASE_ACQUIRED', async () => {
     const mockDb = createMockDb();
     const enc = encryptTestToken('REPLY_TEST_TOKEN');
     mockDb.raw.set('ig_reply_acc', {
@@ -1543,6 +1738,114 @@ function encryptTestToken(plain) {
     const timeline = automationTimeline.getRecordedTimeline();
     const publicReplyStage = timeline.find(t => t.stage === 'PUBLIC_REPLY_LEASE_ACQUIRED');
     assert(publicReplyStage, 'PUBLIC_REPLY_LEASE_ACQUIRED stage must be recorded in automation timeline');
+  });
+
+  // Test 39: Final resource text fallback validates lease before sending and aborts if lease lost
+  await runTestAsync('Test 39: Final resource text fallback validates lease before sending and aborts if lease lost', async () => {
+    const mockDb = createMockDb();
+    const enc = encryptTestToken('DELIVERY_FALLBACK_TOKEN');
+    const igUserId = 'ig_fallback_safe_1';
+    const stateKey = `auto_fb_test:${igUserId}:user_fb_recipient`;
+
+    mockDb.raw.set(igUserId, {
+      id: igUserId,
+      instagram_user_id: igUserId,
+      owner_user_id: 'usr_fb_owner',
+      username: 'resource_creator',
+      ciphertext: enc.ciphertext,
+      iv: enc.iv,
+      tag: enc.tag,
+      expires_at: new Date(Date.now() + 86400000).toISOString(),
+      active_dispatches: 0,
+      active_dispatch_leases: []
+    });
+
+    const automation = {
+      id: 'auto_fb_test',
+      owner_user_id: 'usr_fb_owner',
+      dm_message: 'Here is your link!',
+      enabled: 1
+    };
+
+    const flow = {
+      delivery: {
+        message: 'Here is your link!',
+        resourceUrl: 'https://example.com/asset-download',
+        buttonText: 'Download'
+      }
+    };
+
+    const tokenData = { accessToken: 'valid_access_token_123' };
+
+    db.collections = mockDb.collections;
+
+    const origSendDM = instagramService.sendDirectMessage;
+    let templateAttempted = false;
+    let fallbackAttempted = false;
+    let sendCalls = 0;
+
+    instagramService.sendDirectMessage = async (recipientId, senderId, payload, token) => {
+      sendCalls++;
+      if (sendCalls === 1) {
+        templateAttempted = true;
+        // Verify this first call was the template attachment
+        assert(payload.attachment, 'First send must be the interactive template payload');
+
+        // Simulate account disconnect / lease revocation after the first response
+        // Revoke the lease from the mock DB: empty active_dispatch_leases and set deletion_pending
+        const acc = mockDb.raw.get(igUserId);
+        if (acc) {
+          acc.active_dispatch_leases = [];
+          acc.active_dispatches = 0;
+          acc.deletion_pending = true;
+          acc.deletion_state = 'deleting';
+        }
+
+        // Return a definite template format rejection (400)
+        const formatErr = new Error('Invalid template format: web_url button payload rejected');
+        formatErr.statusCode = 400;
+        formatErr.metaError = { code: 100, message: 'Invalid parameter: template' };
+        throw formatErr;
+      } else {
+        // Any subsequent call is the fallback text send
+        fallbackAttempted = true;
+        return { message_id: 'mid_fallback_should_not_happen' };
+      }
+    };
+
+    let deliveryError = null;
+    try {
+      await deliverFinalResource({
+        recipientIgUserId: igUserId,
+        senderIgsid: 'user_fb_recipient',
+        automation,
+        tokenData,
+        flow,
+        workerId: 'worker_fb_delivery_test'
+      });
+    } catch (err) {
+      deliveryError = err;
+    } finally {
+      instagramService.sendDirectMessage = origSendDM;
+    }
+
+    // 1. Initial template send is attempted.
+    assert.strictEqual(templateAttempted, true, 'Initial template send must have been attempted');
+
+    // 2 & 3. The fallback validation fails.
+    assert(deliveryError, 'Must throw when fallback lease validation fails');
+    assert.strictEqual(deliveryError.code, 'LEASE_LOST', 'Must fail with LEASE_LOST');
+
+    // 4. The fallback Meta request is never called.
+    assert.strictEqual(fallbackAttempted, false, 'Fallback Meta request must NEVER be called after lease loss');
+    assert.strictEqual(sendCalls, 1, 'Exactly one Meta request (the template) must have been attempted');
+
+    // 5. The original delivery state is not incorrectly marked successful.
+    const stateDoc = await mockDb.collections().conversationStates.findOne({ key: stateKey });
+    assert(stateDoc, 'Conversation state document must exist');
+    assert.strictEqual(stateDoc.resource_delivered, false, 'resource_delivered MUST NOT be marked true');
+    assert.notStrictEqual(stateDoc.delivery_state, 'sent', 'delivery_state MUST NOT be sent');
+    assert.strictEqual(stateDoc.delivery_state, 'failed', 'delivery_state must be failed');
   });
 
   // Restore collections
