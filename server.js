@@ -1270,6 +1270,12 @@ async function safeDispatchOutbound(recipientIgUserId, workerId, dispatchFn, lea
     return { success: false, skipped: true, reason: 'LEASE_VALIDATION_API_UNAVAILABLE' };
   }
 
+  // Require the lease release API to exist before proceeding
+  if (typeof db.releaseDispatchLease !== 'function') {
+    console.error(`[DISPATCH LEASE ERROR] releaseDispatchLease API unavailable. Aborting dispatch.`);
+    return { success: false, skipped: true, reason: 'LEASE_RELEASE_API_UNAVAILABLE' };
+  }
+
   let lease;
   let leaseDuration = 0;
   try {
@@ -1286,56 +1292,85 @@ async function safeDispatchOutbound(recipientIgUserId, workerId, dispatchFn, lea
     return { success: false, skipped: true, reason: 'ACCOUNT_DELETED' };
   }
 
-  // Verify the lease immediately before beginning the external Meta request
-  let preValid = false;
-  try {
-    preValid = await db.isDispatchLeaseValid(recipientIgUserId, lease.leaseId);
-  } catch (valErr) {
-    console.error(`[DISPATCH LEASE ERROR] Exception during pre-dispatch lease validation:`, valErr.message);
-    preValid = false;
-  }
-  if (!preValid) {
-    console.warn(`[DISPATCH LEASE LOST] Worker lost dispatch lease before outbound request. Halting.`);
-    const leaseLossErr = new Error(`Dispatch lease expired or reclaimed prior to request processing`);
-    leaseLossErr.code = 'LEASE_LOST';
-    leaseLossErr.retryable = false;
-    throw leaseLossErr;
-  }
-
-  if (leaseOptions.stage && typeof automationTimeline?.recordTimelineStage === 'function') {
-    automationTimeline.recordTimelineStage({
-      stage: leaseOptions.stage,
-      duration_ms: leaseDuration,
-      job_id: leaseOptions.job_id || null,
-      automation_id: leaseOptions.automation_id || null,
-      instagram_account_id: recipientIgUserId,
-      event_type: leaseOptions.event_type || null,
-      success: true
-    });
-  }
-
+  // Once a lease has been acquired, put all subsequent validation, timing,
+  // dispatch and fallback work inside a try/finally block so the exact lease is always released.
   let renewalFailed = false;
   let leaseRenewTimer = null;
-  if (typeof db.renewDispatchLease === 'function') {
-    leaseRenewTimer = setInterval(async () => {
-      try {
-        const renewed = await db.renewDispatchLease(recipientIgUserId, lease.leaseId, 15000);
-        if (!renewed) renewalFailed = true;
-      } catch (_) {
-        renewalFailed = true;
-      }
-    }, 5000);
-    if (leaseRenewTimer.unref) leaseRenewTimer.unref();
-  }
 
   try {
+    // Verify the lease immediately before beginning the external Meta request
+    let preValid = false;
+    try {
+      preValid = await db.isDispatchLeaseValid(recipientIgUserId, lease.leaseId);
+    } catch (valErr) {
+      console.error(`[DISPATCH LEASE ERROR] Exception during pre-dispatch lease validation:`, valErr.message);
+      preValid = false;
+    }
+    if (!preValid) {
+      console.warn(`[DISPATCH LEASE LOST] Worker lost dispatch lease before outbound request. Halting.`);
+      const leaseLossErr = new Error(`Dispatch lease expired or reclaimed prior to request processing`);
+      leaseLossErr.code = 'LEASE_LOST';
+      leaseLossErr.retryable = false;
+      throw leaseLossErr;
+    }
+
+    if (leaseOptions.stage && typeof automationTimeline?.recordTimelineStage === 'function') {
+      automationTimeline.recordTimelineStage({
+        stage: leaseOptions.stage,
+        duration_ms: leaseDuration,
+        job_id: leaseOptions.job_id || null,
+        automation_id: leaseOptions.automation_id || null,
+        instagram_account_id: recipientIgUserId,
+        event_type: leaseOptions.event_type || null,
+        success: true
+      });
+    }
+
+    if (typeof db.renewDispatchLease === 'function') {
+      leaseRenewTimer = setInterval(async () => {
+        try {
+          const renewed = await db.renewDispatchLease(recipientIgUserId, lease.leaseId, 15000);
+          if (!renewed) renewalFailed = true;
+        } catch (_) {
+          renewalFailed = true;
+        }
+      }, 5000);
+      if (leaseRenewTimer.unref) leaseRenewTimer.unref();
+    }
+
     console.log(`[STAGE: DISPATCH_LEASE_ACQUIRED]`, JSON.stringify({
       worker_id: String(workerId || 'unknown'),
       lease_id: lease.leaseId,
       expires_at: lease.expiresAt
     }));
 
-    const res = await dispatchFn(lease);
+    const dispatchLease = {
+      ...lease,
+      isRenewalFailed: () => renewalFailed,
+      assertValid: async () => {
+        if (renewalFailed) {
+          const err = new Error('Dispatch lease renewal failed; halting outbound dispatch.');
+          err.code = 'LEASE_LOST';
+          err.retryable = false;
+          throw err;
+        }
+        let valid = false;
+        try {
+          valid = await db.isDispatchLeaseValid(recipientIgUserId, lease.leaseId);
+        } catch (_) {
+          valid = false;
+        }
+        if (!valid) {
+          const err = new Error('Dispatch lease expired or reclaimed prior to request processing.');
+          err.code = 'LEASE_LOST';
+          err.retryable = false;
+          throw err;
+        }
+        return true;
+      }
+    };
+
+    const res = await dispatchFn(dispatchLease);
 
     if (renewalFailed) {
       console.warn(`[DISPATCH LEASE RENEWAL WARNING] Lease renewal failed during dispatch for lease ${lease.leaseId}`);
@@ -1346,11 +1381,15 @@ async function safeDispatchOutbound(recipientIgUserId, workerId, dispatchFn, lea
     if (leaseRenewTimer) {
       clearInterval(leaseRenewTimer);
     }
-    if (typeof db.releaseDispatchLease === 'function') {
-      await db.releaseDispatchLease(recipientIgUserId, lease.leaseId);
-      console.log(`[STAGE: DISPATCH_LEASE_RELEASED]`, JSON.stringify({
-        lease_id: lease.leaseId
-      }));
+    try {
+      if (typeof db.releaseDispatchLease === 'function') {
+        await db.releaseDispatchLease(recipientIgUserId, lease.leaseId);
+        console.log(`[STAGE: DISPATCH_LEASE_RELEASED]`, JSON.stringify({
+          lease_id: lease.leaseId
+        }));
+      }
+    } catch (releaseErr) {
+      console.error(`[DISPATCH LEASE RELEASE ERROR] Failed to release dispatch lease safely:`, releaseErr.message);
     }
   }
 }
@@ -2699,10 +2738,13 @@ async function executeMessagingJob(job) {
         );
       }
 
-      await safeDispatchOutbound(recipientIgUserId, job?.worker_id, async () => {
+      await safeDispatchOutbound(recipientIgUserId, job?.worker_id, async (dispatchLease) => {
         try {
           await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, retryPayload, tokenData.accessToken);
         } catch (_) {
+          if (dispatchLease && typeof dispatchLease.assertValid === 'function') {
+            await dispatchLease.assertValid();
+          }
           await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, {
             text: `${retryNotice}\n\n👉 Profile: ${profileUrl}`,
             quick_replies: [{ content_type: 'text', title: 'Retry Check 🔄'.slice(0, 20), payload: `CHECK_FOLLOW:${targetAutomation.id}:${resolvedCommentId || ''}` }]
@@ -2747,10 +2789,13 @@ async function executeMessagingJob(job) {
         );
       }
 
-      await safeDispatchOutbound(recipientIgUserId, job?.worker_id, async () => {
+      await safeDispatchOutbound(recipientIgUserId, job?.worker_id, async (dispatchLease) => {
         try {
           await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, followPromptPayload, tokenData.accessToken);
         } catch (dmErr) {
+          if (dispatchLease && typeof dispatchLease.assertValid === 'function') {
+            await dispatchLease.assertValid();
+          }
           await instagramService.sendDirectMessage(
             recipientIgUserId,
             senderIgsid,
@@ -2834,10 +2879,13 @@ async function executeMessagingJob(job) {
         );
       }
 
-      await safeDispatchOutbound(recipientIgUserId, job?.worker_id, async () => {
+      await safeDispatchOutbound(recipientIgUserId, job?.worker_id, async (dispatchLease) => {
         try {
           await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, retryPayload, tokenData.accessToken);
         } catch (_) {
+          if (dispatchLease && typeof dispatchLease.assertValid === 'function') {
+            await dispatchLease.assertValid();
+          }
           await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, {
             text: `${retryNotice}\n\n👉 Profile: ${profileUrl}`,
             quick_replies: [{ content_type: 'text', title: 'Retry Check 🔄'.slice(0, 20), payload: `CHECK_FOLLOW:${targetAutomation.id}:${resolvedCommentId || ''}` }]
@@ -2870,10 +2918,13 @@ async function executeMessagingJob(job) {
         );
       }
 
-      await safeDispatchOutbound(recipientIgUserId, job?.worker_id, async () => {
+      await safeDispatchOutbound(recipientIgUserId, job?.worker_id, async (dispatchLease) => {
         try {
           await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, retryPromptPayload, tokenData.accessToken);
         } catch (_) {
+          if (dispatchLease && typeof dispatchLease.assertValid === 'function') {
+            await dispatchLease.assertValid();
+          }
           await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, {
             text: `${retryMsg}\n\n👉 Visit Profile: ${profileUrl}`,
             quick_replies: [{ content_type: 'text', title: confirmBtn, payload: `CHECK_FOLLOW:${targetAutomation.id}:${resolvedCommentId || ''}` }]

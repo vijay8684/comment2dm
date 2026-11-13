@@ -985,8 +985,6 @@ async function renewDispatchLease(instagramAccountId, leaseIdentifier, extendMs 
         { instagram_user_id: { $in: ids } },
         { id: { $in: ids } }
       ],
-      deletion_pending: { $ne: true },
-      deletion_state: { $ne: 'deleting' },
       'active_dispatch_leases.lease_id': leaseId
     },
     {

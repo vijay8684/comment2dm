@@ -808,23 +808,158 @@ function analyzeManualReel(input = {}) {
 async function disconnect(userId, instagramUserId, options = {}) {
   let cols;
   try {
-    cols = db.collections ? db.collections() : null;
+    cols = (db && typeof db.collections === 'function') ? db.collections() : null;
   } catch (_) {
     cols = null;
   }
 
-  if (cols) {
-    const { instagramAccounts, automations, webhookJobs, openingDmClaims } = cols;
-    const ids = [String(instagramUserId)];
-    if (!isNaN(Number(instagramUserId))) ids.push(Number(instagramUserId));
+  const instagramAccounts = cols?.instagramAccounts || cols?.instagram_accounts;
+  if (!cols || !instagramAccounts ||
+      typeof instagramAccounts.updateMany !== 'function' ||
+      typeof instagramAccounts.find !== 'function' ||
+      typeof instagramAccounts.deleteMany !== 'function') {
+    const unavailErr = new Error('Database safety checks unavailable for Instagram disconnect. Please retry in a few moments.');
+    unavailErr.code = 'DATABASE_SAFETY_UNAVAILABLE';
+    unavailErr.statusCode = 503;
+    unavailErr.retryable = true;
+    throw unavailErr;
+  }
 
-    const ownerClauses = [{ owner_user_id: String(userId) }, { owner_id: String(userId) }];
-    if (!isNaN(Number(userId))) {
-      ownerClauses.push({ owner_user_id: Number(userId) });
-      ownerClauses.push({ owner_id: Number(userId) });
+  const { automations, webhookJobs, openingDmClaims } = cols;
+  const ids = [String(instagramUserId)];
+  if (!isNaN(Number(instagramUserId))) ids.push(Number(instagramUserId));
+
+  const ownerClauses = [{ owner_user_id: String(userId) }, { owner_id: String(userId) }];
+  if (!isNaN(Number(userId))) {
+    ownerClauses.push({ owner_user_id: Number(userId) });
+    ownerClauses.push({ owner_id: Number(userId) });
+  }
+
+  const accountFilter = {
+    $and: [
+      { $or: ownerClauses },
+      {
+        $or: [
+          { instagram_user_id: { $in: ids } },
+          { id: { $in: ids } }
+        ]
+      }
+    ]
+  };
+
+  // 1. Atomically mark the account deletion_pending: true to reject ALL new dispatch leases
+  let markResult;
+  try {
+    markResult = await instagramAccounts.updateMany(
+      accountFilter,
+      {
+        $set: {
+          deletion_pending: true,
+          deletion_state: 'deleting',
+          deletion_started_at: new Date()
+        }
+      }
+    );
+  } catch (markErr) {
+    const safetyErr = new Error(`Failed to set deletion-pending safety guard on Instagram account: ${markErr.message}`);
+    safetyErr.code = 'DATABASE_SAFETY_UNAVAILABLE';
+    safetyErr.statusCode = 503;
+    safetyErr.retryable = true;
+    throw safetyErr;
+  }
+
+  // Require successful marking before starting the drain
+  if (!markResult || (markResult.matchedCount === 0 && markResult.modifiedCount === 0)) {
+    let existingCount = 0;
+    try {
+      if (typeof instagramAccounts.countDocuments === 'function') {
+        existingCount = await instagramAccounts.countDocuments(accountFilter);
+      } else {
+        const found = await instagramAccounts.find(accountFilter).toArray();
+        existingCount = found.length;
+      }
+    } catch (_) {}
+
+    if (existingCount > 0) {
+      const markFailErr = new Error('Failed to set deletion-pending safety guard on account. Preserving credentials.');
+      markFailErr.code = 'DATABASE_SAFETY_UNAVAILABLE';
+      markFailErr.statusCode = 503;
+      markFailErr.retryable = true;
+      throw markFailErr;
+    }
+    // If account does not exist at all, invalidate local cache and return cleanly
+    reelsCache.delete(`${userId}:${instagramUserId}`);
+    tokenCache.clear();
+    return;
+  }
+
+  // 2. Coordinate with active outbound dispatch leases: wait for existing leases to drain
+  const drainTimeoutMs = Number(options.drainTimeoutMs !== undefined ? options.drainTimeoutMs : 5000);
+  const pollIntervalMs = options.pollIntervalMs || 50;
+  const startTime = Date.now();
+  let activeLeasesRemain = false;
+
+  while (Date.now() - startTime < drainTimeoutMs) {
+    const now = new Date();
+
+    // Safe pruning of expired leases
+    try {
+      await instagramAccounts.updateMany(
+        accountFilter,
+        {
+          $pull: {
+            active_dispatch_leases: { expires_at: { $lte: now } }
+          }
+        }
+      );
+    } catch (_) {}
+
+    // Check if any active unexpired leases remain
+    let accounts;
+    try {
+      accounts = await instagramAccounts.find(accountFilter).toArray();
+    } catch (checkErr) {
+      const checkFailErr = new Error(`Database error while checking active dispatch leases: ${checkErr.message}. Preserving credentials.`);
+      checkFailErr.code = 'DATABASE_SAFETY_UNAVAILABLE';
+      checkFailErr.statusCode = 503;
+      checkFailErr.retryable = true;
+      throw checkFailErr;
     }
 
-    const accountFilter = {
+    let totalActive = 0;
+    for (const acc of accounts) {
+      const leases = Array.isArray(acc.active_dispatch_leases)
+        ? acc.active_dispatch_leases.filter(l => new Date(l.expires_at) > now)
+        : [];
+      totalActive += leases.length;
+    }
+
+    if (totalActive === 0) {
+      activeLeasesRemain = false;
+      break; // All dispatches drained!
+    }
+    activeLeasesRemain = true;
+    await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+  }
+
+  if (activeLeasesRemain) {
+    // Leases did not drain within bounded timeout!
+    // DO NOT delete credentials or automations.
+    // Return clear retryable error (503).
+    const drainError = new Error('Instagram account disconnect in progress: active outbound dispatches are still draining. Please retry in a few moments.');
+    drainError.code = 'DISCONNECT_DRAIN_TIMEOUT';
+    drainError.statusCode = 503;
+    drainError.retryable = true;
+    throw drainError;
+  }
+
+  // 3. Delete the account and associated automations only after active leases have drained.
+  // Propagate database deletion errors instead of swallowing them!
+  const deleteTasks = [
+    instagramAccounts.deleteMany(accountFilter)
+  ];
+  if (automations && typeof automations.deleteMany === 'function') {
+    deleteTasks.push(automations.deleteMany({
       $and: [
         { $or: ownerClauses },
         {
@@ -834,106 +969,17 @@ async function disconnect(userId, instagramUserId, options = {}) {
           ]
         }
       ]
-    };
-
-    // 1. Atomically mark the account deletion_pending: true to reject ALL new dispatch leases
-    if (instagramAccounts && typeof instagramAccounts.updateMany === 'function') {
-      await instagramAccounts.updateMany(
-        accountFilter,
-        {
-          $set: {
-            deletion_pending: true,
-            deletion_state: 'deleting',
-            deletion_started_at: new Date()
-          }
-        }
-      );
-    }
-
-    // 2. Coordinate with active outbound dispatch leases: wait for existing leases to drain
-    const drainTimeoutMs = Number(options.drainTimeoutMs !== undefined ? options.drainTimeoutMs : 5000);
-    const pollIntervalMs = options.pollIntervalMs || 50;
-    const startTime = Date.now();
-    let activeLeasesRemain = false;
-
-    if (instagramAccounts && typeof instagramAccounts.find === 'function') {
-      while (Date.now() - startTime < drainTimeoutMs) {
-        const now = new Date();
-
-        // Safe pruning of expired leases
-        if (typeof instagramAccounts.updateMany === 'function') {
-          await instagramAccounts.updateMany(
-            accountFilter,
-            {
-              $pull: {
-                active_dispatch_leases: { expires_at: { $lte: now } }
-              }
-            }
-          ).catch(() => {});
-        }
-
-        // Check if any active unexpired leases remain
-        const accounts = await instagramAccounts.find(accountFilter).toArray();
-        let totalActive = 0;
-        for (const acc of accounts) {
-          const leases = Array.isArray(acc.active_dispatch_leases)
-            ? acc.active_dispatch_leases.filter(l => new Date(l.expires_at) > now)
-            : [];
-          totalActive += leases.length;
-        }
-
-        if (totalActive === 0) {
-          activeLeasesRemain = false;
-          break; // All dispatches drained!
-        }
-        activeLeasesRemain = true;
-        await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
-      }
-
-      if (activeLeasesRemain) {
-        // Leases did not drain within bounded timeout!
-        // DO NOT delete credentials or automations.
-        // Return clear retryable error (503).
-        const drainError = new Error('Instagram account disconnect in progress: active outbound dispatches are still draining. Please retry in a few moments.');
-        drainError.code = 'DISCONNECT_DRAIN_TIMEOUT';
-        drainError.statusCode = 503;
-        drainError.retryable = true;
-        throw drainError;
-      }
-    }
-
-    // 3. Delete the account and associated automations only after active leases have drained.
-    // Propagate database deletion errors instead of swallowing them with Promise.allSettled()!
-    const deleteTasks = [];
-    if (instagramAccounts && typeof instagramAccounts.deleteMany === 'function') {
-      deleteTasks.push(instagramAccounts.deleteMany(accountFilter));
-    }
-    if (automations && typeof automations.deleteMany === 'function') {
-      deleteTasks.push(automations.deleteMany({
-        $and: [
-          { $or: ownerClauses },
-          {
-            $or: [
-              { instagram_user_id: { $in: ids } },
-              { id: { $in: ids } }
-            ]
-          }
-        ]
-      }));
-    }
-    if (webhookJobs && typeof webhookJobs.deleteMany === 'function') {
-      deleteTasks.push(webhookJobs.deleteMany({ instagram_account_id: { $in: ids } }));
-    }
-    if (openingDmClaims && typeof openingDmClaims.deleteMany === 'function') {
-      deleteTasks.push(openingDmClaims.deleteMany({ instagram_account_id: { $in: ids } }));
-    }
-
-    // Await all delete operations; any rejection will throw and propagate!
-    await Promise.all(deleteTasks);
-  } else {
-    await db.run('DELETE FROM instagram_accounts WHERE owner_user_id = ? AND instagram_user_id = ?', [userId, instagramUserId]);
-    await db.run('DELETE FROM automations WHERE owner_user_id = ? AND instagram_user_id = ?', [userId, instagramUserId]);
+    }));
   }
+  if (webhookJobs && typeof webhookJobs.deleteMany === 'function') {
+    deleteTasks.push(webhookJobs.deleteMany({ instagram_account_id: { $in: ids } }));
+  }
+  if (openingDmClaims && typeof openingDmClaims.deleteMany === 'function') {
+    deleteTasks.push(openingDmClaims.deleteMany({ instagram_account_id: { $in: ids } }));
+  }
+
+  // Await all delete operations; any rejection will throw and propagate!
+  await Promise.all(deleteTasks);
 
   // 4. Invalidate local caches after successful disconnect
   reelsCache.delete(`${userId}:${instagramUserId}`);

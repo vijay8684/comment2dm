@@ -1,11 +1,12 @@
 // test_release_review_fixes_suite.js
 // Verification suite for Comment2DM Release Review Fixes:
 // 1. Fail-closed dispatch lease handling & pre-dispatch validation
-// 2. Genuinely idempotent lease release
-// 3. Privacy & telemetry identifier protection (including live console capture)
-// 4. Token-cache correctness across instances (real cache assertions, no assert(true))
-// 5. Lease-aware Instagram disconnect & drain timeout coordination
-// 6. Outbound operation lease protection (public comment reply)
+// 2. Genuinely idempotent lease release & always-release guarantees
+// 3. Renewal behaviour during disconnect & fallback protection
+// 4. Privacy & telemetry identifier protection (real comment/message execution)
+// 5. Token-cache correctness across instances (simulated multi-process protection)
+// 6. Lease-aware Instagram disconnect fail-closed safety
+// 7. Outbound operation lease protection (public comment reply)
 
 const assert = require('assert');
 const crypto = require('crypto');
@@ -99,7 +100,7 @@ function createMockDb() {
     return true;
   }
 
-  function applyUpdate(acc, update) {
+  function applyUpdate(acc, update, query = null) {
     let modified = false;
     if (update.$push && update.$push.active_dispatch_leases) {
       if (!acc.active_dispatch_leases) acc.active_dispatch_leases = [];
@@ -125,7 +126,20 @@ function createMockDb() {
       modified = true;
     }
     if (update.$set) {
-      Object.assign(acc, update.$set);
+      for (const [key, val] of Object.entries(update.$set)) {
+        if (key === 'active_dispatch_leases.$.expires_at') {
+          const targetLeaseId = query?.['active_dispatch_leases.lease_id'];
+          if (Array.isArray(acc.active_dispatch_leases)) {
+            for (const l of acc.active_dispatch_leases) {
+              if (!targetLeaseId || l.lease_id === targetLeaseId) {
+                l.expires_at = val;
+              }
+            }
+          }
+        } else {
+          acc[key] = val;
+        }
+      }
       modified = true;
     }
     return modified;
@@ -144,7 +158,7 @@ function createMockDb() {
     async findOneAndUpdate(query, update) {
       for (const acc of accounts.values()) {
         if (matches(acc, query)) {
-          applyUpdate(acc, update);
+          applyUpdate(acc, update, query);
           return { value: JSON.parse(JSON.stringify(acc)) };
         }
       }
@@ -153,7 +167,7 @@ function createMockDb() {
     async updateOne(query, update) {
       for (const acc of accounts.values()) {
         if (matches(acc, query)) {
-          const mod = applyUpdate(acc, update);
+          const mod = applyUpdate(acc, update, query);
           return { matchedCount: 1, modifiedCount: mod ? 1 : 0 };
         }
       }
@@ -165,7 +179,7 @@ function createMockDb() {
       for (const acc of accounts.values()) {
         if (matches(acc, query)) {
           matchCount++;
-          if (applyUpdate(acc, update)) modCount++;
+          if (applyUpdate(acc, update, query)) modCount++;
         }
       }
       return { matchedCount: matchCount, modifiedCount: modCount };
@@ -176,7 +190,8 @@ function createMockDb() {
         if (matches(acc, query)) results.push(JSON.parse(JSON.stringify(acc)));
       }
       return {
-        toArray: async () => results
+        toArray: async () => results,
+        sort: () => ({ toArray: async () => results })
       };
     },
     async countDocuments(query) {
@@ -289,6 +304,20 @@ function createMockDb() {
       }
       return null;
     },
+    async findOneAndUpdate(query, update, opts = {}) {
+      for (const s of conversationStates.values()) {
+        if (matches(s, query)) {
+          applyUpdate(s, update, query);
+          return { value: JSON.parse(JSON.stringify(s)) };
+        }
+      }
+      if (opts.upsert) {
+        const newDoc = { ...(update.$setOnInsert || {}), ...(update.$set || {}) };
+        conversationStates.set(newDoc.key || crypto.randomUUID(), newDoc);
+        return { value: JSON.parse(JSON.stringify(newDoc)) };
+      }
+      return { value: null };
+    },
     async updateOne(query, update, opts = {}) {
       for (const s of conversationStates.values()) {
         if (matches(s, query)) {
@@ -355,7 +384,7 @@ function encryptTestToken(plain) {
   const origCollections = db.collections;
 
   // ====================================================================
-  // 1. FAIL-CLOSED DISPATCH LEASE HANDLING & PRE-DISPATCH VALIDATION
+  // 1. FAIL-CLOSED DISPATCH LEASE & PRE-DISPATCH VALIDATION
   // ====================================================================
   console.log('--- 1. FAIL-CLOSED DISPATCH LEASE & PRE-DISPATCH VALIDATION ---');
 
@@ -518,12 +547,157 @@ function encryptTestToken(plain) {
     db.isDispatchLeaseValid = origValid;
   });
 
+  // Test 8: safeDispatchOutbound fails closed if releaseDispatchLease API is missing (no Meta request sent)
+  await runTestAsync('Test 8: safeDispatchOutbound fails closed if releaseDispatchLease API is missing', async () => {
+    const origRelease = db.releaseDispatchLease;
+    delete db.releaseDispatchLease;
+
+    let dispatchCalled = false;
+    const res = await safeDispatchOutbound('ig_acc_test', 'worker_1', async () => {
+      dispatchCalled = true;
+    });
+
+    assert.strictEqual(dispatchCalled, false, 'dispatchFn must NEVER be called when release API is missing');
+    assert.strictEqual(res.skipped, true);
+    assert.strictEqual(res.reason, 'LEASE_RELEASE_API_UNAVAILABLE');
+
+    db.releaseDispatchLease = origRelease;
+  });
+
+  // Test 9: Pre-dispatch validation returns false, and the acquired lease is released
+  await runTestAsync('Test 9: Pre-dispatch validation returns false, and the acquired lease is released', async () => {
+    const mockDb = createMockDb();
+    const accId = 'ig_val_false';
+    mockDb.raw.set(accId, {
+      id: accId,
+      instagram_user_id: accId,
+      active_dispatches: 0,
+      active_dispatch_leases: []
+    });
+    db.collections = mockDb.collections;
+
+    let releasedLeaseId = null;
+    const origRelease = db.releaseDispatchLease;
+    db.releaseDispatchLease = async (id, leaseId) => {
+      releasedLeaseId = leaseId;
+      return origRelease(id, leaseId);
+    };
+
+    const origValid = db.isDispatchLeaseValid;
+    db.isDispatchLeaseValid = async () => false;
+
+    let dispatchCalled = false;
+    let errorCaught = null;
+    try {
+      await safeDispatchOutbound(accId, 'worker_1', async () => {
+        dispatchCalled = true;
+      });
+    } catch (err) {
+      errorCaught = err;
+    } finally {
+      db.releaseDispatchLease = origRelease;
+      db.isDispatchLeaseValid = origValid;
+    }
+
+    assert(errorCaught, 'Must throw LEASE_LOST when pre-dispatch validation returns false');
+    assert.strictEqual(errorCaught.code, 'LEASE_LOST');
+    assert.strictEqual(dispatchCalled, false, 'dispatchFn must NOT be called');
+    assert(releasedLeaseId, 'Lease MUST be released in finally even when pre-dispatch validation returns false');
+  });
+
+  // Test 10: Pre-dispatch validation throws, and the acquired lease is released
+  await runTestAsync('Test 10: Pre-dispatch validation throws, and the acquired lease is released', async () => {
+    const mockDb = createMockDb();
+    const accId = 'ig_val_throws';
+    mockDb.raw.set(accId, {
+      id: accId,
+      instagram_user_id: accId,
+      active_dispatches: 0,
+      active_dispatch_leases: []
+    });
+    db.collections = mockDb.collections;
+
+    let releasedLeaseId = null;
+    const origRelease = db.releaseDispatchLease;
+    db.releaseDispatchLease = async (id, leaseId) => {
+      releasedLeaseId = leaseId;
+      return origRelease(id, leaseId);
+    };
+
+    const origValid = db.isDispatchLeaseValid;
+    db.isDispatchLeaseValid = async () => { throw new Error('Simulated DB validation query failure'); };
+
+    let dispatchCalled = false;
+    let errorCaught = null;
+    try {
+      await safeDispatchOutbound(accId, 'worker_1', async () => {
+        dispatchCalled = true;
+      });
+    } catch (err) {
+      errorCaught = err;
+    } finally {
+      db.releaseDispatchLease = origRelease;
+      db.isDispatchLeaseValid = origValid;
+    }
+
+    assert(errorCaught, 'Must throw LEASE_LOST when pre-dispatch validation throws');
+    assert.strictEqual(errorCaught.code, 'LEASE_LOST');
+    assert.strictEqual(dispatchCalled, false, 'dispatchFn must NOT be called');
+    assert(releasedLeaseId, 'Lease MUST be released in finally when pre-dispatch validation throws');
+  });
+
+  // Test 11: Release failure in finally is caught and original dispatch error is preserved without leaking identifiers
+  await runTestAsync('Test 11: Release failure is logged safely without exposing identifiers and preserves dispatch error', async () => {
+    const mockDb = createMockDb();
+    const accId = 'ig_rel_err_sensitive_id';
+    mockDb.raw.set(accId, {
+      id: accId,
+      instagram_user_id: accId,
+      active_dispatches: 0,
+      active_dispatch_leases: []
+    });
+    db.collections = mockDb.collections;
+
+    const origRelease = db.releaseDispatchLease;
+    db.releaseDispatchLease = async () => {
+      throw new Error('Database connection reset during lease release cleanup');
+    };
+
+    const capturedErrors = [];
+    const origConsoleError = console.error;
+    console.error = (...args) => {
+      capturedErrors.push(args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' '));
+      origConsoleError(...args);
+    };
+
+    let errorCaught = null;
+    try {
+      await safeDispatchOutbound(accId, 'worker_1', async () => {
+        const dispatchErr = new Error('Meta API 400 Bad Request');
+        dispatchErr.statusCode = 400;
+        throw dispatchErr;
+      });
+    } catch (err) {
+      errorCaught = err;
+    } finally {
+      console.error = origConsoleError;
+      db.releaseDispatchLease = origRelease;
+    }
+
+    assert(errorCaught, 'Original dispatch error must be thrown');
+    assert.strictEqual(errorCaught.message, 'Meta API 400 Bad Request', 'Must preserve original dispatch error, not mask with release error');
+
+    const errLogs = capturedErrors.join('\n');
+    assert(errLogs.includes('Failed to release dispatch lease safely'), 'Must log release failure');
+    assert(!errLogs.includes(accId), 'Release failure log must NOT expose raw account ID');
+  });
+
   // ====================================================================
   // 2. GENUINELY IDEMPOTENT LEASE RELEASE TESTS
   // ====================================================================
   console.log('\n--- 2. GENUINELY IDEMPOTENT LEASE RELEASE TESTS ---');
 
-  await runTestAsync('Test 8: First release succeeds and decrements active_dispatches', async () => {
+  await runTestAsync('Test 12: First release succeeds and decrements active_dispatches', async () => {
     const mockDb = createMockDb();
     mockDb.raw.set('ig_acc_idem', {
       id: 'ig_acc_idem',
@@ -547,7 +721,7 @@ function encryptTestToken(plain) {
     assert.strictEqual(acc.active_dispatch_leases.length, 0);
   });
 
-  await runTestAsync('Test 9: Second release of the same lease does not decrement again', async () => {
+  await runTestAsync('Test 13: Second release of the same lease does not decrement again', async () => {
     const mockDb = createMockDb();
     mockDb.raw.set('ig_acc_idem2', {
       id: 'ig_acc_idem2',
@@ -571,7 +745,7 @@ function encryptTestToken(plain) {
     assert.strictEqual(mockDb.raw.get('ig_acc_idem2').active_dispatches, 0, 'active_dispatches must remain 0');
   });
 
-  await runTestAsync('Test 10: Releasing two different leases decrements exactly twice', async () => {
+  await runTestAsync('Test 14: Releasing two different leases decrements exactly twice', async () => {
     const mockDb = createMockDb();
     mockDb.raw.set('ig_acc_two', {
       id: 'ig_acc_two',
@@ -596,7 +770,7 @@ function encryptTestToken(plain) {
     assert.strictEqual(mockDb.raw.get('ig_acc_two').active_dispatch_leases.length, 0);
   });
 
-  await runTestAsync('Test 11: Releasing an unknown lease does not change the counter', async () => {
+  await runTestAsync('Test 15: Releasing an unknown lease does not change the counter', async () => {
     const mockDb = createMockDb();
     mockDb.raw.set('ig_acc_unk', {
       id: 'ig_acc_unk',
@@ -613,11 +787,166 @@ function encryptTestToken(plain) {
   });
 
   // ====================================================================
-  // 3. PRIVACY & TELEMETRY IDENTIFIER HANDLING TESTS
+  // 3. RENEWAL BEHAVIOUR DURING DISCONNECT & FALLBACK PROTECTION
   // ====================================================================
-  console.log('\n--- 3. PRIVACY & TELEMETRY IDENTIFIER HANDLING TESTS ---');
+  console.log('\n--- 3. RENEWAL BEHAVIOUR DURING DISCONNECT & FALLBACK PROTECTION ---');
 
-  runTest('Test 12: Telemetry records transform raw identifiers into non-reversible hashes', () => {
+  // Test 16: Existing lease renews while deletion_pending is true
+  await runTestAsync('Test 16: Existing lease renews while deletion_pending is true', async () => {
+    const mockDb = createMockDb();
+    const accId = 'ig_renew_pending';
+    const leaseId = 'lease_existing_to_renew';
+    const now = Date.now();
+    mockDb.raw.set(accId, {
+      id: accId,
+      instagram_user_id: accId,
+      deletion_pending: true,
+      deletion_state: 'deleting',
+      active_dispatches: 1,
+      active_dispatch_leases: [{ lease_id: leaseId, worker_id: 'w1', expires_at: new Date(now + 4000) }]
+    });
+    db.collections = mockDb.collections;
+
+    const renewed = await db.renewDispatchLease(accId, leaseId, 15000);
+    assert.strictEqual(renewed, true, 'Existing lease MUST be allowed to renew while deletion_pending is true');
+
+    const acc = mockDb.raw.get(accId);
+    const renewedLease = acc.active_dispatch_leases.find(l => l.lease_id === leaseId);
+    assert(new Date(renewedLease.expires_at).getTime() > now + 10000, 'Lease expiration must be extended');
+  });
+
+  // Test 17: New lease acquisition remains blocked while deletion_pending is true
+  await runTestAsync('Test 17: New lease acquisition remains blocked while deletion_pending is true', async () => {
+    const mockDb = createMockDb();
+    const accId = 'ig_block_new';
+    mockDb.raw.set(accId, {
+      id: accId,
+      instagram_user_id: accId,
+      deletion_pending: true,
+      deletion_state: 'deleting',
+      active_dispatches: 0,
+      active_dispatch_leases: []
+    });
+    db.collections = mockDb.collections;
+
+    const lease = await db.acquireDispatchLease(accId, 'worker_new');
+    assert.strictEqual(lease, null, 'New lease acquisition MUST be blocked when deletion_pending is true');
+  });
+
+  // Test 18: Renewal requires exact lease ID and cannot create lease or authorize new dispatch
+  await runTestAsync('Test 18: Renewal requires exact lease ID and cannot create lease or authorize new dispatch', async () => {
+    const mockDb = createMockDb();
+    const accId = 'ig_renew_exact';
+    mockDb.raw.set(accId, {
+      id: accId,
+      instagram_user_id: accId,
+      active_dispatches: 0,
+      active_dispatch_leases: []
+    });
+    db.collections = mockDb.collections;
+
+    const renewed = await db.renewDispatchLease(accId, 'nonexistent_lease_id', 15000);
+    assert.strictEqual(renewed, false, 'Renewal must fail for non-existent lease ID');
+    const acc = mockDb.raw.get(accId);
+    assert.strictEqual(acc.active_dispatch_leases.length, 0, 'Renewal must never create a lease record');
+    assert.strictEqual(acc.active_dispatches, 0, 'Renewal must never increment active_dispatches');
+  });
+
+  // Test 19: A failed renewal prevents a subsequent fallback request
+  await runTestAsync('Test 19: A failed renewal prevents a subsequent fallback request', async () => {
+    const mockDb = createMockDb();
+    const accId = 'ig_fail_fallback';
+    mockDb.raw.set(accId, {
+      id: accId,
+      instagram_user_id: accId,
+      active_dispatches: 0,
+      active_dispatch_leases: []
+    });
+    db.collections = mockDb.collections;
+
+    let primaryCalled = false;
+    let fallbackCalled = false;
+    let errorCaught = null;
+
+    try {
+      await safeDispatchOutbound(accId, 'worker_test', async (dispatchLease) => {
+        primaryCalled = true;
+        try {
+          throw new Error('Primary Meta request failed: 500 Internal Error');
+        } catch (_) {
+          // Simulate lease revoked/expired in DB before fallback
+          const acc = mockDb.raw.get(accId);
+          acc.active_dispatch_leases = []; // Revoke lease
+
+          // Before fallback request, check assertValid()
+          await dispatchLease.assertValid();
+          fallbackCalled = true;
+          return { sent: true };
+        }
+      });
+    } catch (err) {
+      errorCaught = err;
+    }
+
+    assert.strictEqual(primaryCalled, true, 'Primary request should have been attempted');
+    assert.strictEqual(fallbackCalled, false, 'Fallback request must NOT be attempted after lease validation/renewal failure');
+    assert(errorCaught, 'Must throw error when lease is invalid before fallback');
+    assert.strictEqual(errorCaught.code, 'LEASE_LOST');
+  });
+
+  // Test 20: Disconnect cannot delete credentials while a valid renewed lease exists
+  await runTestAsync('Test 20: Disconnect cannot delete credentials while a valid renewed lease exists', async () => {
+    const mockDb = createMockDb();
+    const accId = 'ig_renew_blocks_delete';
+    const ownerId = 'usr_owner_renew';
+    const leaseId = 'lease_renewed_keepalive';
+    const enc = encryptTestToken('KEEPALIVE_TOKEN');
+
+    mockDb.raw.set(accId, {
+      id: accId,
+      instagram_user_id: accId,
+      owner_user_id: ownerId,
+      username: 'keepalive_user',
+      ciphertext: enc.ciphertext,
+      iv: enc.iv,
+      tag: enc.tag,
+      active_dispatches: 1,
+      active_dispatch_leases: [{ lease_id: leaseId, worker_id: 'w1', expires_at: new Date(Date.now() + 200) }]
+    });
+    mockDb.automationsRaw.set('auto_keepalive', {
+      id: 'auto_keepalive',
+      owner_user_id: ownerId,
+      instagram_user_id: accId
+    });
+    db.collections = mockDb.collections;
+
+    // Worker periodically renews the lease during drain
+    const renewInterval = setInterval(async () => {
+      await db.renewDispatchLease(accId, leaseId, 500);
+    }, 50);
+
+    let errorCaught = null;
+    try {
+      await instagramService.disconnect(ownerId, accId, { drainTimeoutMs: 200, pollIntervalMs: 25 });
+    } catch (err) {
+      errorCaught = err;
+    } finally {
+      clearInterval(renewInterval);
+    }
+
+    assert(errorCaught, 'Disconnect must time out and throw 503 while lease is being renewed');
+    assert.strictEqual(errorCaught.code, 'DISCONNECT_DRAIN_TIMEOUT');
+    assert.strictEqual(errorCaught.statusCode, 503);
+    assert.strictEqual(mockDb.raw.has(accId), true, 'Account credentials MUST NOT be deleted while renewed lease exists');
+    assert.strictEqual(mockDb.automationsRaw.has('auto_keepalive'), true, 'Automations MUST NOT be deleted while renewed lease exists');
+  });
+
+  // ====================================================================
+  // 4. PRIVACY & TELEMETRY IDENTIFIER HANDLING TESTS
+  // ====================================================================
+  console.log('\n--- 4. PRIVACY & TELEMETRY IDENTIFIER HANDLING TESTS ---');
+
+  runTest('Test 21: Telemetry records transform raw identifiers into non-reversible hashes', () => {
     automationTimeline.clearRecordedTimeline();
     const rawAccountId = 'ig_real_user_99887766';
     const rawAutoId = 'auto_marketing_lead_magnet_123';
@@ -659,7 +988,7 @@ function encryptTestToken(plain) {
     assert.strictEqual(record.job_ref, record2.job_ref, 'Same job ID must produce identical job_ref');
   });
 
-  runTest('Test 13: Telemetry stringification never emits raw identifiers or private content', () => {
+  runTest('Test 22: Telemetry stringification never emits raw identifiers or private content', () => {
     const rawAccountId = 'ig_secret_account_777';
     const rawComment = 'Check this secret comment! My email is user@test.com and password is secret';
 
@@ -675,13 +1004,14 @@ function encryptTestToken(plain) {
     assert(!serialized.includes('password'), 'Serialized record must NEVER contain passwords');
   });
 
-  // Test 14: Console Privacy Log Interception Audit
-  await runTestAsync('Test 14: Console logs during webhook execution never leak raw sender IDs, comments, or texts', async () => {
-    const rawSenderIgsid = 'igsid_sensitive_9876543210';
-    const rawCommentId = 'cmt_secret_1122334455';
-    const rawCommentText = 'SEND GUIDE TO SECRET EMAIL';
-    const rawPrivateMsg = 'Here is my private phone number: 555-1234';
-    const rawAccountId = 'ig_account_private_001';
+  // Test 23: Complete Privacy Audit: exercise actual comment webhook and message webhook
+  await runTestAsync('Test 23: Console logs during comment and messaging webhook execution never leak raw sender IDs, comments, or texts', async () => {
+    const rawAccountId = `ig_priv_acc_${crypto.randomBytes(6).toString('hex')}`;
+    const rawSenderIgsid = `igsid_priv_${crypto.randomBytes(6).toString('hex')}`;
+    const rawCommentId = `cmt_priv_${crypto.randomBytes(6).toString('hex')}`;
+    const rawCommentText = `SECRET_KEYWORD_DISCOUNT_${crypto.randomBytes(6).toString('hex')}`;
+    const rawPrivateMsg = `SECRET_USER_PHONE_555_${crypto.randomBytes(6).toString('hex')}`;
+    const rawSecretToken = 'EAAB_PRIVACY_SUPER_SECRET_TOKEN';
 
     const capturedLogs = [];
     const origLog = console.log;
@@ -692,18 +1022,21 @@ function encryptTestToken(plain) {
       capturedLogs.push({ level, text: args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ') });
     }
 
-    console.log = (...args) => { intercept('log', ...args); origLog(...args); };
-    console.warn = (...args) => { intercept('warn', ...args); origWarn(...args); };
-    console.error = (...args) => { intercept('error', ...args); origError(...args); };
+    console.log = (...args) => { intercept('log', ...args); };
+    console.warn = (...args) => { intercept('warn', ...args); };
+    console.error = (...args) => { intercept('error', ...args); };
+
+    let commentExecuted = false;
+    let messagingExecuted = false;
 
     try {
       const mockDb = createMockDb();
-      const enc = encryptTestToken('EAAB_PRIVACY_TEST_TOKEN');
+      const enc = encryptTestToken(rawSecretToken);
       mockDb.raw.set(rawAccountId, {
         id: rawAccountId,
         instagram_user_id: rawAccountId,
-        owner_user_id: 'usr_priv',
-        username: 'privcreator',
+        owner_user_id: 'usr_priv_test',
+        username: 'creator_priv_test',
         ciphertext: enc.ciphertext,
         iv: enc.iv,
         tag: enc.tag,
@@ -711,29 +1044,57 @@ function encryptTestToken(plain) {
         active_dispatches: 0,
         active_dispatch_leases: []
       });
-      mockDb.automationsRaw.set('auto_priv_1', {
-        id: 'auto_priv_1',
-        owner_user_id: 'usr_priv',
+      mockDb.automationsRaw.set('auto_priv_test', {
+        id: 'auto_priv_test',
+        owner_user_id: 'usr_priv_test',
         instagram_user_id: rawAccountId,
-        keyword: 'GUIDE',
+        keyword: rawCommentText,
         dm_message: 'Here is your private guide',
+        reply_template: 'Thanks for asking!',
         enabled: 1,
         flow: { followGate: { enabled: false } }
       });
       db.collections = mockDb.collections;
 
-      // Execute messaging job
-      const executeWebhookJob = app.locals.executeWebhookJob;
-      if (typeof executeWebhookJob === 'function') {
+      // Mock instagramService calls for this test
+      const origPrivateReply = instagramService.sendPrivateReply;
+      const origReplyToComment = instagramService.replyToComment;
+      const origSendDM = instagramService.sendDirectMessage;
+
+      instagramService.sendPrivateReply = async () => ({ id: 'mid_priv_reply' });
+      instagramService.replyToComment = async () => ({ id: 'meta_comment_reply_id' });
+      instagramService.sendDirectMessage = async () => ({ message_id: 'mid_dm_sent' });
+
+      try {
+        const executeWebhookJob = app.locals.executeWebhookJob;
+        assert(typeof executeWebhookJob === 'function', 'executeWebhookJob must be available');
+
+        // 1. Exercise actual comment webhook
+        await executeWebhookJob({
+          event_type: 'comment',
+          instagram_account_id: rawAccountId,
+          comment_id: rawCommentId,
+          from_id: rawSenderIgsid,
+          from_username: 'test_commenter',
+          comment_text: rawCommentText
+        });
+        commentExecuted = true;
+
+        // 2. Exercise actual incoming message webhook
         await executeWebhookJob({
           event_type: 'messaging_postback',
           instagram_account_id: rawAccountId,
           from_id: rawSenderIgsid,
           action: 'SEND_LINK',
-          automation_id: 'auto_priv_1',
+          automation_id: 'auto_priv_test',
           comment_id: rawCommentId,
           message_text: rawPrivateMsg
-        }).catch(() => {});
+        });
+        messagingExecuted = true;
+      } finally {
+        instagramService.sendPrivateReply = origPrivateReply;
+        instagramService.replyToComment = origReplyToComment;
+        instagramService.sendDirectMessage = origSendDM;
       }
     } finally {
       console.log = origLog;
@@ -741,21 +1102,26 @@ function encryptTestToken(plain) {
       console.error = origError;
     }
 
+    assert.strictEqual(commentExecuted, true, 'Comment webhook must have executed successfully');
+    assert.strictEqual(messagingExecuted, true, 'Messaging webhook must have executed successfully');
+    assert(capturedLogs.length >= 5, 'Log collection must not be empty; operational logs must have been generated');
+
     const allCapturedText = capturedLogs.map(l => l.text).join('\n');
     assert(!allCapturedText.includes(rawSenderIgsid), 'Captured logs must NOT contain raw sender IGSID');
     assert(!allCapturedText.includes(rawCommentId), 'Captured logs must NOT contain raw comment ID');
     assert(!allCapturedText.includes(rawCommentText), 'Captured logs must NOT contain raw comment text');
     assert(!allCapturedText.includes(rawPrivateMsg), 'Captured logs must NOT contain private message text');
     assert(!allCapturedText.includes(rawAccountId), 'Captured logs must NOT contain raw account ID');
+    assert(!allCapturedText.includes(rawSecretToken), 'Captured logs must NOT contain raw access token');
   });
 
   // ====================================================================
-  // 4. REAL TOKEN-CACHE TESTS (NO assert(true))
+  // 5. TOKEN CACHE CORRECTNESS & MULTI-PROCESS PROTECTION
   // ====================================================================
-  console.log('\n--- 4. REAL TOKEN CACHE TESTS ---');
+  console.log('\n--- 5. TOKEN CACHE CORRECTNESS & MULTI-PROCESS PROTECTION ---');
 
-  // Test 15: Cache hit avoids DB query
-  await runTestAsync('Test 15: Token cache hit returns decrypted token without querying database', async () => {
+  // Test 24: Cache hit avoids DB query
+  await runTestAsync('Test 24: Token cache hit returns decrypted token without querying database', async () => {
     const mockDb = createMockDb();
     const enc = encryptTestToken('TOKEN_CACHE_HIT_TEST');
     mockDb.raw.set('ig_cache_1', {
@@ -785,8 +1151,8 @@ function encryptTestToken(plain) {
     assert.strictEqual(mockDb.getQueryCount(), 1, 'Second call must hit memory cache (queryCount stays 1)');
   });
 
-  // Test 16: saveAccount invalidates token cache
-  await runTestAsync('Test 16: saveAccount clears the decrypted token cache on connect/reconnect', async () => {
+  // Test 25: saveAccount invalidates token cache
+  await runTestAsync('Test 25: saveAccount clears the decrypted token cache on connect/reconnect', async () => {
     const mockDb = createMockDb();
     const enc1 = encryptTestToken('INITIAL_TOKEN_123');
     mockDb.raw.set('ig_reconn', {
@@ -825,8 +1191,8 @@ function encryptTestToken(plain) {
     instagramService.subscribeToWebhooks = origSub;
   });
 
-  // Test 17: disconnect clears the decrypted token cache
-  await runTestAsync('Test 17: disconnect clears the decrypted token cache and reelsCache', async () => {
+  // Test 26: disconnect clears the decrypted token cache
+  await runTestAsync('Test 26: disconnect clears the decrypted token cache and reelsCache', async () => {
     const mockDb = createMockDb();
     const enc = encryptTestToken('DISC_TOKEN_TEST');
     mockDb.raw.set('ig_disc_cache', {
@@ -854,34 +1220,55 @@ function encryptTestToken(plain) {
     assert.strictEqual(mockDb.raw.has('ig_disc_cache'), false, 'Account must be removed from DB');
   });
 
-  // Test 18: Multi-process safety: disconnected account cannot dispatch even if another process has cached token
-  await runTestAsync('Test 18: Multi-process safety: disconnected account cannot dispatch even if token was cached in process memory', async () => {
+  // Test 27: Multi-process safety: disconnected account cannot dispatch even if second process holds cached token
+  await runTestAsync('Test 27: Multi-process safety: disconnected account cannot dispatch even if second process holds cached token', async () => {
     const mockDb = createMockDb();
-    mockDb.raw.set('ig_multi_proc', {
-      id: 'ig_multi_proc',
-      instagram_user_id: 'ig_multi_proc',
+    const enc = encryptTestToken('TOKEN_FOR_MULTI_PROC');
+    const accId = 'ig_multi_proc_test';
+    const ownerId = 'usr_multi_owner';
+
+    mockDb.raw.set(accId, {
+      id: accId,
+      instagram_user_id: accId,
+      owner_user_id: ownerId,
+      username: 'multiproc_user',
+      ciphertext: enc.ciphertext,
+      iv: enc.iv,
+      tag: enc.tag,
+      expires_at: new Date(Date.now() + 3600000).toISOString(),
       active_dispatches: 0,
       active_dispatch_leases: []
     });
     db.collections = mockDb.collections;
+    instagramService.clearTokenCache();
 
-    // Simulate process B: Account has been deleted/disconnected in MongoDB by process A
-    mockDb.raw.delete('ig_multi_proc');
+    // 1. Populate the actual token cache using the real test account and encrypted token
+    const tokenInProcA = await instagramService.getDecryptedTokenByInstagramUserId(accId, ownerId);
+    assert.strictEqual(tokenInProcA.accessToken, 'TOKEN_FOR_MULTI_PROC');
 
-    // Process B attempts outbound dispatch:
-    // Even if Process B had the decrypted token in local RAM, MongoDB lease acquisition blocks it!
+    // 2. Retain the decrypted token result as the simulated second-process (Process B) cache
+    const procBCachedToken = { ...tokenInProcA };
+    assert.strictEqual(procBCachedToken.accessToken, 'TOKEN_FOR_MULTI_PROC');
+
+    // 3. Process A disconnects the account in the shared mock database
+    await instagramService.disconnect(ownerId, accId);
+    assert.strictEqual(mockDb.raw.has(accId), false, 'Account must be deleted from shared database by Process A');
+
+    // 4. Process B attempts outbound dispatch using its retained in-memory token
     let dispatchCalled = false;
-    const res = await safeDispatchOutbound('ig_multi_proc', 'worker_process_B', async () => {
+    const res = await safeDispatchOutbound(accId, 'worker_process_B', async () => {
       dispatchCalled = true;
+      return { message_id: 'mid_unauthorized' };
     });
 
-    assert.strictEqual(dispatchCalled, false, 'Dispatch must NEVER be called for disconnected account across processes');
+    // 5. Confirm that lease acquisition fails at the database layer and dispatch callback is NEVER called
+    assert.strictEqual(dispatchCalled, false, 'External dispatch callback must NEVER be called across processes');
     assert.strictEqual(res.skipped, true);
     assert.strictEqual(res.reason, 'ACCOUNT_DELETED');
   });
 
-  // Test 19: Expired token evicted from cache even within 30s TTL
-  await runTestAsync('Test 19: Expired token is evicted from cache even within 30s TTL and throws 401', async () => {
+  // Test 28: Expired token evicted from cache even within 30s TTL
+  await runTestAsync('Test 28: Expired token is evicted from cache even within 30s TTL and throws 401', async () => {
     const mockDb = createMockDb();
     const enc = encryptTestToken('EXPIRING_SOON_TOKEN');
     // Token that expires in 50 milliseconds
@@ -922,58 +1309,103 @@ function encryptTestToken(plain) {
   });
 
   // ====================================================================
-  // 5. LEASE-AWARE INSTAGRAM DISCONNECT & DRAIN COORDINATION
+  // 6. LEASE-AWARE INSTAGRAM DISCONNECT FAIL-CLOSED SAFETY
   // ====================================================================
-  console.log('\n--- 5. LEASE-AWARE INSTAGRAM DISCONNECT & DRAIN TESTS ---');
+  console.log('\n--- 6. LEASE-AWARE INSTAGRAM DISCONNECT FAIL-CLOSED SAFETY ---');
 
-  // Test 20: Disconnect atomically marks deletion_pending: true and rejects new leases
-  await runTestAsync('Test 20: Disconnect marks deletion_pending: true, blocking any new dispatch lease', async () => {
+  // Test 29: Disconnect fails closed with 503 when collections unavailable
+  await runTestAsync('Test 29: Disconnect fails closed with 503 when collections unavailable', async () => {
+    const origCols = db.collections;
+    db.collections = () => { throw new Error('Database cluster connection failure'); };
+
+    let errorCaught = null;
+    try {
+      await instagramService.disconnect('usr_fail', 'ig_fail_1');
+    } catch (err) {
+      errorCaught = err;
+    } finally {
+      db.collections = origCols;
+    }
+
+    assert(errorCaught, 'Must throw when database safety checks unavailable');
+    assert.strictEqual(errorCaught.statusCode, 503);
+    assert.strictEqual(errorCaught.retryable, true);
+    assert.strictEqual(errorCaught.code, 'DATABASE_SAFETY_UNAVAILABLE');
+  });
+
+  // Test 30: Disconnect requires successful deletion-pending update, failing closed with 503 if update fails
+  await runTestAsync('Test 30: Disconnect requires successful deletion-pending update, failing closed with 503 if update fails', async () => {
     const mockDb = createMockDb();
-    mockDb.raw.set('ig_drain_1', {
-      id: 'ig_drain_1',
-      instagram_user_id: 'ig_drain_1',
-      owner_user_id: 'usr_drain',
+    mockDb.raw.set('ig_fail_mark', {
+      id: 'ig_fail_mark',
+      instagram_user_id: 'ig_fail_mark',
+      owner_user_id: 'usr_fail',
+      ciphertext: 'c', iv: 'i', tag: 't'
+    });
+    mockDb.automationsRaw.set('auto_fail_mark', {
+      id: 'auto_fail_mark',
+      owner_user_id: 'usr_fail',
+      instagram_user_id: 'ig_fail_mark'
+    });
+    db.collections = mockDb.collections;
+
+    // Simulate updateMany failure
+    mockDb.collections().instagramAccounts.updateMany = async () => {
+      throw new Error('Disk I/O error during deletion-pending update');
+    };
+
+    let errorCaught = null;
+    try {
+      await instagramService.disconnect('usr_fail', 'ig_fail_mark');
+    } catch (err) {
+      errorCaught = err;
+    }
+
+    assert(errorCaught, 'Must throw 503 when deletion-pending update fails');
+    assert.strictEqual(errorCaught.statusCode, 503);
+    assert.strictEqual(errorCaught.retryable, true);
+    assert.strictEqual(mockDb.raw.has('ig_fail_mark'), true, 'Account credentials must be preserved');
+    assert.strictEqual(mockDb.automationsRaw.has('auto_fail_mark'), true, 'Automations must be preserved');
+  });
+
+  // Test 31: Disconnect fails closed with 503 if active lease checking throws, preserving credentials
+  await runTestAsync('Test 31: Disconnect fails closed with 503 if active lease checking throws, preserving credentials', async () => {
+    const mockDb = createMockDb();
+    mockDb.raw.set('ig_fail_check', {
+      id: 'ig_fail_check',
+      instagram_user_id: 'ig_fail_check',
+      owner_user_id: 'usr_fail',
       active_dispatches: 0,
       active_dispatch_leases: []
     });
-    db.collections = mockDb.collections;
-
-    // Disconnect with no active dispatches finishes immediately
-    await instagramService.disconnect('usr_drain', 'ig_drain_1');
-
-    // Attempting to acquire lease on this account now must return null (it was deleted)
-    const lease = await db.acquireDispatchLease('ig_drain_1', 'worker_new');
-    assert.strictEqual(lease, null, 'Must not acquire lease for disconnected account');
-  });
-
-  // Test 21: Disconnect waits for active leases to drain
-  await runTestAsync('Test 21: Disconnect waits for active leases to drain before deleting account', async () => {
-    const mockDb = createMockDb();
-    const leaseId = 'lease_active_123';
-    mockDb.raw.set('ig_drain_active', {
-      id: 'ig_drain_active',
-      instagram_user_id: 'ig_drain_active',
-      owner_user_id: 'usr_drain',
-      active_dispatches: 1,
-      active_dispatch_leases: [{ lease_id: leaseId, worker_id: 'w1', expires_at: new Date(Date.now() + 200) }]
+    mockDb.automationsRaw.set('auto_fail_check', {
+      id: 'auto_fail_check',
+      owner_user_id: 'usr_fail',
+      instagram_user_id: 'ig_fail_check'
     });
     db.collections = mockDb.collections;
 
-    // Background job releases the lease after 100ms
-    setTimeout(async () => {
-      await db.releaseDispatchLease('ig_drain_active', leaseId);
-    }, 100);
+    // Simulate find throwing during drain check
+    mockDb.collections().instagramAccounts.find = () => ({
+      toArray: async () => { throw new Error('Network timeout during lease check'); }
+    });
 
-    const start = Date.now();
-    await instagramService.disconnect('usr_drain', 'ig_drain_active', { drainTimeoutMs: 1000, pollIntervalMs: 20 });
-    const duration = Date.now() - start;
+    let errorCaught = null;
+    try {
+      await instagramService.disconnect('usr_fail', 'ig_fail_check');
+    } catch (err) {
+      errorCaught = err;
+    }
 
-    assert(duration >= 90, `Disconnect must have waited for lease release (waited ${duration}ms)`);
-    assert.strictEqual(mockDb.raw.has('ig_drain_active'), false, 'Account must be deleted after drain finishes');
+    assert(errorCaught, 'Must throw 503 when lease check fails');
+    assert.strictEqual(errorCaught.statusCode, 503);
+    assert.strictEqual(errorCaught.retryable, true);
+    assert.strictEqual(mockDb.raw.has('ig_fail_check'), true, 'Account credentials must be preserved');
+    assert.strictEqual(mockDb.automationsRaw.has('auto_fail_check'), true, 'Automations must be preserved');
   });
 
-  // Test 22: Disconnect timeout throws 503 and preserves account credentials and automations
-  await runTestAsync('Test 22: Disconnect timeout throws 503 and preserves account and automations in DB', async () => {
+  // Test 32: Disconnect timeout throws 503 and preserves account and automations in DB
+  await runTestAsync('Test 32: Disconnect timeout throws 503 and preserves account and automations in DB', async () => {
     const mockDb = createMockDb();
     const enc = encryptTestToken('PRESERVED_TOKEN');
     mockDb.raw.set('ig_drain_timeout', {
@@ -998,7 +1430,6 @@ function encryptTestToken(plain) {
 
     let errorCaught = null;
     try {
-      // Set short 100ms timeout for test
       await instagramService.disconnect('usr_drain', 'ig_drain_timeout', { drainTimeoutMs: 100, pollIntervalMs: 20 });
     } catch (err) {
       errorCaught = err;
@@ -1014,8 +1445,8 @@ function encryptTestToken(plain) {
     assert.strictEqual(mockDb.automationsRaw.has('auto_preserved'), true, 'Automations MUST NOT be deleted on drain timeout');
   });
 
-  // Test 23: Disconnect propagates database deletion errors
-  await runTestAsync('Test 23: Disconnect propagates database deletion errors instead of swallowing them', async () => {
+  // Test 33: Disconnect propagates database deletion errors
+  await runTestAsync('Test 33: Disconnect propagates database deletion errors instead of swallowing them', async () => {
     const mockDb = createMockDb();
     mockDb.raw.set('ig_drain_err', {
       id: 'ig_drain_err',
@@ -1043,12 +1474,12 @@ function encryptTestToken(plain) {
   });
 
   // ====================================================================
-  // 6. OUTBOUND OPERATIONS LEASE PROTECTION
+  // 7. OUTBOUND OPERATIONS LEASE PROTECTION
   // ====================================================================
-  console.log('\n--- 6. OUTBOUND OPERATIONS LEASE PROTECTION ---');
+  console.log('\n--- 7. OUTBOUND OPERATIONS LEASE PROTECTION ---');
 
-  // Test 24: Public comment reply requires dispatch lease and records stage
-  await runTestAsync('Test 24: Public comment reply is routed through safeDispatchOutbound with PUBLIC_REPLY_LEASE_ACQUIRED', async () => {
+  // Test 34: Public comment reply requires dispatch lease and records stage
+  await runTestAsync('Test 34: Public comment reply is routed through safeDispatchOutbound with PUBLIC_REPLY_LEASE_ACQUIRED', async () => {
     const mockDb = createMockDb();
     const enc = encryptTestToken('REPLY_TEST_TOKEN');
     mockDb.raw.set('ig_reply_acc', {
