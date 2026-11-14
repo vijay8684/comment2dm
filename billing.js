@@ -134,13 +134,22 @@
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to create subscription');
 
+      if (!data.keyId || !data.subscriptionId) {
+        throw new Error('Payment system credentials or subscription details are unavailable. Please try again later.');
+      }
+
       const options = {
-        key: data.keyId || 'rzp_test_placeholder',
+        key: data.keyId,
         subscription_id: data.subscriptionId,
         name: data.name || 'Comment2DM',
         description: `Upgrade to ${planKey}`,
         prefill: data.prefill || { email: userEmail },
         theme: { color: '#6366f1' },
+        modal: {
+          ondismiss: function () {
+            showToast('Checkout was cancelled. No payment was charged.', 'error');
+          }
+        },
         handler: async (response) => {
           try {
             const verifyRes = await fetch('/api/billing/verify-subscription', {

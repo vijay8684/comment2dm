@@ -528,6 +528,10 @@ async function verify(req, res) {
   const sig = String(req.body?.razorpay_signature || '');
   if (!sid || !pid || !sig) return res.status(400).json({ error: 'Incomplete payment verification data.' });
 
+  if (!process.env.RAZORPAY_KEY_SECRET) {
+    return res.status(503).json({ error: 'Payment verification service is not configured.' });
+  }
+
   const exp = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET).update(pid + '|' + sid).digest('hex');
   if (!equal(exp, sig)) return res.status(400).json({ error: 'Payment signature verification failed.' });
 
@@ -738,6 +742,7 @@ async function webhook(req, res) {
   if (!secret) return res.status(503).send('Webhook secret is not configured.');
   const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.from('');
   const sig = req.get('x-razorpay-signature');
+  if (!sig) return res.status(400).send('Missing webhook signature.');
   const exp = crypto.createHmac('sha256', secret).update(raw).digest('hex');
   if (!equal(exp, sig)) return res.status(400).send('Invalid webhook signature.');
 
