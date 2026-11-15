@@ -121,12 +121,19 @@
         <div class="dm-limit-card" id="dmLimitCard">
           <div class="dm-limit-header">
             <span>Monthly DMs</span>
-            <strong id="dmLimitText">0 / 300</strong>
+            <strong id="dmLimitText">0 / 500</strong>
           </div>
           <div class="dm-progress-track">
-            <div class="dm-progress-fill" id="dmProgressFill" style="width: 5%;"></div>
+            <div class="dm-progress-fill" id="dmProgressFill" style="width: 0%;"></div>
           </div>
-          <a href="billing.html" class="btn btn-ghost btn-sm btn-block" style="font-size:0.78rem; padding:6px;">
+          <div class="storage-limit-header" style="display:flex;justify-content:space-between;font-size:0.75rem;color:rgba(255,255,255,0.5);margin-top:8px;">
+            <span>Storage</span>
+            <span id="sidebarStorageText">0 MB / 150 MB</span>
+          </div>
+          <div class="dm-progress-track" style="margin-top:3px;">
+            <div class="dm-progress-fill" id="sidebarStorageFill" style="width: 0%; background: linear-gradient(90deg, #10b981, #3b82f6);"></div>
+          </div>
+          <a href="billing.html" class="btn btn-ghost btn-sm btn-block" style="font-size:0.78rem; padding:6px; margin-top:10px;">
             Upgrade Plan ↗
           </a>
         </div>
@@ -240,6 +247,20 @@
             <a href="instagram-accounts.html" class="btn btn-secondary" id="connectAccountHeaderBtn">
               <span>Manage Accounts</span>
             </a>
+          </div>
+        </div>
+
+        <!-- First-Party Promotional Banner (Exclusively for Free Tier) -->
+        <div id="dashboardPromoCard" class="apple-card" style="display: none; margin-bottom: 24px; padding: 16px 20px; background: linear-gradient(135deg, rgba(99, 102, 241, 0.12) 0%, rgba(236, 72, 153, 0.08) 100%); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 16px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px;">
+            <div style="display: flex; align-items: center; gap: 14px;">
+              <div style="width: 38px; height: 38px; border-radius: 10px; background: linear-gradient(135deg, #6366f1, #ec4899); display: flex; align-items: center; justify-content: center; font-size: 1.2rem; flex-shrink: 0;">🚀</div>
+              <div>
+                <div style="font-weight: 700; color: var(--ink); font-size: 0.95rem;">Unlock Unlimited Automations & 5,000 DMs for ₹70/mo</div>
+                <div style="font-size: 0.82rem; color: var(--ink-secondary); margin-top: 2px;">Upgrade to Pro to remove branding, access All-Comment triggers, and expand storage to 1 GB.</div>
+              </div>
+            </div>
+            <a href="billing.html" class="btn btn-accent btn-sm" style="white-space: nowrap; font-weight: 600;">Upgrade to Pro ↗</a>
           </div>
         </div>
 

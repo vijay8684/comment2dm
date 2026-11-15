@@ -16,6 +16,7 @@ const webhookWorker = require('./src/jobs/webhookWorker');
 const metaRateLimiter = require('./src/services/metaRateLimiter');
 const emailService = require('./src/services/emailService');
 const automationTimeline = require('./src/services/automationTimeline');
+const storageService = require('./src/services/storageService');
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
@@ -42,7 +43,7 @@ app.use((request, response, next) => {
   response.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
   response.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
   response.setHeader('X-DNS-Prefetch-Control', 'on');
-  response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' https://checkout.razorpay.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://api.openai.com https://generativelanguage.googleapis.com https://api.instagram.com https://graph.instagram.com https://graph.facebook.com https://oauth2.googleapis.com https://api.razorpay.com https://checkout.razorpay.com; frame-src 'self' https://checkout.razorpay.com https://api.razorpay.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none';");
+  response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' https://checkout.razorpay.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://*.r2.cloudflarestorage.com https://api.openai.com https://generativelanguage.googleapis.com https://api.instagram.com https://graph.instagram.com https://graph.facebook.com https://oauth2.googleapis.com https://api.razorpay.com https://checkout.razorpay.com; frame-src 'self' https://checkout.razorpay.com https://api.razorpay.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none';");
   if (isProduction) response.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   if (request.path.startsWith('/api/')) response.setHeader('Cache-Control', 'no-store');
   next();
@@ -774,6 +775,17 @@ app.get('/api/instagram/callback', async (request, response) => {
     if (!state.sub) return errorRedirect('Instagram authorization state was invalid.');
     const token = await instagramService.exchangeCode(request.query.code);
     const profile = await instagramService.fetchProfile(token.accessToken);
+
+    // Enforce plan limits for new connected Instagram accounts
+    const existingAccounts = await instagramService.listAccounts(state.sub);
+    const isAlreadyConnected = existingAccounts.some(a => String(a.id) === String(profile.userId));
+    if (!isAlreadyConnected) {
+      const r = await billing.check(state.sub, 'instagramAccounts');
+      if (!r.allowed) {
+        return errorRedirect(`Your ${r.plan.toUpperCase()} plan allows ${r.limits.instagramAccounts} Instagram account${r.limits.instagramAccounts === 1 ? '' : 's'}. Upgrade to connect more.`);
+      }
+    }
+
     await instagramService.saveAccount(state.sub, profile, token);
     return response.redirect('/instagram-accounts.html?instagram_connected=1');
   } catch (error) {
@@ -942,6 +954,17 @@ app.post('/api/automations', requireAuth, async (request, response, next) => {
 
     const trimmedReply = typeof replyTemplate === 'string' ? replyTemplate.trim() : '';
     const isEnabled = enabled === false || enabled === 0 ? 0 : 1;
+
+    // Active automations entitlement limit check
+    if (isEnabled === 1) {
+      const autCheck = await billing.check(request.user.id, 'automations', { user: request.user });
+      if (!autCheck.allowed) {
+        return response.status(403).json({
+          error: `You have reached your limit of ${autCheck.limits.automations} active automations on the ${autCheck.plan} plan. Please upgrade to Pro or Elite for unlimited automations.`
+        });
+      }
+    }
+
     const now = new Date().toISOString();
 
     const result = await db.run(
@@ -977,6 +1000,10 @@ app.post('/api/automations', requireAuth, async (request, response, next) => {
        WHERE a.id = ?`,
       [result.lastID]
     );
+
+    if (flow?.delivery?.resourceId && result?.lastID) {
+      await storageService.linkAutomationReference(request.user.id, result.lastID, flow.delivery.resourceId);
+    }
 
     return response.status(201).json({ automation: created });
   } catch (error) {
@@ -1060,6 +1087,16 @@ app.patch('/api/automations/:id', requireAuth, async (request, response, next) =
     let newEnabled = existing.enabled;
     if (enabled !== undefined) newEnabled = enabled === true || enabled === 1 || enabled === '1' ? 1 : 0;
 
+    // Check active automation limit if toggling from disabled to enabled
+    if (newEnabled === 1 && !existing.enabled) {
+      const autCheck = await billing.check(request.user.id, 'automations', { user: request.user });
+      if (!autCheck.allowed) {
+        return response.status(403).json({
+          error: `You have reached your limit of ${autCheck.limits.automations} active automations on the ${autCheck.plan} plan. Please upgrade to Pro or Elite for unlimited automations.`
+        });
+      }
+    }
+
     let newMediaId = existing.media_id || null;
     if (mediaId !== undefined) newMediaId = mediaId || null;
 
@@ -1114,6 +1151,17 @@ app.patch('/api/automations/:id', requireAuth, async (request, response, next) =
       [automationId]
     );
 
+    if (newFlow !== undefined) {
+      const oldResId = existing.flow?.delivery?.resourceId;
+      const newResId = newFlow?.delivery?.resourceId;
+      if (oldResId && oldResId !== newResId) {
+        await storageService.unlinkAutomationReference(request.user.id, automationId, oldResId);
+      }
+      if (newResId && newResId !== oldResId) {
+        await storageService.linkAutomationReference(request.user.id, automationId, newResId);
+      }
+    }
+
     return response.json({ automation: updated });
   } catch (error) {
     return next(error);
@@ -1148,13 +1196,111 @@ app.delete('/api/automations/:id', requireAuth, async (request, response, next) 
     } else {
       await db.run('DELETE FROM automations WHERE id = ? AND owner_user_id = ?', [automationId, request.user.id]);
     }
+    await storageService.unlinkAutomationReference(request.user.id, automationId);
     return response.status(204).end();
   } catch (error) {
     return next(error);
   }
 });
 
-// Resource Upload Endpoint (Images, PDFs up to 10MB)
+// ── Cloudflare R2 Standard Storage Integration ────────────────────────────
+app.post('/api/storage/presign', requireAuth, async (request, response) => {
+  try {
+    const { fileName, fileType, fileSize } = request.body || {};
+    if (!fileName || !fileSize) {
+      return response.status(400).json({ error: 'fileName and fileSize are required.' });
+    }
+    const result = await storageService.createPresignedUpload(request.user.id, {
+      fileName,
+      fileType: fileType || 'application/octet-stream',
+      fileSize: Number(fileSize)
+    });
+    return response.json(result);
+  } catch (err) {
+    const status = err.statusCode || 500;
+    return response.status(status).json({
+      error: err.message,
+      code: err.code || 'STORAGE_ERROR'
+    });
+  }
+});
+
+app.post('/api/storage/confirm', requireAuth, async (request, response) => {
+  try {
+    const { resourceId, objectKey } = request.body || {};
+    if (!resourceId || !objectKey) {
+      return response.status(400).json({ error: 'resourceId and objectKey are required.' });
+    }
+    const result = await storageService.confirmUpload(request.user.id, { resourceId, objectKey });
+    return response.json(result);
+  } catch (err) {
+    const status = err.statusCode || 500;
+    return response.status(status).json({
+      error: err.message,
+      code: err.code || 'STORAGE_CONFIRM_ERROR'
+    });
+  }
+});
+
+app.get('/api/storage/usage', requireAuth, async (request, response) => {
+  try {
+    const usage = await storageService.getStorageUsage(request.user.id);
+    return response.json(usage);
+  } catch (err) {
+    return response.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/storage/resources', requireAuth, async (request, response) => {
+  try {
+    const col = await storageService.getStorageCollection();
+    const resources = await col.find({
+      owner_user_id: String(request.user.id),
+      status: 'active',
+      'deletion_state.isDeleted': { $ne: true }
+    }).sort({ created_at: -1 }).toArray();
+    return response.json({
+      resources: resources.map(r => ({
+        id: r.id,
+        fileName: r.original_filename,
+        fileSize: r.size_bytes,
+        mimeType: r.content_type,
+        createdAt: r.created_at,
+        automationReferences: r.automation_references || []
+      }))
+    });
+  } catch (err) {
+    return response.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/storage/resources/:id', requireAuth, async (request, response) => {
+  try {
+    const result = await storageService.deleteResource(request.user.id, request.params.id);
+    return response.json(result);
+  } catch (err) {
+    const status = err.statusCode || 500;
+    return response.status(status).json({
+      error: err.message,
+      code: err.code || 'STORAGE_DELETE_ERROR',
+      blockingAutomations: err.blockingAutomations || []
+    });
+  }
+});
+
+app.get('/api/storage/file/:id', async (request, response) => {
+  try {
+    const url = await storageService.getResourceAccessUrl(null, request.params.id);
+    if (!url) {
+      return response.status(404).send('File not found or expired.');
+    }
+    return response.redirect(302, url);
+  } catch (err) {
+    return response.status(500).send('Error accessing file: ' + err.message);
+  }
+});
+
+// Resource Upload Endpoint (Direct memory-to-R2 upload, zero local disk writes)
 app.post('/api/automations/upload-resource', requireAuth, async (request, response) => {
   try {
     const { fileName, fileType, fileData } = request.body || {};
@@ -1168,39 +1314,38 @@ app.post('/api/automations/upload-resource', requireAuth, async (request, respon
     const mimeType = matches[1].toLowerCase();
     const base64Buffer = Buffer.from(matches[2], 'base64');
 
-    if (base64Buffer.length > 10 * 1024 * 1024) {
+    if (base64Buffer.length > 10 * 1000 * 1000) {
       return response.status(400).json({ error: 'File size exceeds maximum allowed 10MB limit.' });
     }
 
-    const allowedMimes = {
-      'image/jpeg': '.jpg',
-      'image/png': '.png',
-      'image/webp': '.webp',
-      'image/gif': '.gif',
-      'application/pdf': '.pdf'
-    };
-
-    if (!allowedMimes[mimeType]) {
-      return response.status(400).json({ error: 'Unsupported file type. Only JPG, PNG, WEBP, GIF, and PDF files are allowed.' });
+    if (!storageService.isConfigured()) {
+      return response.status(503).json({
+        error: 'Cloud storage service is currently unconfigured. Customer files cannot be stored on ephemeral server disk. Please configure Cloudflare R2 credentials or use a Google Drive link.',
+        code: 'STORAGE_NOT_CONFIGURED'
+      });
     }
 
-    const ext = allowedMimes[mimeType];
-    const safeBase = path.basename(fileName, path.extname(fileName)).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 32);
-    const uniqueName = `res_${Date.now()}_${crypto.randomBytes(4).toString('hex')}_${safeBase}${ext}`;
-    const uploadsDir = path.join(__dirname, 'uploads');
-    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-    fs.writeFileSync(path.join(uploadsDir, uniqueName), base64Buffer);
+    const uploadRes = await storageService.uploadDirectBuffer(request.user.id, {
+      buffer: base64Buffer,
+      fileName,
+      mimeType
+    });
 
     return response.json({
       success: true,
-      url: `/uploads/${uniqueName}`,
-      fileName: `${safeBase}${ext}`,
-      fileType: mimeType,
-      fileSize: base64Buffer.length
+      url: uploadRes.resource.url,
+      resourceId: uploadRes.resource.id,
+      fileName: uploadRes.resource.fileName,
+      fileType: uploadRes.resource.fileType,
+      fileSize: uploadRes.resource.fileSize
     });
   } catch (err) {
     console.error('Resource upload failed:', err);
-    return response.status(500).json({ error: 'Failed to process resource upload.' });
+    const status = err.statusCode || 500;
+    return response.status(status).json({
+      error: err.message || 'Failed to process resource upload.',
+      code: err.code || 'STORAGE_ERROR'
+    });
   }
 });
 
@@ -1561,11 +1706,27 @@ async function deliverFinalResource({
     // Start active delivery lease renewal heartbeat
     startDeliveryHeartbeat();
 
+    // Check monthly DM quota entitlement
+    try {
+      const dmCheck = await billing.check(automation.owner_user_id, 'dmMonthly');
+      if (!dmCheck.allowed) {
+        console.warn(`[BILLING] Monthly DM quota exceeded for owner ${automation.owner_user_id} (${dmCheck.used}/${dmCheck.limits.dmMonthly}). Skipping outbound delivery.`);
+        return { success: false, skipped: true, reason: 'DM_QUOTA_EXCEEDED' };
+      }
+    } catch (bErr) {
+      console.warn('Billing check note in deliverFinalResource:', bErr.message);
+    }
+
     let deliveryText = flow.delivery?.message || automation.dm_message || "Here's what you requested! Enjoy ✨";
     if (prefixMessage) {
       deliveryText = `${prefixMessage.trim()}\n\n${deliveryText}`;
     }
-    const resourceUrl = flow.delivery?.resourceUrl;
+    let resourceUrl = flow.delivery?.resourceUrl;
+    if (!resourceUrl && flow.delivery?.resourceId) {
+      try {
+        resourceUrl = await storageService.getResourceAccessUrl(automation.owner_user_id, flow.delivery.resourceId);
+      } catch (_) {}
+    }
     const buttonText = (flow.delivery?.buttonText || "Open Link ↗").trim().slice(0, 20);
 
     // Free branding attribution if not white-label
@@ -2085,6 +2246,17 @@ async function executeCommentJob(job) {
   console.log(`[TRIGGER] Matched automation (auto_ref: ${automationTimeline.hashCorrelationId(selectedAuto.id)}, cmt_ref: ${automationTimeline.hashCorrelationId(commentId)}). Sending interactive opening DM...`);
 
   try {
+    // Check monthly DM quota entitlement
+    try {
+      const dmCheck = await billing.check(selectedAuto.owner_user_id, 'dmMonthly');
+      if (!dmCheck.allowed) {
+        console.warn(`[BILLING] Monthly DM quota exceeded for owner ${selectedAuto.owner_user_id} (${dmCheck.used}/${dmCheck.limits.dmMonthly}). Skipping opening DM.`);
+        return { success: false, skipped: true, reason: 'DM_QUOTA_EXCEEDED' };
+      }
+    } catch (bErr) {
+      console.warn('Billing check note in executeCommentJob:', bErr.message);
+    }
+
     // Ensure flow is loaded
     if (!selectedAuto.flow && db.collections && db.collections().automations) {
       const raw = await db.collections().automations.findOne({ id: selectedAuto.id });
@@ -3344,7 +3516,7 @@ const supportKnowledge = [
   { keys: ['hi', 'hello', 'hey'], answer: 'Hi! Welcome to Comment2DM Support. How can I assist you with your Instagram automations, account connection, or billing today?' },
   { keys: ['connect', 'instagram', 'meta', 'account'], answer: 'To connect Instagram: 1) Go to Instagram Accounts in the sidebar. 2) Click "Connect Instagram". 3) Authorize using your professional Meta account. Ensure you have Instagram Business Login permissions enabled.' },
   { keys: ['automation', 'keyword', 'comment', 'dm'], answer: 'Comment2DM triggers automatic DMs and public replies when someone comments on your Reels! Go to "Create Automation", select your account, choose your Reel, set the trigger keyword or select "All comments", and write your private DM and public reply.' },
-  { keys: ['pricing', 'upgrade', 'plan', 'billing'], answer: 'Comment2DM offers 3 plans: Free (3 automations, 300 DMs), Pro (25 automations, 5,000 DMs, All Comments trigger, public replies), and Elite (Unlimited automations, 50,000 DMs, priority webhook queue). Manage your plan in Billing.' },
+  { keys: ['pricing', 'upgrade', 'plan', 'billing'], answer: 'Comment2DM offers 3 plans: Free (₹0/mo, 1 connected account, 2 active automations, 500 DMs, 150 MB storage), Pro (₹70/mo, 3 connected accounts, Unlimited active automations, 5,000 DMs, 1 GB storage, all-comment trigger, follow-to-unlock), and Elite (₹150/mo, 10 connected accounts, Unlimited active automations, 50,000 DMs, 5 GB storage, priority webhook queue, priority support). Manage your plan in Billing.' },
   { keys: ['help', 'contact', 'email'], answer: 'You can email our team directly at nudge.support360@gmail.com for priority help!' }
 ];
 
@@ -3673,6 +3845,51 @@ app.get('/api/analytics/events', requireAuth, async (request, response) => {
   }
 });
 
+// ── Advanced Analytics CSV Export ─────────────────────────────────────────
+app.get('/api/analytics/export', requireAuth, async (request, response) => {
+  try {
+    const userEntitlement = await billing.entitlement(request.user.id, request);
+    if (!userEntitlement?.limits?.advancedAnalytics) {
+      return response.status(403).json({
+        error: 'CSV data export is a premium feature available exclusively on Pro and Elite plans. Please upgrade to unlock.'
+      });
+    }
+
+    const ownerClauses = buildOwnerClauses(request.user.id);
+    let events = [];
+    if (db.collections && db.collections().automationEvents) {
+      events = await db.collections().automationEvents
+        .find({ $or: ownerClauses })
+        .sort({ created_at: -1 })
+        .limit(5000)
+        .toArray();
+    } else {
+      events = await db.all(
+        'SELECT * FROM automation_events WHERE owner_user_id = ? ORDER BY created_at DESC LIMIT 5000',
+        [request.user.id]
+      );
+    }
+
+    const headers = ['Event ID', 'Type', 'Status', 'Instagram User ID', 'Comment ID', 'Created At', 'Error'];
+    const rows = (events || []).map(e => [
+      `"${String(e._id || e.id || '').replace(/"/g, '""')}"`,
+      `"${String(e.event_type || 'comment').replace(/"/g, '""')}"`,
+      `"${String(e.status || '').replace(/"/g, '""')}"`,
+      `"${String(e.instagram_user_id || '').replace(/"/g, '""')}"`,
+      `"${String(e.comment_id || '').replace(/"/g, '""')}"`,
+      `"${String(e.created_at || '').replace(/"/g, '""')}"`,
+      `"${String(e.error_message || e.error || '').replace(/"/g, '""')}"`
+    ]);
+
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    response.setHeader('Content-Type', 'text/csv');
+    response.setHeader('Content-Disposition', 'attachment; filename="comment2dm_analytics_export.csv"');
+    return response.send(csvContent);
+  } catch (err) {
+    return response.status(500).json({ error: 'Failed to export analytics: ' + err.message });
+  }
+});
+
 // ── Live Debug Status for User & Webhook Verification ────────────────────────
 app.get('/api/instagram/debug-status', requireAuth, async (request, response) => {
   try {
@@ -3796,7 +4013,7 @@ app.get('/api/admin/config', requireAdmin, async (request, response) => {
     const pricesDoc = col ? await col.findOne({ _id: 'global_prices' }) : null;
     const coupons = coup ? await coup.find({}).toArray() : [];
     return response.json({ 
-      prices: pricesDoc || { pro_monthly: 999, elite_monthly: 2499 },
+      prices: pricesDoc || { pro_monthly: 70, elite_monthly: 150 },
       coupons: coupons.map(c => ({ code: c._id, discount: c.discount }))
     });
   } catch (err) { return response.status(500).json({ error: err.message }); }
@@ -3808,7 +4025,7 @@ app.post('/api/admin/config/prices', requireAdmin, async (request, response) => 
     if (db.collections) {
       await db.collections().billing_plans.updateOne(
         { _id: 'global_prices' }, 
-        { $set: { pro_monthly: pro_monthly || 999, elite_monthly: elite_monthly || 2499, updated_at: new Date() } },
+        { $set: { pro_monthly: pro_monthly || 70, elite_monthly: elite_monthly || 150, updated_at: new Date() } },
         { upsert: true }
       );
     }
@@ -3860,8 +4077,8 @@ app.get('/api/billing/prices', async (request, response) => {
   try {
     const col = db.collections ? db.collections().billing_plans : null;
     const pricesDoc = col ? await col.findOne({ _id: 'global_prices' }) : null;
-    return response.json(pricesDoc || { pro_monthly: 999, elite_monthly: 2499 });
-  } catch (err) { return response.json({ pro_monthly: 999, elite_monthly: 2499 }); }
+    return response.json(pricesDoc || { pro_monthly: 70, elite_monthly: 150 });
+  } catch (err) { return response.json({ pro_monthly: 70, elite_monthly: 150 }); }
 });
 
 app.post('/api/billing/validate-coupon', async (request, response) => {

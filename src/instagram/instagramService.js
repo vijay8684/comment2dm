@@ -275,13 +275,39 @@ async function checkWebhookSubscription(instagramUserId, accessToken) {
 
 async function saveAccount(userId, profile, token) {
   const encrypted = encryptToken(token.accessToken);
+  const existingAccounts = await db.getInstagramAccounts(userId);
+  const isFirstAccount = existingAccounts.length === 0 ||
+    (existingAccounts.length === 1 && String(existingAccounts[0].instagram_user_id) === String(profile.userId));
+
   await db.run(
     `INSERT INTO instagram_accounts
-    (owner_user_id, instagram_user_id, username, ciphertext, iv, tag, expires_at, connected_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [userId, profile.userId, profile.username, encrypted.ciphertext, encrypted.iv, encrypted.tag, Date.now() + token.expiresIn * 1000, new Date().toISOString()]
+    (owner_user_id, instagram_user_id, username, ciphertext, iv, tag, expires_at, connected_at, profile_picture_url)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [userId, profile.userId, profile.username, encrypted.ciphertext, encrypted.iv, encrypted.tag, Date.now() + token.expiresIn * 1000, new Date().toISOString(), profile.profilePictureUrl || null]
   );
   tokenCache.clear();
+
+  // Part 14: Use the profile picture URL from the customer's first successfully connected Instagram account
+  // as the Comment2DM profile avatar. Store only URL and metadata, not image binary.
+  if (isFirstAccount && profile.profilePictureUrl) {
+    try {
+      if (db.collections && db.collections().users) {
+        await db.collections().users.updateOne(
+          { id: String(userId) },
+          {
+            $set: {
+              avatar_url: profile.profilePictureUrl,
+              primary_instagram_user_id: profile.userId,
+              avatar_updated_at: new Date().toISOString()
+            }
+          }
+        );
+      }
+    } catch (avatarErr) {
+      console.warn('[AVATAR SYNC WARNING]:', avatarErr.message);
+    }
+  }
+
   await subscribeToWebhooks(profile.userId, token.accessToken);
 }
 

@@ -319,6 +319,9 @@
         deliveryButtonInput.placeholder = 'Download PDF 📄';
       }
 
+      if (resType === 'image' || resType === 'document') {
+        loadStorageUsage();
+      }
       updateSimulator();
     });
   });
@@ -351,63 +354,125 @@
     });
   }
 
-  function handleFileUpload(file) {
+  async function loadStorageUsage() {
+    try {
+      const res = await fetch('/api/storage/usage', {
+        headers: window.getAuthHeaders ? window.getAuthHeaders() : {},
+        credentials: 'same-origin'
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const storageBar = document.getElementById('uploadStorageBar');
+      const storageText = document.getElementById('uploadStorageText');
+      const remText = document.getElementById('uploadRemainingText');
+      if (storageBar) storageBar.style.width = (data.percentage || 0) + '%';
+      if (storageText) storageText.textContent = `${data.usedFormatted || '0 MB'} / ${data.totalFormatted || '150 MB'}`;
+      if (remText) remText.textContent = `Remaining: ${data.remainingFormatted || '150 MB'}`;
+    } catch (_) {}
+  }
+
+  async function handleFileUpload(file) {
     if (!file) return;
 
-    if (file.size > 10 * 1024 * 1024) {
-      showError('File is too large. Maximum file size is 10MB.');
+    if (file.size > 10 * 1000 * 1000) {
+      showError('File is too large. Maximum file size is 10 MB.');
       return;
     }
+
+    const selSizeEl = document.getElementById('uploadSelectedSizeText');
+    if (selSizeEl) selSizeEl.textContent = `Selected file: ${(file.size / (1000 * 1000)).toFixed(2)} MB`;
 
     const progressContainer = document.getElementById('uploadProgressContainer');
     const progressBar = document.getElementById('uploadProgressBar');
     const progressPercent = document.getElementById('uploadPercent');
 
-    progressContainer.style.display = 'block';
-    progressBar.style.width = '30%';
-    progressPercent.textContent = '30%';
+    if (progressContainer) {
+      progressContainer.style.display = 'block';
+      progressBar.style.width = '20%';
+      progressPercent.textContent = '20%';
+    }
 
-    const reader = new FileReader();
-    reader.onload = async function (e) {
-      const base64Data = e.target.result;
-      progressBar.style.width = '70%';
-      progressPercent.textContent = '70%';
+    try {
+      // 1. Request presigned upload URL & reserve quota
+      const presignRes = await fetch('/api/storage/presign', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(window.getAuthHeaders ? window.getAuthHeaders() : {})
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          fileName: file.name,
+          fileType: file.type || 'application/octet-stream',
+          fileSize: file.size
+        })
+      });
 
-      try {
-        const res = await fetch('/api/automations/upload-resource', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...window.getAuthHeaders()
-          },
-          credentials: 'same-origin',
-          body: JSON.stringify({
-            fileName: file.name,
-            fileType: file.type,
-            fileData: base64Data
-          })
-        });
-
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || 'Failed to upload file');
-
-        progressBar.style.width = '100%';
-        progressPercent.textContent = '100%';
-        setTimeout(() => { progressContainer.style.display = 'none'; }, 500);
-
-        uploadedResourceData = data;
-        uploadedFileCard.style.display = 'flex';
-        uploadedFileName.textContent = data.fileName;
-        uploadedFileSize.textContent = (data.fileSize / (1024 * 1024)).toFixed(2) + ' MB';
-        uploadDropzone.style.display = 'none';
-
-        updateSimulator();
-      } catch (err) {
-        progressContainer.style.display = 'none';
-        showError('Upload failed: ' + err.message);
+      const presignData = await presignRes.json();
+      if (!presignRes.ok) {
+        throw new Error(presignData.error || 'Failed to initialize upload reservation');
       }
-    };
-    reader.readAsDataURL(file);
+
+      if (progressBar) progressBar.style.width = '55%';
+      if (progressPercent) progressPercent.textContent = '55%';
+
+      // 2. Direct browser-to-R2 PUT upload (presigned URL)
+      const uploadRes = await fetch(presignData.uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': file.type || 'application/octet-stream'
+        },
+        body: file
+      });
+
+      if (!uploadRes.ok) {
+        throw new Error(`Upload to storage bucket failed with status ${uploadRes.status}`);
+      }
+
+      if (progressBar) progressBar.style.width = '85%';
+      if (progressPercent) progressPercent.textContent = '85%';
+
+      // 3. Confirm upload
+      const confirmRes = await fetch('/api/storage/confirm', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(window.getAuthHeaders ? window.getAuthHeaders() : {})
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          resourceId: presignData.resourceId,
+          objectKey: presignData.objectKey
+        })
+      });
+
+      const confirmData = await confirmRes.json();
+      if (!confirmRes.ok) {
+        throw new Error(confirmData.error || 'Failed to confirm storage upload');
+      }
+
+      if (progressBar) progressBar.style.width = '100%';
+      if (progressPercent) progressPercent.textContent = '100%';
+      setTimeout(() => { if (progressContainer) progressContainer.style.display = 'none'; }, 500);
+
+      uploadedResourceData = {
+        resourceId: confirmData.resource.id,
+        url: confirmData.resource.url,
+        fileName: confirmData.resource.fileName,
+        fileSize: confirmData.resource.fileSize
+      };
+
+      if (uploadedFileCard) uploadedFileCard.style.display = 'flex';
+      if (uploadedFileName) uploadedFileName.textContent = confirmData.resource.fileName;
+      if (uploadedFileSize) uploadedFileSize.textContent = (confirmData.resource.fileSize / (1000 * 1000)).toFixed(2) + ' MB';
+      if (uploadDropzone) uploadDropzone.style.display = 'none';
+
+      await loadStorageUsage();
+      updateSimulator();
+    } catch (err) {
+      if (progressContainer) progressContainer.style.display = 'none';
+      showError('Upload failed: ' + err.message);
+    }
   }
 
   if (removeUploadedFileBtn) {
@@ -789,6 +854,19 @@
         deliveryUrlInput.value = flow.delivery.resourceUrl || '';
         deliveryButtonInput.value = flow.delivery.buttonText || '';
         const resType = flow.delivery.resourceType || 'url';
+        if (flow.delivery.resourceId) {
+          uploadedResourceData = {
+            resourceId: flow.delivery.resourceId,
+            url: flow.delivery.resourceUrl,
+            fileName: flow.delivery.resourceName || 'Uploaded Resource'
+          };
+          if (uploadedFileCard) {
+            uploadedFileCard.style.display = 'flex';
+            if (uploadedFileName) uploadedFileName.textContent = uploadedResourceData.fileName;
+            if (uploadedFileSize) uploadedFileSize.textContent = 'Existing file';
+          }
+          if (uploadDropzone) uploadDropzone.style.display = 'none';
+        }
         const targetTab = document.querySelector(`.resource-tab-btn[data-res-type="${resType}"]`);
         if (targetTab) targetTab.click();
       } else {
@@ -918,6 +996,7 @@
         delivery: {
           message: deliveryMessageInput.value.trim() || 'Here is your link! Click below to access the full guide:',
           resourceType: currentResourceType,
+          resourceId: (currentResourceType === 'image' || currentResourceType === 'document') && uploadedResourceData ? uploadedResourceData.resourceId : null,
           resourceUrl: uploadedResourceData ? uploadedResourceData.url : (deliveryUrlInput.value.trim() || null),
           resourceName: uploadedResourceData ? uploadedResourceData.fileName : null,
           buttonText: deliveryButtonInput.value.trim() || 'Open Free Guide ↗'

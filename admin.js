@@ -71,8 +71,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       // Config (Pricing/Coupons)
       if (configRes.prices) {
-        document.getElementById('priceProM').value = configRes.prices.pro_monthly || 999;
-        document.getElementById('priceEliteM').value = configRes.prices.elite_monthly || 2499;
+        document.getElementById('priceProM').value = configRes.prices.pro_monthly || 70;
+        document.getElementById('priceEliteM').value = configRes.prices.elite_monthly || 150;
       }
       if (configRes.coupons) {
         document.getElementById('couponsTableBody').innerHTML = configRes.coupons.length === 0 ? '<tr><td colspan="3">No active coupons</td></tr>' : 

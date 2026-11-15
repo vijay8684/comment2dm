@@ -2,14 +2,73 @@
 (function () {
   'use strict';
 
-  let isAnnual = false;
   let currentPlan = 'free';
   let userEmail = '';
+  let appliedDiscount = 0;
+  let appliedCouponCode = '';
 
+  // Canonical Launch Plan Configuration (Monthly Only)
   const PLANS = {
-    free:  { name: 'Free',  monthlyPrice: 0,    annualPrice: 0,    features: ['1 Instagram account','3 automations','300 DMs / month','100 AI credits','Keyword triggers only'], missing: ['All Comments trigger','Priority support','Analytics export'] },
-    pro:   { name: 'Pro',   monthlyPrice: 999,  annualPrice: 9990, features: ['3 Instagram accounts','25 automations','5,000 DMs / month','2,500 AI credits','All comment triggers','Priority support'], missing: ['Analytics export','Custom webhooks'] },
-    elite: { name: 'Elite', monthlyPrice: 2499, annualPrice: 24990,features: ['10 Instagram accounts','Unlimited automations','50,000 DMs / month','30,000 AI credits','All features unlocked','Dedicated support','Analytics export','Custom webhooks'], missing: [] }
+    free: {
+      name: 'Free',
+      monthlyPrice: 0,
+      features: [
+        '1 connected Instagram account',
+        '2 active automations',
+        '500 successful DMs / month',
+        '150 MB customer file storage',
+        'Keyword trigger',
+        'Standard public replies',
+        'Normal queue priority'
+      ],
+      missing: [
+        'All-comment trigger',
+        'Follow-to-unlock',
+        'Advanced analytics & export',
+        'Priority queue'
+      ]
+    },
+    pro: {
+      name: 'Pro',
+      monthlyPrice: 70,
+      features: [
+        '3 connected Instagram accounts',
+        'Unlimited active automations',
+        '5,000 successful DMs / month',
+        '1 GB customer file storage',
+        'All-comment trigger',
+        'Follow-to-unlock',
+        'Public comment replies',
+        'Advanced analytics & CSV export',
+        'No Comment2DM branding',
+        'No dashboard ads',
+        'Standard queue priority'
+      ],
+      missing: [
+        'Priority support',
+        'Early feature access'
+      ]
+    },
+    elite: {
+      name: 'Elite',
+      monthlyPrice: 150,
+      features: [
+        '10 connected Instagram accounts',
+        'Unlimited active automations',
+        '50,000 successful DMs / month',
+        '5 GB customer file storage',
+        'All-comment trigger',
+        'Follow-to-unlock',
+        'Public comment replies',
+        'Advanced analytics & CSV export',
+        'No Comment2DM branding',
+        'No dashboard ads',
+        'Priority queue processing',
+        'Priority support',
+        'Early feature access'
+      ],
+      missing: []
+    }
   };
 
   // ── Toast ──────────────────────────────────────────────────────────────────
@@ -30,25 +89,24 @@
     if (!container) return;
 
     container.innerHTML = Object.entries(PLANS).map(([key, plan]) => {
-      const basePrice = isAnnual ? plan.annualPrice : plan.monthlyPrice;
+      const basePrice = plan.monthlyPrice;
       const discountAmount = appliedDiscount > 0 ? (basePrice * (appliedDiscount / 100)) : 0;
       const finalPrice = Math.max(0, basePrice - discountAmount);
 
       const isCurrent = key === currentPlan;
       const isPopular = key === 'pro';
-      
+
       let priceDisplay = '₹0';
       if (finalPrice > 0) {
         priceDisplay = `₹${Math.round(finalPrice).toLocaleString('en-IN')}`;
       }
-      
+
       let originalDisplay = '';
       if (appliedDiscount > 0 && basePrice > 0) {
         originalDisplay = `<s style="opacity:0.5;font-size:0.8rem;margin-right:6px;">₹${basePrice.toLocaleString('en-IN')}</s>`;
       }
-      
-      const period = basePrice === 0 ? 'Forever free' : (isAnnual ? '/ year' : '/ month');
-      const originalMonthly = isAnnual && plan.monthlyPrice > 0 && !appliedDiscount ? `₹${(plan.monthlyPrice * 12).toLocaleString('en-IN')} /yr` : '';
+
+      const period = basePrice === 0 ? 'Forever free' : '/ month';
 
       let btnClass = key;
       let btnText = isCurrent ? '✓ Current Plan' : key === 'free' ? 'Downgrade to Free' : `Upgrade to ${plan.name}`;
@@ -64,7 +122,6 @@
           ${originalDisplay}
           <span class="amount">${priceDisplay}</span>
           <span class="period">${period}</span>
-          ${originalMonthly ? `<span class="original">${originalMonthly}</span>` : ''}
         </div>
         <div class="plan-desc">${key === 'free' ? 'Perfect to get started' : key === 'pro' ? 'For growing creators' : 'For power users & agencies'}</div>
         <ul class="plan-features">${features}${missing}</ul>
@@ -78,9 +135,6 @@
   }
 
   // ── Coupons ───────────────────────────────────────────────────────────────
-  let appliedDiscount = 0;
-  let appliedCouponCode = '';
-
   const applyBtn = document.getElementById('applyCouponBtn');
   const couponInput = document.getElementById('couponCodeInput');
   const couponMsg = document.getElementById('couponMessage');
@@ -92,7 +146,7 @@
       try {
         const res = await fetch('/api/billing/validate-coupon', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...window.getAuthHeaders() },
+          headers: { 'Content-Type': 'application/json', ...(window.getAuthHeaders ? window.getAuthHeaders() : {}) },
           body: JSON.stringify({ code })
         });
         const data = await res.json();
@@ -124,7 +178,7 @@
       return;
     }
     try {
-      const planKey = plan + (isAnnual ? '_annual' : '_monthly');
+      const planKey = `${plan}_monthly`;
 
       const res = await fetch('/api/billing/create-subscription', {
         method: 'POST',
@@ -142,7 +196,7 @@
         key: data.keyId,
         subscription_id: data.subscriptionId,
         name: data.name || 'Comment2DM',
-        description: `Upgrade to ${planKey}`,
+        description: `Upgrade to ${PLANS[plan]?.name || plan} Monthly`,
         prefill: data.prefill || { email: userEmail },
         theme: { color: '#6366f1' },
         modal: {
@@ -190,10 +244,8 @@
       const priceRes = await fetch('/api/billing/prices');
       if (priceRes.ok) {
         const prices = await priceRes.json();
-        PLANS.pro.monthlyPrice = prices.pro_monthly || 999;
-        PLANS.pro.annualPrice = (prices.pro_monthly || 999) * 10;
-        PLANS.elite.monthlyPrice = prices.elite_monthly || 2499;
-        PLANS.elite.annualPrice = (prices.elite_monthly || 2499) * 10;
+        PLANS.pro.monthlyPrice = prices.pro_monthly || 70;
+        PLANS.elite.monthlyPrice = prices.elite_monthly || 150;
       }
 
       // Then fetch user billing status
@@ -202,23 +254,50 @@
         credentials: 'same-origin'
       });
       if (!res.ok) { renderPlanCards(); return; }
-      
+
       const data = await res.json();
       currentPlan = (data.plan || 'free').toLowerCase();
-      const used = data.usage?.dmMonthly || 0;
+      const usedDms = data.usage?.dmMonthly || 0;
       const isUnlimited = data.isAdmin || data.limits?.dmMonthly === null || data.limits?.dmMonthly === Infinity;
-      const limit = isUnlimited ? 'Unlimited' : (data.limits?.dmMonthly || (currentPlan === 'elite' ? 50000 : currentPlan === 'pro' ? 5000 : 300));
-      const pct = isUnlimited ? 0 : Math.min(100, Math.round((used / (typeof limit === 'number' ? limit : 300)) * 100));
+      const defaultLimit = currentPlan === 'elite' ? 50000 : currentPlan === 'pro' ? 5000 : 500;
+      const dmLimit = isUnlimited ? 'Unlimited' : (data.limits?.dmMonthly || defaultLimit);
+      const dmPct = isUnlimited ? 0 : Math.min(100, Math.round((usedDms / (typeof dmLimit === 'number' ? dmLimit : defaultLimit)) * 100));
       const planName = currentPlan.charAt(0).toUpperCase() + currentPlan.slice(1);
 
+      // DOM Elements in current plan card
       const pn = document.getElementById('currentPlanName');
       const pb = document.getElementById('currentPlanBadge');
-      const bar = document.getElementById('dmUsageBar');
-      const txt = document.getElementById('dmUsageText');
+      const dmBar = document.getElementById('dmUsageBar');
+      const dmTxt = document.getElementById('dmUsageText');
       if (pn) pn.textContent = planName;
       if (pb) { pb.textContent = currentPlan.toUpperCase(); pb.className = `plan-badge ${currentPlan}`; }
-      if (bar) bar.style.width = pct + '%';
-      if (txt) txt.textContent = `${used.toLocaleString()} / ${typeof limit === 'number' ? limit.toLocaleString() : limit}`;
+      if (dmBar) dmBar.style.width = dmPct + '%';
+      if (dmTxt) dmTxt.textContent = `${usedDms.toLocaleString()} / ${typeof dmLimit === 'number' ? dmLimit.toLocaleString() : dmLimit}`;
+
+      // Storage metrics in current plan card
+      const defaultStorage = currentPlan === 'elite' ? '5 GB' : currentPlan === 'pro' ? '1 GB' : '150 MB';
+      const storageUsed = data.usage?.storageFormatted || '0 MB';
+      const storageTotal = data.limits?.storageDisplay || defaultStorage;
+      const storageRemaining = data.usage?.storageRemainingFormatted || defaultStorage;
+      const storagePct = data.usage?.storagePercentage || 0;
+
+      const storageBar = document.getElementById('storageUsageBar');
+      const storageTxt = document.getElementById('storageUsageText');
+      const storageRemTxt = document.getElementById('storageRemainingText');
+      if (storageBar) storageBar.style.width = storagePct + '%';
+      if (storageTxt) storageTxt.textContent = `${storageUsed} / ${storageTotal}`;
+      if (storageRemTxt) storageRemTxt.textContent = `Remaining: ${storageRemaining}`;
+
+      // Sidebar storage indicators
+      const sideDmText = document.getElementById('dmLimitText');
+      const sideDmFill = document.getElementById('dmProgressFill');
+      const sideStorageText = document.getElementById('sidebarStorageText');
+      const sideStorageFill = document.getElementById('sidebarStorageFill');
+
+      if (sideDmText) sideDmText.textContent = `${usedDms.toLocaleString()} / ${typeof dmLimit === 'number' ? dmLimit.toLocaleString() : dmLimit}`;
+      if (sideDmFill) sideDmFill.style.width = dmPct + '%';
+      if (sideStorageText) sideStorageText.textContent = `${storageUsed} / ${storageTotal}`;
+      if (sideStorageFill) sideStorageFill.style.width = storagePct + '%';
 
       renderPlanCards();
     } catch {
@@ -262,12 +341,6 @@
       }).join('');
     } catch {}
   }
-
-  // ── Annual toggle ──────────────────────────────────────────────────────────
-  document.getElementById('annualToggle')?.addEventListener('change', (e) => {
-    isAnnual = e.target.checked;
-    renderPlanCards();
-  });
 
   // ── Init ──────────────────────────────────────────────────────────────────
   function init() {

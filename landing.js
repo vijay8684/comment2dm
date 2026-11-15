@@ -287,42 +287,18 @@
   }
 
   // ==========================================
-  // 6. PRICING MONTHLY / ANNUAL TOGGLE
+  // 6. PRICING MONTHLY CONFIGURATION
   // ==========================================
-  const billingCycleSwitch = document.getElementById('billingCycleSwitch');
-  const monthlyLabel = document.getElementById('monthlyLabel');
-  const annualLabel = document.getElementById('annualLabel');
-
   const pricingData = {
-    free: { monthly: '₹0', annual: '₹0', period: '/ month' },
-    pro: { monthly: '₹999', annual: '₹799', period: '/ mo (billed yearly)' },
-    elite: { monthly: '₹2,499', annual: '₹1,999', period: '/ mo (billed yearly)' }
+    free: { monthly: '₹0', period: '/ month' },
+    pro: { monthly: '₹70', period: '/ month' },
+    elite: { monthly: '₹150', period: '/ month' }
   };
 
-  if (billingCycleSwitch) {
-    billingCycleSwitch.addEventListener('change', () => {
-      const isAnnual = billingCycleSwitch.checked;
-      monthlyLabel?.classList.toggle('active', !isAnnual);
-      annualLabel?.classList.toggle('active', isAnnual);
-
-      const proPriceEl = document.getElementById('pricePro');
-      const proPeriodEl = document.getElementById('periodPro');
-      const elitePriceEl = document.getElementById('priceElite');
-      const elitePeriodEl = document.getElementById('periodElite');
-
-      if (proPriceEl) proPriceEl.textContent = isAnnual ? pricingData.pro.annual : pricingData.pro.monthly;
-      if (proPeriodEl) proPeriodEl.textContent = isAnnual ? pricingData.pro.period : '/ month';
-      if (elitePriceEl) elitePriceEl.textContent = isAnnual ? pricingData.elite.annual : pricingData.elite.monthly;
-      if (elitePeriodEl) elitePeriodEl.textContent = isAnnual ? pricingData.elite.period : '/ month';
-
-      // Update CTA query params
-      const cycle = isAnnual ? 'annual' : 'monthly';
-      document.querySelectorAll('[data-plan-target]').forEach(link => {
-        const plan = link.getAttribute('data-plan-target');
-        link.href = `login.html?tab=signup&plan=${encodeURIComponent(plan)}&billing=${cycle}`;
-      });
-    });
-  }
+  document.querySelectorAll('[data-plan-target]').forEach(link => {
+    const plan = link.getAttribute('data-plan-target');
+    link.href = `login.html?tab=signup&plan=${encodeURIComponent(plan)}&billing=monthly`;
+  });
 
   // ==========================================
   // 7. SCROLL REVEAL OBSERVER

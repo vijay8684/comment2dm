@@ -562,6 +562,21 @@ It would mean a lot if you could visit my profile and hit that follow button ðŸ˜
                           </div>
                           <button type="button" class="btn btn-ghost btn-xs" id="removeUploadedFileBtn" style="color:var(--rose);">âœ• Remove</button>
                         </div>
+
+                        <!-- Live Storage Meter -->
+                        <div id="uploadStorageMeter" style="margin-top:12px; padding:10px 14px; background:rgba(255,255,255,0.03); border:1px solid var(--glass-border); border-radius:10px;">
+                          <div style="display:flex; justify-content:space-between; font-size:0.76rem; color:var(--ink-secondary); margin-bottom:4px;">
+                            <span>Cloud Storage Quota</span>
+                            <span id="uploadStorageText">0 MB / 150 MB</span>
+                          </div>
+                          <div class="dm-progress-track" style="height:5px;">
+                            <div class="dm-progress-fill" id="uploadStorageBar" style="width:0%; background:linear-gradient(90deg,#10b981,#3b82f6);"></div>
+                          </div>
+                          <div style="display:flex; justify-content:space-between; font-size:0.72rem; color:var(--ink-muted); margin-top:4px;">
+                            <span id="uploadSelectedSizeText">Selected file: 0 MB</span>
+                            <span id="uploadRemainingText">Remaining: 150 MB</span>
+                          </div>
+                        </div>
                       </div>
 
                       <!-- Button Label Input -->

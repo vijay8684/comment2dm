@@ -5,129 +5,154 @@ const Razorpay = require('razorpay');
 const authService = require('./auth/authService');
 const dbModule = require('./db');
 
-// Subscription Plan Configurations (Prices in INR Paise: 49900 = ₹499)
+// Official Canonical Subscription Plan Configurations (Monthly Launch Pricing)
+// Free: ₹0, Pro: ₹70/month (7000 paise), Elite: ₹150/month (15000 paise)
 const PLANS = {
   pro_monthly: {
     plan: 'pro',
     cycle: 'monthly',
-    amount: 49900,
+    amount: 7000,
     period: 'monthly',
     totalCount: 120,
     name: 'Comment2DM Pro Monthly'
-  },
-  pro_annual: {
-    plan: 'pro',
-    cycle: 'annual',
-    amount: 499900,
-    period: 'yearly',
-    totalCount: 10,
-    name: 'Comment2DM Pro Annual'
   },
   elite_monthly: {
     plan: 'elite',
     cycle: 'monthly',
-    amount: 149900,
-    period: 'monthly',
-    totalCount: 120,
-    name: 'Comment2DM Elite Monthly'
-  },
-  elite_annual: {
-    plan: 'elite',
-    cycle: 'annual',
-    amount: 1499900,
-    period: 'yearly',
-    totalCount: 10,
-    name: 'Comment2DM Elite Annual'
-  },
-  // Legacy aliases
-  creator_monthly: {
-    plan: 'pro',
-    cycle: 'monthly',
-    amount: 49900,
-    period: 'monthly',
-    totalCount: 120,
-    name: 'Comment2DM Pro Monthly'
-  },
-  growth_monthly: {
-    plan: 'pro',
-    cycle: 'monthly',
-    amount: 69900,
-    period: 'monthly',
-    totalCount: 120,
-    name: 'Comment2DM Pro Monthly'
-  },
-  scale_monthly: {
-    plan: 'elite',
-    cycle: 'monthly',
-    amount: 149900,
+    amount: 15000,
     period: 'monthly',
     totalCount: 120,
     name: 'Comment2DM Elite Monthly'
   }
 };
 
-// Tier Quotas & Feature Entitlements
+// Canonical Plan Matrix (Single Source of Truth)
 const LIMITS = {
   free: {
+    name: 'Comment2DM Free',
+    price: 0,
+    cycle: 'monthly',
+    dmMonthly: 500,
     instagramAccounts: 1,
-    automations: 3,
-    dmMonthly: 300,
-    aiCreditsMonthly: 100,
+    automations: 2,
+    storageBytes: 150000000, // 150 MB (decimal: 150 * 1,000,000 bytes)
+    storageDisplay: '150 MB',
     allCommentsTrigger: false,
-    publicReplies: true,
     followToUnlock: false,
-    whiteLabel: false
+    publicReplies: true, // Preserve basic Free access pending owner confirmation
+    queuePriority: 'normal',
+    advancedAnalytics: false,
+    earlyAccess: false,
+    prioritySupport: false,
+    branding: true,
+    whiteLabel: false,
+    dashboardAds: true
   },
   pro: {
-    instagramAccounts: 3,
-    automations: 25,
+    name: 'Comment2DM Pro',
+    price: 70,
+    cycle: 'monthly',
+    amount: 7000,
     dmMonthly: 5000,
-    aiCreditsMonthly: 2500,
+    instagramAccounts: 3,
+    automations: Infinity, // Unlimited active automations
+    storageBytes: 1000000000, // 1 GB (decimal: 1,000,000,000 bytes)
+    storageDisplay: '1 GB',
     allCommentsTrigger: true,
-    publicReplies: true,
     followToUnlock: true,
-    whiteLabel: true
+    publicReplies: true,
+    queuePriority: 'standard',
+    advancedAnalytics: true,
+    earlyAccess: false,
+    prioritySupport: false,
+    branding: false,
+    whiteLabel: true,
+    dashboardAds: false
   },
   elite: {
-    instagramAccounts: 10,
-    automations: Infinity,
+    name: 'Comment2DM Elite',
+    price: 150,
+    cycle: 'monthly',
+    amount: 15000,
     dmMonthly: 50000,
-    aiCreditsMonthly: 30000,
+    instagramAccounts: 10,
+    automations: Infinity, // Unlimited active automations
+    storageBytes: 5000000000, // 5 GB (decimal: 5,000,000,000 bytes)
+    storageDisplay: '5 GB',
     allCommentsTrigger: true,
-    publicReplies: true,
     followToUnlock: true,
-    whiteLabel: true
+    publicReplies: true,
+    queuePriority: 'priority',
+    advancedAnalytics: true,
+    earlyAccess: true,
+    prioritySupport: true,
+    branding: false,
+    whiteLabel: true,
+    dashboardAds: false
   },
-  // Aliases for legacy plan data in DB
+  // Compatibility aliases for legacy subscription records in DB
   creator: {
-    instagramAccounts: 3,
-    automations: 25,
+    name: 'Comment2DM Pro (Creator)',
+    price: 70,
+    cycle: 'monthly',
+    amount: 7000,
     dmMonthly: 5000,
-    aiCreditsMonthly: 2500,
+    instagramAccounts: 3,
+    automations: Infinity,
+    storageBytes: 1000000000,
+    storageDisplay: '1 GB',
     allCommentsTrigger: true,
-    publicReplies: true,
     followToUnlock: true,
-    whiteLabel: true
+    publicReplies: true,
+    queuePriority: 'standard',
+    advancedAnalytics: true,
+    earlyAccess: false,
+    prioritySupport: false,
+    branding: false,
+    whiteLabel: true,
+    dashboardAds: false
   },
   growth: {
-    instagramAccounts: 5,
-    automations: 50,
-    dmMonthly: 15000,
-    aiCreditsMonthly: 10000,
+    name: 'Comment2DM Pro (Growth)',
+    price: 70,
+    cycle: 'monthly',
+    amount: 7000,
+    dmMonthly: 5000,
+    instagramAccounts: 3,
+    automations: Infinity,
+    storageBytes: 1000000000,
+    storageDisplay: '1 GB',
     allCommentsTrigger: true,
-    publicReplies: true,
     followToUnlock: true,
-    whiteLabel: true
+    publicReplies: true,
+    queuePriority: 'standard',
+    advancedAnalytics: true,
+    earlyAccess: false,
+    prioritySupport: false,
+    branding: false,
+    whiteLabel: true,
+    dashboardAds: false
   },
   scale: {
+    name: 'Comment2DM Elite (Scale)',
+    price: 150,
+    cycle: 'monthly',
+    amount: 15000,
+    dmMonthly: 50000,
     instagramAccounts: 10,
     automations: Infinity,
-    dmMonthly: 50000,
-    aiCreditsMonthly: 30000,
+    storageBytes: 5000000000,
+    storageDisplay: '5 GB',
     allCommentsTrigger: true,
-    publicReplies: true,
     followToUnlock: true,
-    whiteLabel: true
+    publicReplies: true,
+    queuePriority: 'priority',
+    advancedAnalytics: true,
+    earlyAccess: true,
+    prioritySupport: true,
+    branding: false,
+    whiteLabel: true,
+    dashboardAds: false
   }
 };
 
@@ -284,14 +309,25 @@ async function entitlement(uid, contextOrOptions = null) {
         plan: 'elite',
         isAdmin: true,
         limits: {
+          name: 'Comment2DM Admin',
+          price: 0,
+          cycle: 'monthly',
+          amount: 0,
           instagramAccounts: Infinity,
           automations: Infinity,
           dmMonthly: Infinity,
-          aiCreditsMonthly: Infinity,
+          storageBytes: 100000000000,
+          storageDisplay: 'Unlimited',
           allCommentsTrigger: true,
           publicReplies: true,
           followToUnlock: true,
-          whiteLabel: true
+          queuePriority: 'priority',
+          advancedAnalytics: true,
+          earlyAccess: true,
+          prioritySupport: true,
+          branding: false,
+          whiteLabel: true,
+          dashboardAds: false
         },
         subscription: null
       };
@@ -333,10 +369,10 @@ async function counts(uid) {
 
   const [accounts, automations, dmMonthly] = await Promise.all([
     d.collection('instagram_accounts').countDocuments({ owner_user_id: uid }),
-    d.collection('automations').countDocuments({ owner_user_id: uid, enabled: true }),
+    d.collection('automations').countDocuments({ owner_user_id: uid, enabled: { $in: [true, 1, '1'] } }),
     d.collection('automation_events').countDocuments({
       owner_user_id: uid,
-      event_type: 'private_reply',
+      event_type: { $in: ['private_reply', 'resource_delivered'] },
       status: 'success',
       created_at: { $gte: start.toISOString() }
     })
@@ -348,7 +384,7 @@ async function check(uid, resource, options = {}) {
   const e = await entitlement(uid, options);
   const c = await counts(uid);
   const used = resource === 'instagramAccounts' ? c.accounts : resource === 'automations' ? c.automations : c.dmMonthly;
-  return { ...e, used, allowed: used < e.limits[resource] };
+  return { ...e, used, allowed: e.limits[resource] === Infinity || used < e.limits[resource] };
 }
 
 async function billingRateLimit(req, res, next) {
@@ -401,7 +437,7 @@ async function ensurePlans() {
     const authHeader = Buffer.from(process.env.RAZORPAY_KEY_ID + ':' + process.env.RAZORPAY_KEY_SECRET).toString('base64');
 
     for (const [k, x] of Object.entries(PLANS)) {
-      let p = existing.find((v) => v?.notes?.comment2dm_plan_key === k || v?.notes?.nudge_plan_key === k);
+      let p = existing.find((v) => (v?.notes?.comment2dm_plan_key === k || v?.notes?.nudge_plan_key === k) && v?.item?.amount === x.amount);
       if (!p) {
         const r = await fetch('https://api.razorpay.com/v1/plans', {
           method: 'POST',
@@ -431,10 +467,12 @@ async function ensurePlans() {
 }
 
 async function planId(k) {
+  const targetPlan = PLANS[k];
+  if (!targetPlan) return null;
   if (cache.has(k)) return cache.get(k);
   const d = await store();
   const p = await d.collection('billing_plans').findOne({ plan_key: k });
-  if (p?.razorpay_plan_id) {
+  if (p?.razorpay_plan_id && (!p?.amount || p?.amount === targetPlan.amount)) {
     cache.set(k, p.razorpay_plan_id);
     return p.razorpay_plan_id;
   }
@@ -711,31 +749,58 @@ async function deductAiCredits(uid, cost, tool = 'general') {
 async function status(req, res) {
   const u = await auth(req);
   if (!u) return res.status(401).json({ error: 'Authentication required.' });
-  const [e, c, aiStatus] = await Promise.all([
+  const storageService = require('./services/storageService');
+  const [e, c, storageUsage] = await Promise.all([
     entitlement(u.id, req),
     counts(u.id),
-    getAiCreditBalance(u.id, req)
+    storageService.getStorageUsage(u.id)
   ]);
 
   return res.json({
     plan: e.plan,
     isAdmin: !!e.isAdmin,
     subscription: e.subscription ? { status: e.subscription.status, billingCycle: e.subscription.billing_cycle, currentEnd: e.subscription.current_end } : null,
-    aiCreditsRemaining: aiStatus.balance,
-    aiCreditsUsed: aiStatus.used,
     limits: {
       instagramAccounts: Number.isFinite(e.limits.instagramAccounts) ? e.limits.instagramAccounts : null,
       automations: Number.isFinite(e.limits.automations) ? e.limits.automations : null,
       dmMonthly: Number.isFinite(e.limits.dmMonthly) ? e.limits.dmMonthly : null,
-      aiCreditsMonthly: Number.isFinite(e.limits.aiCreditsMonthly) ? e.limits.aiCreditsMonthly : null,
-      allCommentsTrigger: e.limits.allCommentsTrigger
+      storageBytes: e.limits.storageBytes,
+      storageDisplay: e.limits.storageDisplay,
+      allCommentsTrigger: e.limits.allCommentsTrigger,
+      followToUnlock: e.limits.followToUnlock,
+      publicReplies: e.limits.publicReplies,
+      queuePriority: e.limits.queuePriority,
+      advancedAnalytics: e.limits.advancedAnalytics,
+      earlyAccess: e.limits.earlyAccess,
+      prioritySupport: e.limits.prioritySupport,
+      branding: e.limits.branding,
+      whiteLabel: e.limits.whiteLabel,
+      dashboardAds: e.limits.dashboardAds
     },
     usage: {
       instagramAccounts: c.accounts,
       automations: c.automations,
       dmMonthly: c.dmMonthly,
-      aiCredits: aiStatus.used
+      storageBytes: storageUsage.usedBytes,
+      storageFormatted: storageUsage.usedFormatted,
+      storageRemainingFormatted: storageUsage.remainingFormatted,
+      storageTotalFormatted: storageUsage.totalFormatted,
+      storagePercentage: storageUsage.percentage
     }
+  });
+}
+
+function getCanonicalPlans() {
+  return {
+    free: LIMITS.free,
+    pro: LIMITS.pro,
+    elite: LIMITS.elite
+  };
+}
+
+function plansEndpoint(req, res) {
+  return res.json({
+    plans: getCanonicalPlans()
   });
 }
 
@@ -792,6 +857,7 @@ async function webhook(req, res) {
 function register(app) {
   app.post('/api/billing/webhook', require('express').raw({ type: 'application/json', limit: '256kb' }), webhook);
   app.get('/api/billing/status', status);
+  app.get('/api/billing/plans', plansEndpoint);
   app.post('/api/billing/create-subscription', billingRateLimit, require('express').json({ limit: '10kb' }), create);
   app.post('/api/billing/verify-subscription', billingRateLimit, require('express').json({ limit: '10kb' }), verify);
   app.post('/api/billing/cancel', billingRateLimit, require('express').json({ limit: '10kb' }), cancel);
@@ -899,6 +965,7 @@ module.exports = {
   _clearEntitlementCacheForTesting: () => globalEntitlementCache.clear(),
   PLANS,
   LIMITS,
+  getCanonicalPlans,
   isAdminEmail,
   getAdminEmails,
   getActiveSubscription

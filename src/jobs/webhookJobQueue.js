@@ -73,6 +73,7 @@ function normalizeWebhookPayload(payload) {
         action: null,
         automation_id: null,
         status: 'queued',
+        priority: 3,
         attempts: 0,
         last_error: null,
         failure_category: null,
@@ -163,6 +164,7 @@ function normalizeWebhookPayload(payload) {
         action: action,
         automation_id: autoId,
         status: 'queued',
+        priority: 3,
         attempts: 0,
         last_error: null,
         failure_category: null,
@@ -247,12 +249,37 @@ async function ingestWebhookPayload(payload, db) {
   let duplicates = 0;
   const persistedJobs = [];
 
+  // Resolve entitlement queue priority for each account in payload
+  const accountPriorityCache = new Map();
+  async function resolveJobPriority(igId) {
+    if (!igId) return 3;
+    if (accountPriorityCache.has(igId)) return accountPriorityCache.get(igId);
+    let p = 3; // Default Normal (Free)
+    try {
+      if (db && db.collections && db.collections().instagramAccounts) {
+        const acct = await db.collections().instagramAccounts.findOne({
+          $or: [{ instagram_user_id: igId }, { id: igId }]
+        });
+        if (acct?.owner_user_id) {
+          const billing = require('../billing');
+          const ent = await billing.entitlement(acct.owner_user_id);
+          if (ent?.plan === 'elite') p = 1; // Priority (Elite)
+          else if (ent?.plan === 'pro') p = 2; // Standard (Pro)
+          else p = 3; // Normal (Free)
+        }
+      }
+    } catch (_) {}
+    accountPriorityCache.set(igId, p);
+    return p;
+  }
+
   const isMongo = Boolean(db && db.collections && db.collections().webhookJobs);
 
   if (isMongo) {
     const col = db.collections().webhookJobs;
     for (const job of normalizedJobs) {
       try {
+        job.priority = await resolveJobPriority(job.instagram_account_id);
         const insertStart = Date.now();
         await col.insertOne(job);
         const insertDuration = Date.now() - insertStart;
@@ -431,7 +458,7 @@ async function claimNextJob(db, options = {}) {
       baseFilter,
       updateDoc,
       {
-        sort: { run_at: 1, created_at: 1 },
+        sort: { priority: 1, run_at: 1, created_at: 1 },
         returnDocument: 'after'
       }
     );
@@ -440,6 +467,7 @@ async function claimNextJob(db, options = {}) {
     return result.value !== undefined ? result.value : result;
   } else {
     // In-memory fallback for testing
+    const candidates = [];
     for (const [key, job] of memoryJobsStore.entries()) {
       if (job.attempts >= MAX_JOB_ATTEMPTS) continue;
       if (excludedAccounts.includes(job.instagram_account_id) || metaRateLimiter.isAccountPaused(job.instagram_account_id)) continue;
@@ -449,14 +477,26 @@ async function claimNextJob(db, options = {}) {
       const isExpiredProcessing = (job.status === 'processing') && (job.locked_until && job.locked_until <= now);
 
       if (isQueuedDue || isRetryingDue || isExpiredProcessing) {
-        job.status = 'processing';
-        job.attempts = (job.attempts || 0) + 1;
-        job.worker_id = workerId;
-        job.locked_until = lockExpiry;
-        job.lease_extended_at = now;
-        job.updated_at = now;
-        return job;
+        candidates.push(job);
       }
+    }
+
+    if (candidates.length > 0) {
+      candidates.sort((a, b) => {
+        const pDiff = (a.priority || 3) - (b.priority || 3);
+        if (pDiff !== 0) return pDiff;
+        const rDiff = (a.run_at || 0) - (b.run_at || 0);
+        if (rDiff !== 0) return rDiff;
+        return (a.created_at || 0) - (b.created_at || 0);
+      });
+      const job = candidates[0];
+      job.status = 'processing';
+      job.attempts = (job.attempts || 0) + 1;
+      job.worker_id = workerId;
+      job.locked_until = lockExpiry;
+      job.lease_extended_at = now;
+      job.updated_at = now;
+      return job;
     }
     return null;
   }

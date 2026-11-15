@@ -127,7 +127,13 @@
       const dropName = document.getElementById('dropdownName');
       const dropEmail = document.getElementById('dropdownEmail');
 
-      if (avatarEl) avatarEl.textContent = initial;
+      if (avatarEl) {
+        if (user.avatarUrl) {
+          avatarEl.innerHTML = `<img src="${user.avatarUrl}" alt="${user.name || 'User'}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" onerror="this.remove();">`;
+        } else {
+          avatarEl.textContent = initial;
+        }
+      }
       if (nameEl) nameEl.textContent = user.name;
       if (welcomeEl) {
         const firstName = user.name ? user.name.split(' ')[0] : 'Creator';
@@ -158,9 +164,10 @@
       }
 
       const isUnlimited = data.isAdmin || data.limits?.dmMonthly === null || data.limits?.dmMonthly === Infinity;
-      const dmMax = isUnlimited ? 'Unlimited' : (data.limits?.dmMonthly || (plan === 'elite' ? 50000 : plan === 'pro' ? 5000 : 300));
+      const defaultLimit = plan === 'elite' ? 50000 : plan === 'pro' ? 5000 : 500;
+      const dmMax = isUnlimited ? 'Unlimited' : (data.limits?.dmMonthly || defaultLimit);
       const dmUsed = data.usage?.dmMonthly || 0;
-      const pct = isUnlimited ? 0 : Math.min(100, Math.round((dmUsed / (typeof dmMax === 'number' ? dmMax : 300)) * 100));
+      const pct = isUnlimited ? 0 : Math.min(100, Math.round((dmUsed / (typeof dmMax === 'number' ? dmMax : defaultLimit)) * 100));
 
       const limitText = document.getElementById('dmLimitText');
       const progressFill = document.getElementById('dmProgressFill');
@@ -177,6 +184,23 @@
       if (pieGaugeCollapsed) {
         pieGaugeCollapsed.title = `Monthly DMs: ${dmUsed} / ${dmMax} (${pct}%) — Click to Upgrade`;
       }
+
+      // First-party promotional card (Free plan only)
+      const promoCard = document.getElementById('dashboardPromoCard');
+      if (promoCard) {
+        promoCard.style.display = plan === 'free' ? 'block' : 'none';
+      }
+
+      // Storage metrics indicator
+      const defaultStorage = plan === 'elite' ? '5 GB' : plan === 'pro' ? '1 GB' : '150 MB';
+      const storageUsed = data.usage?.storageFormatted || '0 MB';
+      const storageTotal = data.limits?.storageDisplay || defaultStorage;
+      const storagePct = data.usage?.storagePercentage || 0;
+
+      const sideStorageText = document.getElementById('sidebarStorageText');
+      const sideStorageFill = document.getElementById('sidebarStorageFill');
+      if (sideStorageText) sideStorageText.textContent = `${storageUsed} / ${storageTotal}`;
+      if (sideStorageFill) sideStorageFill.style.width = `${Math.min(100, storagePct)}%`;
     } catch (e) {}
   }
 

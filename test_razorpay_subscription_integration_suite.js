@@ -386,21 +386,18 @@ async function runSuite() {
       subInDb && subInDb.status === 'created' && subInDb.plan === 'pro' && subInDb.billing_cycle === 'monthly'
     );
 
-    // 2.3b: Successful Pro Annual & Elite Annual verification
+    // 2.3b: Elite Monthly verification and rejection of unapproved Annual plans
     await mockCollections.subscriptions.deleteMany({ user_id: testUser.id });
-    const proAnnualRes = await makeRequest('POST', '/api/billing/create-subscription', { planKey: 'pro_annual' }, authHeaders);
-    test('Create Pro Annual subscription uses annual plan and total_count: 10',
-      proAnnualRes.status === 200 &&
-      createdSubscriptionParams.plan_id === 'plan_pro_a_123' &&
-      createdSubscriptionParams.total_count === 10
+    const eliteMonthlyRes = await makeRequest('POST', '/api/billing/create-subscription', { planKey: 'elite_monthly' }, authHeaders);
+    test('Create Elite Monthly subscription returns HTTP 200 with plan_elite_m_123 and total_count: 120',
+      eliteMonthlyRes.status === 200 &&
+      createdSubscriptionParams.plan_id === 'plan_elite_m_123' &&
+      createdSubscriptionParams.total_count === 120
     );
 
-    await mockCollections.subscriptions.deleteMany({ user_id: testUser.id });
-    const eliteAnnualRes = await makeRequest('POST', '/api/billing/create-subscription', { planKey: 'elite_annual' }, authHeaders);
-    test('Create Elite Annual subscription uses annual plan and total_count: 10',
-      eliteAnnualRes.status === 200 &&
-      createdSubscriptionParams.plan_id === 'plan_elite_a_123' &&
-      createdSubscriptionParams.total_count === 10
+    const unapprovedAnnualRes = await makeRequest('POST', '/api/billing/create-subscription', { planKey: 'pro_annual' }, authHeaders);
+    test('Unapproved annual plan checkout is safely rejected (HTTP 400)',
+      unapprovedAnnualRes.status === 400
     );
 
     // Reset to Pro Monthly for remaining tests
@@ -654,10 +651,11 @@ async function runSuite() {
     const freeEntitlement = await billing.entitlement(testUser.id);
     test('User with cancelled subscription receives Free tier entitlement',
       freeEntitlement.plan === 'free' &&
-      freeEntitlement.limits.dmMonthly === 300 &&
-      freeEntitlement.limits.automations === 3 &&
+      freeEntitlement.limits.dmMonthly === 500 &&
+      freeEntitlement.limits.automations === 2 &&
       freeEntitlement.limits.instagramAccounts === 1 &&
-      freeEntitlement.limits.whiteLabel === false
+      freeEntitlement.limits.whiteLabel === false &&
+      freeEntitlement.limits.storageBytes === 150000000
     );
 
     // 6.2: Active Pro subscription grants Pro limits
@@ -670,9 +668,10 @@ async function runSuite() {
     test('User with active Pro subscription receives Pro tier entitlement',
       proEntitlement.plan === 'pro' &&
       proEntitlement.limits.dmMonthly === 5000 &&
-      proEntitlement.limits.automations === 25 &&
+      proEntitlement.limits.automations === Infinity &&
       proEntitlement.limits.instagramAccounts === 3 &&
-      proEntitlement.limits.whiteLabel === true
+      proEntitlement.limits.whiteLabel === true &&
+      proEntitlement.limits.storageBytes === 1000000000
     );
 
     // 6.3: Active Elite subscription grants Elite limits

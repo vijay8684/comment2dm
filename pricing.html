@@ -126,15 +126,6 @@
     <div class="eyebrow">Simple Pricing</div>
     <h1>Transparent plans,<br><span class="grad">no surprises.</span></h1>
     <p>Start free. Upgrade when you're ready. All plans include core comment-to-DM automation.</p>
-    <div class="toggle-row">
-      <span class="toggle-label active" id="monthlyLabel">Monthly</span>
-      <label class="toggle-switch-pub">
-        <input type="checkbox" id="billingToggle">
-        <span class="ts-slider"></span>
-      </label>
-      <span class="toggle-label" id="annualLabel">Annual</span>
-      <span class="save-badge">Save 17% 🎉</span>
-    </div>
   </div>
 
   <div class="plans-section">
@@ -157,18 +148,20 @@
         </tr>
       </thead>
       <tbody>
-        <tr><td>Instagram Accounts</td><td>1</td><td>3</td><td>10</td></tr>
-        <tr><td>Automations</td><td>3</td><td>25</td><td>Unlimited</td></tr>
-        <tr><td>Monthly DMs</td><td>300</td><td>5,000</td><td>50,000</td></tr>
-        <tr><td>AI Credits</td><td>100</td><td>2,500</td><td>30,000</td></tr>
+        <tr><td>Monthly Price</td><td>₹0</td><td>₹70 / mo</td><td>₹150 / mo</td></tr>
+        <tr><td>Connected Instagram Accounts</td><td>1</td><td>3</td><td>10</td></tr>
+        <tr><td>Active Automations</td><td>2</td><td>Unlimited</td><td>Unlimited</td></tr>
+        <tr><td>Monthly DMs</td><td>500</td><td>5,000</td><td>50,000</td></tr>
+        <tr><td>Customer File Storage</td><td>150 MB</td><td>1 GB</td><td>5 GB</td></tr>
         <tr><td>Keyword Triggers</td><td><span class="check">✓</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td></tr>
-        <tr><td>All Comments Trigger</td><td><span class="cross">✗</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td></tr>
-        <tr><td>Analytics Dashboard</td><td><span class="check">✓</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td></tr>
-        <tr><td>Creator Studio AI</td><td>Limited</td><td><span class="check">✓</span></td><td><span class="check">✓</span></td></tr>
-        <tr><td>Priority Support</td><td><span class="cross">✗</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td></tr>
-        <tr><td>Analytics Export</td><td><span class="cross">✗</span></td><td><span class="cross">✗</span></td><td><span class="check">✓</span></td></tr>
-        <tr><td>Custom Webhooks</td><td><span class="cross">✗</span></td><td><span class="cross">✗</span></td><td><span class="check">✓</span></td></tr>
-        <tr><td>Dedicated Support</td><td><span class="cross">✗</span></td><td><span class="cross">✗</span></td><td><span class="check">✓</span></td></tr>
+        <tr><td>All-Comment Trigger</td><td><span class="cross">✗</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td></tr>
+        <tr><td>Follow-to-Unlock Gating</td><td><span class="cross">✗</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td></tr>
+        <tr><td>Public Comment Replies</td><td>Basic</td><td><span class="check">✓</span></td><td><span class="check">✓</span></td></tr>
+        <tr><td>Queue Processing Priority</td><td>Normal</td><td>Standard</td><td>Priority</td></tr>
+        <tr><td>Advanced Analytics & CSV Export</td><td><span class="cross">✗</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td></tr>
+        <tr><td>No Branding & No Ads</td><td><span class="cross">✗</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td></tr>
+        <tr><td>Priority Support</td><td><span class="cross">✗</span></td><td><span class="cross">✗</span></td><td><span class="check">✓</span></td></tr>
+        <tr><td>Early Feature Access</td><td><span class="cross">✗</span></td><td><span class="cross">✗</span></td><td><span class="check">✓</span></td></tr>
       </tbody>
     </table>
   </div>
@@ -201,26 +194,74 @@
 
   <script>
     const PLANS = [
-      { key:'free', name:'Free', monthly:0, annual:0, desc:'Perfect to get started', features:['1 Instagram account','3 automations','300 DMs / month','100 AI credits','Keyword triggers','Analytics dashboard'], cta:'Get Started Free', href:'login.html?action=signup' },
-      { key:'pro', name:'Pro', monthly:999, annual:9990, desc:'For growing creators', features:['3 Instagram accounts','25 automations','5,000 DMs / month','2,500 AI credits','All Comments trigger','Priority support'], cta:'Start Pro', href:'login.html?plan=pro', popular:true },
-      { key:'elite', name:'Elite', monthly:2499, annual:24990, desc:'For power users & agencies', features:['10 Instagram accounts','Unlimited automations','50,000 DMs / month','30,000 AI credits','Analytics export','Custom webhooks','Dedicated support'], cta:'Go Elite', href:'login.html?plan=elite' }
+      {
+        key: 'free',
+        name: 'Free',
+        monthly: 0,
+        desc: 'Perfect to get started testing automations',
+        features: [
+          '1 connected Instagram account',
+          '2 active automations',
+          '500 successful DMs / month',
+          '150 MB customer file storage',
+          'Keyword triggers',
+          'Standard public comment replies',
+          'Normal queue priority'
+        ],
+        cta: 'Get Started Free',
+        href: 'login.html?action=signup'
+      },
+      {
+        key: 'pro',
+        name: 'Pro',
+        monthly: 70,
+        desc: 'For growing creators maximizing conversions',
+        features: [
+          '3 connected Instagram accounts',
+          'Unlimited active automations',
+          '5,000 successful DMs / month',
+          '1 GB customer file storage',
+          'All-comment & keyword triggers',
+          'Follow-to-unlock gating',
+          'Advanced analytics & CSV export',
+          'No Comment2DM branding & No ads'
+        ],
+        cta: 'Start Pro Plan',
+        href: 'login.html?plan=pro',
+        popular: true
+      },
+      {
+        key: 'elite',
+        name: 'Elite',
+        monthly: 150,
+        desc: 'For power creators, brands & agencies',
+        features: [
+          '10 connected Instagram accounts',
+          'Unlimited active automations',
+          '50,000 successful DMs / month',
+          '5 GB customer file storage',
+          'Priority queue processing',
+          'Advanced analytics & CSV export',
+          'Priority support & early access',
+          'No Comment2DM branding & No ads'
+        ],
+        cta: 'Go Elite Plan',
+        href: 'login.html?plan=elite'
+      }
     ];
-
-    let isAnnual = false;
 
     function renderPlans() {
       const grid = document.getElementById('plansGrid');
       if (!grid) return;
       grid.innerHTML = PLANS.map(p => {
-        const price = isAnnual ? p.annual : p.monthly;
-        const orig = isAnnual && p.monthly > 0 ? `₹${(p.monthly * 12).toLocaleString('en-IN')} /yr` : '';
+        const price = p.monthly;
         return `<div class="plan-card-pub ${p.popular ? 'popular' : ''}">
           ${p.popular ? '<div class="popular-tag">⭐ Most Popular</div>' : ''}
           <div class="plan-name-pub">${p.name}</div>
           <div class="price-pub">
             <span class="amount">${price === 0 ? '₹0' : '₹' + price.toLocaleString('en-IN')}</span>
-            <span class="period">${price === 0 ? ' forever' : isAnnual ? ' / year' : ' / month'}</span>
-            ${orig ? `<span class="orig">${orig}</span>` : '<span style="height:18px;display:block;"></span>'}
+            <span class="period">${price === 0 ? ' forever' : ' / month'}</span>
+            <span style="height:18px;display:block;"></span>
           </div>
           <div class="plan-desc-pub">${p.desc}</div>
           <ul class="features-pub">${p.features.map(f => `<li><span class="tick">✓</span>${f}</li>`).join('')}</ul>
@@ -228,15 +269,6 @@
         </div>`;
       }).join('');
     }
-
-    document.getElementById('billingToggle').addEventListener('change', (e) => {
-      isAnnual = e.target.checked;
-      const ml = document.getElementById('monthlyLabel');
-      const al = document.getElementById('annualLabel');
-      if (ml) ml.classList.toggle('active', !isAnnual);
-      if (al) al.classList.toggle('active', isAnnual);
-      renderPlans();
-    });
 
     renderPlans();
 

@@ -37,7 +37,8 @@ function collections() {
     aiCreditUsage: database.collection('ai_credit_usage'),
     webhookJobs: database.collection('webhook_jobs'),
     accountRateLimits: database.collection('account_rate_limits'),
-    openingDmClaims: database.collection('opening_dm_claims')
+    openingDmClaims: database.collection('opening_dm_claims'),
+    storageResources: database.collection('storage_resources')
   };
 }
 
@@ -198,7 +199,11 @@ async function initialize() {
         collections().openingDmClaims.createIndex({ instagram_account_id: 1, created_at: -1 }, { name: 'opening_dm_claims_account_created' }),
         // Safe TTL retention: Only confirmed successfully sent claims carrying completed_at are purged after 30 days.
         // Unknown, processing, pending, and retryable claims never carry completed_at and are permanently preserved.
-        collections().openingDmClaims.createIndex({ completed_at: 1 }, { expireAfterSeconds: 30 * 86400, sparse: true, name: 'opening_dm_claims_completed_ttl' })
+        collections().openingDmClaims.createIndex({ completed_at: 1 }, { expireAfterSeconds: 30 * 86400, sparse: true, name: 'opening_dm_claims_completed_ttl' }),
+        // Customer Cloudflare R2 Storage Resources:
+        collections().storageResources.createIndex({ owner_user_id: 1, status: 1 }, { name: 'storage_resources_owner_status' }),
+        collections().storageResources.createIndex({ id: 1 }, { unique: true, name: 'storage_resources_id_unique' }),
+        collections().storageResources.createIndex({ r2_object_key: 1 }, { unique: true, sparse: true, name: 'storage_resources_key_unique' })
       ]);
 
       await migrateJsonData().catch((err) => console.warn('JSON migration notice:', err.message));
@@ -279,10 +284,12 @@ async function run(sql, params = []) {
 
   // Instagram Accounts
   if (normalized.startsWith('insert into instagram_accounts')) {
-    const [ownerUserId, instagramUserId, username, ciphertext, iv, tag, expiresAt, connectedAt] = params;
+    const [ownerUserId, instagramUserId, username, ciphertext, iv, tag, expiresAt, connectedAt, profilePictureUrl] = params;
+    const updateDoc = { owner_user_id: ownerUserId, instagram_user_id: instagramUserId, username, ciphertext, iv, tag, expires_at: expiresAt, connected_at: connectedAt };
+    if (profilePictureUrl !== undefined) updateDoc.profile_picture_url = profilePictureUrl;
     const result = await instagramAccounts.updateOne(
       { owner_user_id: ownerUserId, instagram_user_id: instagramUserId },
-      { $set: { owner_user_id: ownerUserId, instagram_user_id: instagramUserId, username, ciphertext, iv, tag, expires_at: expiresAt, connected_at: connectedAt } },
+      { $set: updateDoc },
       { upsert: true }
     );
     return { lastID: result.upsertedId ? result.upsertedId.toString() : null, changes: result.upsertedCount || result.modifiedCount };

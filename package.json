@@ -10,13 +10,15 @@
     "test": "node test_auth_suite.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1169.0",
+    "@aws-sdk/s3-request-presigner": "^3.1169.0",
     "bcrypt": "^6.0.0",
     "cookie-parser": "^1.4.6",
     "dotenv": "^16.4.5",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.2",
-    "qs": "^6.16.0",
     "mongodb": "^6.20.0",
+    "qs": "^6.16.0",
     "razorpay": "^2.9.6"
   }
 }
