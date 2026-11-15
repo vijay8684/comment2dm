@@ -11,6 +11,15 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
+
+  <!-- Instant Theme Sync (Default: Light Mode, Zero Flash) -->
+  <script>
+    (function () {
+      const saved = localStorage.getItem('comment2dm_theme');
+      const theme = saved === 'dark' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+  </script>
 </head>
 <body class="app-body" data-page="activity">
   <div class="app-shell">
@@ -57,7 +66,7 @@
 
         <a href="automations.html" data-nav="automations" title="Automations">
           <span class="nav-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect><path d="M6.5 10v7a2 2 0 0 0 2 2h5.5"></path></svg>
           </span>
           <span>Automations</span>
         </a>
@@ -109,11 +118,71 @@
           <h2 style="margin-top:2px;">Activity & Analytics</h2>
         </div>
 
-        <div class="app-header-right">
-          <button class="icon-btn" id="themeToggleBtn" title="Toggle Theme">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+        <div class="header-user-menu">
+          <!-- Shared Theme Toggle Button -->
+          <button class="theme-toggle-btn" id="themeToggleBtn" type="button" aria-label="Toggle theme" title="Toggle theme">
+            <svg class="moon-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+            <svg class="sun-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="5"></circle>
+              <line x1="12" y1="1" x2="12" y2="3"></line>
+              <line x1="12" y1="21" x2="12" y2="23"></line>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+              <line x1="1" y1="12" x2="3" y2="12"></line>
+              <line x1="21" y1="12" x2="23" y2="12"></line>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+            </svg>
           </button>
-          <div class="user-avatar" id="headerUserAvatar" title="Your Profile">U</div>
+
+          <!-- Feedback Button -->
+          <button type="button" class="btn btn-ghost btn-sm" id="openFeedbackBtn" title="Share feedback or report an issue" style="font-size:0.82rem; gap:6px; display:inline-flex; align-items:center; padding:6px 12px; border:1px solid var(--glass-border); border-radius:var(--radius-pill);">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+            <span>Feedback</span>
+          </button>
+
+          <a href="help.html" class="notification-bell" title="Support & Help Desk">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          </a>
+
+          <div style="position:relative;">
+            <button class="user-profile-trigger" id="userProfileBtn" aria-label="User profile menu">
+              <div class="user-avatar-circle" id="userAvatarInitial">U</div>
+              <div style="text-align:left; display:flex; flex-direction:column;">
+                <span style="font-size:0.86rem; font-weight:600; color:var(--ink);" id="topbarUserName">Loading...</span>
+                <span class="plan-badge" id="topbarPlanBadge">Free</span>
+              </div>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </button>
+
+            <!-- Dropdown Menu -->
+            <div class="user-dropdown-menu" id="userDropdownMenu">
+              <div style="padding:10px 14px;">
+                <strong style="display:block; font-size:0.88rem; color:var(--ink);" id="dropdownName">User</strong>
+                <small style="color:var(--ink-muted);" id="dropdownEmail">user@domain.com</small>
+              </div>
+              <div class="dropdown-divider"></div>
+              <a href="settings.html" class="user-dropdown-item">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                <span>Account Settings</span>
+              </a>
+              <a href="billing.html" class="user-dropdown-item">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+                <span>Billing & Plans</span>
+              </a>
+              <a href="help.html" class="user-dropdown-item">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                <span>Support Desk</span>
+              </a>
+              <div class="dropdown-divider"></div>
+              <button type="button" class="user-dropdown-item" id="logoutBtn" style="color:var(--rose); width:100%; text-align:left; border:none; background:none; cursor:pointer;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+                <span>Sign out</span>
+              </button>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -146,7 +215,15 @@
           <!-- Card 1: Total DMs Sent -->
           <div class="activity-kpi-card">
             <div class="activity-kpi-header">
-              <span class="activity-kpi-label">Total DMs Sent</span>
+              <span class="activity-kpi-label">
+                Total DMs Sent
+                <span class="info-tooltip-wrap">
+                  <button class="info-tooltip-btn" type="button" aria-label="More information about Total DMs Sent">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                  </button>
+                  <span class="info-tooltip-box" role="tooltip">Total direct messages initiated by Comment2DM automations.</span>
+                </span>
+              </span>
               <div class="activity-kpi-icon" style="background:var(--accent-tint); color:var(--accent-light);">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4Z"></path><path d="M22 2 11 13"></path></svg>
               </div>
@@ -160,7 +237,15 @@
           <!-- Card 2: Successful Deliveries -->
           <div class="activity-kpi-card">
             <div class="activity-kpi-header">
-              <span class="activity-kpi-label">Successful Deliveries</span>
+              <span class="activity-kpi-label">
+                Successful Deliveries
+                <span class="info-tooltip-wrap">
+                  <button class="info-tooltip-btn" type="button" aria-label="More information about Successful Deliveries">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                  </button>
+                  <span class="info-tooltip-box" role="tooltip">Messages confirmed as accepted and delivered by the Meta Instagram Graph API.</span>
+                </span>
+              </span>
               <div class="activity-kpi-icon" style="background:var(--emerald-tint); color:var(--emerald);">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
               </div>
@@ -174,7 +259,15 @@
           <!-- Card 3: Failed Deliveries -->
           <div class="activity-kpi-card">
             <div class="activity-kpi-header">
-              <span class="activity-kpi-label">Failed Deliveries</span>
+              <span class="activity-kpi-label">
+                Failed Deliveries
+                <span class="info-tooltip-wrap">
+                  <button class="info-tooltip-btn" type="button" aria-label="More information about Failed Deliveries">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                  </button>
+                  <span class="info-tooltip-box" role="tooltip">Messages that Meta rejected due to messaging window closure, user privacy settings, or API limits.</span>
+                </span>
+              </span>
               <div class="activity-kpi-icon" style="background:var(--rose-tint); color:var(--rose);">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
               </div>
@@ -188,7 +281,15 @@
           <!-- Card 4: Active Automations -->
           <div class="activity-kpi-card">
             <div class="activity-kpi-header">
-              <span class="activity-kpi-label">Active Automations</span>
+              <span class="activity-kpi-label">
+                Active Automations
+                <span class="info-tooltip-wrap">
+                  <button class="info-tooltip-btn" type="button" aria-label="More information about Active Automations">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                  </button>
+                  <span class="info-tooltip-box" role="tooltip">Number of active comment-to-DM automation rules currently listening for triggers.</span>
+                </span>
+              </span>
               <div class="activity-kpi-icon" style="background:rgba(245,158,11,0.12); color:#f59e0b;">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
               </div>
@@ -232,7 +333,15 @@
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path></svg>
                   </div>
                   <div>
-                    <div class="activity-funnel-title">Comments Processed</div>
+                    <div class="activity-funnel-title">
+                      Comments Processed
+                      <span class="info-tooltip-wrap">
+                        <button class="info-tooltip-btn" type="button" aria-label="More information about Comments Processed">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                        </button>
+                        <span class="info-tooltip-box" role="tooltip">Total comments received and analyzed across your connected posts and reels.</span>
+                      </span>
+                    </div>
                     <div class="activity-funnel-sub">Official Meta Webhook</div>
                   </div>
                 </div>
@@ -249,7 +358,15 @@
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
                   </div>
                   <div>
-                    <div class="activity-funnel-title">DMs Triggered</div>
+                    <div class="activity-funnel-title">
+                      DMs Triggered
+                      <span class="info-tooltip-wrap">
+                        <button class="info-tooltip-btn" type="button" aria-label="More information about DMs Triggered">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                        </button>
+                        <span class="info-tooltip-box" role="tooltip">Comments that matched automation keywords and rule conditions to initiate DM workflows.</span>
+                      </span>
+                    </div>
                     <div class="activity-funnel-sub">Keyword & Rule Matches</div>
                   </div>
                 </div>
@@ -266,7 +383,15 @@
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4Z"></path></svg>
                   </div>
                   <div>
-                    <div class="activity-funnel-title">Delivered to Inbox</div>
+                    <div class="activity-funnel-title">
+                      Delivered to Inbox
+                      <span class="info-tooltip-wrap">
+                        <button class="info-tooltip-btn" type="button" aria-label="More information about Delivered to Inbox">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                        </button>
+                        <span class="info-tooltip-box" role="tooltip">Confirmed outbound messages successfully received in commenter direct message inboxes.</span>
+                      </span>
+                    </div>
                     <div class="activity-funnel-sub">Private Reply Confirmed</div>
                   </div>
                 </div>

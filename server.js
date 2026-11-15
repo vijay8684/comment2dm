@@ -1952,6 +1952,25 @@ async function deliverFinalResource({
           }
         );
       }
+      if (db.collections && db.collections().automationEvents) {
+        try {
+          await db.collections().automationEvents.insertOne({
+            event_id: crypto.randomUUID(),
+            owner_user_id: automation.owner_user_id,
+            instagram_user_id: recipientIgUserId,
+            automation_id: automation.id,
+            from_id: senderIgsid,
+            event_type: 'resource_delivered',
+            delivery_channel: 'private_dm',
+            message_text: typeof deliveryText !== 'undefined' ? deliveryText : 'Resource Delivery',
+            resource_url: resourceUrl || null,
+            status: 'unknown',
+            error_message: 'Meta response missing message_id confirmation',
+            created_at: new Date().toISOString(),
+            created_at_date: new Date()
+          });
+        } catch (_) {}
+      }
       return;
     }
 
@@ -1998,12 +2017,49 @@ async function deliverFinalResource({
         automation_id: automation.id,
         from_id: senderIgsid,
         event_type: 'resource_delivered',
+        delivery_channel: 'private_dm',
         message_text: deliveryText,
         resource_url: resourceUrl || null,
         status: 'success',
-        created_at: new Date().toISOString()
+        meta_message_id: metaMsgId,
+        created_at: new Date().toISOString(),
+        created_at_date: new Date()
       });
+    } else if (db.run) {
+      try {
+        await db.run(
+          'INSERT INTO automation_events (owner_user_id, instagram_user_id, automation_id, from_id, event_type, message_text, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [automation.owner_user_id, recipientIgUserId, automation.id, senderIgsid, 'resource_delivered', deliveryText, 'success', new Date().toISOString()]
+        );
+      } catch (_) {}
     }
+  } catch (deliveryErr) {
+    const isUnknownOutcome = deliveryErr?.uncertainDelivery === true ||
+      deliveryErr?.requestDispatched === true ||
+      deliveryErr?.category === 'UNKNOWN_OUTCOME' ||
+      /timeout|socket hang up|econnreset|esockettimedout|network timeout|fetch failed|aborted/i.test(deliveryErr?.message || '');
+    const cleanErrMsg = String(deliveryErr?.message || 'Outbound delivery failed').replace(/EA[A-Za-z0-9_-]{20,}/g, '[REDACTED_TOKEN]');
+
+    if (db.collections && db.collections().automationEvents) {
+      try {
+        await db.collections().automationEvents.insertOne({
+          event_id: crypto.randomUUID(),
+          owner_user_id: automation.owner_user_id,
+          instagram_user_id: recipientIgUserId,
+          automation_id: automation.id,
+          from_id: senderIgsid,
+          event_type: 'resource_delivered',
+          delivery_channel: 'private_dm',
+          message_text: typeof deliveryText !== 'undefined' ? deliveryText : (automation.dm_message || 'Resource Delivery'),
+          resource_url: typeof resourceUrl !== 'undefined' ? resourceUrl : null,
+          status: isUnknownOutcome ? 'unknown' : 'failed',
+          error_message: cleanErrMsg,
+          created_at: new Date().toISOString(),
+          created_at_date: new Date()
+        });
+      } catch (_) {}
+    }
+    throw deliveryErr;
   } finally {
     stopDeliveryHeartbeat();
     const cleanupTimer = setTimeout(() => {
@@ -2471,6 +2527,7 @@ async function executeCommentJob(job) {
         from_id: fromId,
         comment_text: commentText,
         event_type: 'private_reply',
+        delivery_channel: 'private_dm',
         keyword: selectedAuto.keyword,
         message_text: messageToSend,
         button_text: openingBtnTitle,
@@ -2508,6 +2565,7 @@ async function executeCommentJob(job) {
               from_id: fromId,
               comment_text: commentText,
               event_type: 'public_reply',
+              delivery_channel: 'public_comment',
               message_text: selectedAuto.reply_template,
               status: 'success',
               meta_comment_id: publicReplyResult?.id || null,
@@ -2538,9 +2596,10 @@ async function executeCommentJob(job) {
             from_id: fromId,
             comment_text: commentText,
             event_type: 'public_reply',
+            delivery_channel: 'public_comment',
             message_text: selectedAuto.reply_template,
             status: 'failed',
-            error: publicErr.message,
+            error: String(publicErr.message).replace(/EA[A-Za-z0-9_-]{20,}/g, '[REDACTED_TOKEN]'),
             created_at: new Date().toISOString(),
             created_at_date: new Date()
           });
@@ -2615,6 +2674,12 @@ async function executeCommentJob(job) {
       }
     }
 
+    const isUnknownOutcome = targetClaimStatus === 'unknown' ||
+      classification.category === 'UNKNOWN_OUTCOME' ||
+      apiErr?.category === 'UNKNOWN_OUTCOME';
+    const finalEventStatus = isUnknownOutcome ? 'unknown' : 'failed';
+    const sanitizedError = String(apiErr.message || 'Dispatch failed').replace(/EA[A-Za-z0-9_-]{20,}/g, '[REDACTED_TOKEN]');
+
     if (db.collections && db.collections().automationEvents) {
       await db.collections().automationEvents.insertOne({
         event_id: crypto.randomUUID(),
@@ -2626,10 +2691,11 @@ async function executeCommentJob(job) {
         from_id: fromId,
         comment_text: commentText,
         event_type: 'private_reply',
+        delivery_channel: 'private_dm',
         keyword: selectedAuto.keyword,
         message_text: selectedAuto.dm_message,
-        status: 'failed',
-        error_message: apiErr.message,
+        status: finalEventStatus,
+        error_message: sanitizedError,
         created_at: new Date().toISOString(),
         created_at_date: new Date()
       });
@@ -2919,19 +2985,45 @@ async function executeMessagingJob(job) {
         );
       }
 
+      let retryMetaResult = null;
+      let retryError = null;
       await safeDispatchOutbound(recipientIgUserId, job?.worker_id, async (dispatchLease) => {
         try {
-          await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, retryPayload, tokenData.accessToken);
-        } catch (_) {
+          retryMetaResult = await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, retryPayload, tokenData.accessToken);
+        } catch (dmErr) {
           if (dispatchLease && typeof dispatchLease.assertValid === 'function') {
             await dispatchLease.assertValid();
           }
-          await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, {
-            text: `${retryNotice}\n\n👉 Profile: ${profileUrl}`,
-            quick_replies: [{ content_type: 'text', title: 'Retry Check 🔄'.slice(0, 20), payload: `CHECK_FOLLOW:${targetAutomation.id}:${resolvedCommentId || ''}` }]
-          }, tokenData.accessToken);
+          try {
+            retryMetaResult = await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, {
+              text: `${retryNotice}\n\n👉 Profile: ${profileUrl}`,
+              quick_replies: [{ content_type: 'text', title: 'Retry Check 🔄'.slice(0, 20), payload: `CHECK_FOLLOW:${targetAutomation.id}:${resolvedCommentId || ''}` }]
+            }, tokenData.accessToken);
+          } catch (fbErr) {
+            retryError = fbErr;
+            throw fbErr;
+          }
         }
       });
+
+      if (db.collections && db.collections().automationEvents) {
+        const rMsgId = retryMetaResult?.message_id || retryMetaResult?.id || null;
+        await db.collections().automationEvents.insertOne({
+          event_id: crypto.randomUUID(),
+          owner_user_id: targetAutomation.owner_user_id,
+          instagram_user_id: recipientIgUserId,
+          automation_id: targetAutomation.id,
+          from_id: senderIgsid,
+          event_type: 'verification_retry',
+          delivery_channel: 'private_dm',
+          message_text: retryNotice,
+          status: rMsgId ? 'success' : (retryError ? 'failed' : 'unknown'),
+          meta_message_id: rMsgId,
+          error_message: retryError ? String(retryError.message).replace(/EA[A-Za-z0-9_-]{20,}/g, '[REDACTED_TOKEN]') : null,
+          created_at: new Date().toISOString(),
+          created_at_date: new Date()
+        });
+      }
       return { success: true, delivered: false, follow_prompt_sent: true, retry: true };
     } else {
       console.log(`[MESSAGING] PATH B: Follow not yet detected for sender_ref=${automationTimeline.hashCorrelationId(senderIgsid)}. Sending two-button follow prompt.`);
@@ -2970,24 +3062,50 @@ async function executeMessagingJob(job) {
         );
       }
 
+      let fpMetaResult = null;
+      let fpError = null;
       await safeDispatchOutbound(recipientIgUserId, job?.worker_id, async (dispatchLease) => {
         try {
-          await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, followPromptPayload, tokenData.accessToken);
+          fpMetaResult = await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, followPromptPayload, tokenData.accessToken);
         } catch (dmErr) {
           if (dispatchLease && typeof dispatchLease.assertValid === 'function') {
             await dispatchLease.assertValid();
           }
-          await instagramService.sendDirectMessage(
-            recipientIgUserId,
-            senderIgsid,
-            {
-              text: `${followPrompt}\n\n👉 ${profileBtn}: ${profileUrl}`,
-              quick_replies: [{ content_type: 'text', title: confirmBtn, payload: `CHECK_FOLLOW:${targetAutomation.id}:${resolvedCommentId || ''}` }]
-            },
-            tokenData.accessToken
-          );
+          try {
+            fpMetaResult = await instagramService.sendDirectMessage(
+              recipientIgUserId,
+              senderIgsid,
+              {
+                text: `${followPrompt}\n\n👉 ${profileBtn}: ${profileUrl}`,
+                quick_replies: [{ content_type: 'text', title: confirmBtn, payload: `CHECK_FOLLOW:${targetAutomation.id}:${resolvedCommentId || ''}` }]
+              },
+              tokenData.accessToken
+            );
+          } catch (fbErr) {
+            fpError = fbErr;
+            throw fbErr;
+          }
         }
       });
+
+      if (db.collections && db.collections().automationEvents) {
+        const fpMsgId = fpMetaResult?.message_id || fpMetaResult?.id || null;
+        await db.collections().automationEvents.insertOne({
+          event_id: crypto.randomUUID(),
+          owner_user_id: targetAutomation.owner_user_id,
+          instagram_user_id: recipientIgUserId,
+          automation_id: targetAutomation.id,
+          from_id: senderIgsid,
+          event_type: 'follow_prompt',
+          delivery_channel: 'private_dm',
+          message_text: followPrompt,
+          status: fpMsgId ? 'success' : (fpError ? 'failed' : 'unknown'),
+          meta_message_id: fpMsgId,
+          error_message: fpError ? String(fpError.message).replace(/EA[A-Za-z0-9_-]{20,}/g, '[REDACTED_TOKEN]') : null,
+          created_at: new Date().toISOString(),
+          created_at_date: new Date()
+        });
+      }
       return { success: true, delivered: false, follow_prompt_sent: true };
     }
   } else if (effectiveAction === 'CHECK_FOLLOW') {
@@ -3060,19 +3178,45 @@ async function executeMessagingJob(job) {
         );
       }
 
+      let checkRetryResult = null;
+      let checkRetryErr = null;
       await safeDispatchOutbound(recipientIgUserId, job?.worker_id, async (dispatchLease) => {
         try {
-          await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, retryPayload, tokenData.accessToken);
+          checkRetryResult = await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, retryPayload, tokenData.accessToken);
         } catch (_) {
           if (dispatchLease && typeof dispatchLease.assertValid === 'function') {
             await dispatchLease.assertValid();
           }
-          await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, {
-            text: `${retryNotice}\n\n👉 Profile: ${profileUrl}`,
-            quick_replies: [{ content_type: 'text', title: 'Retry Check 🔄'.slice(0, 20), payload: `CHECK_FOLLOW:${targetAutomation.id}:${resolvedCommentId || ''}` }]
-          }, tokenData.accessToken);
+          try {
+            checkRetryResult = await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, {
+              text: `${retryNotice}\n\n👉 Profile: ${profileUrl}`,
+              quick_replies: [{ content_type: 'text', title: 'Retry Check 🔄'.slice(0, 20), payload: `CHECK_FOLLOW:${targetAutomation.id}:${resolvedCommentId || ''}` }]
+            }, tokenData.accessToken);
+          } catch (fbErr) {
+            checkRetryErr = fbErr;
+            throw fbErr;
+          }
         }
       });
+
+      if (db.collections && db.collections().automationEvents) {
+        const crMsgId = checkRetryResult?.message_id || checkRetryResult?.id || null;
+        await db.collections().automationEvents.insertOne({
+          event_id: crypto.randomUUID(),
+          owner_user_id: targetAutomation.owner_user_id,
+          instagram_user_id: recipientIgUserId,
+          automation_id: targetAutomation.id,
+          from_id: senderIgsid,
+          event_type: 'verification_retry',
+          delivery_channel: 'private_dm',
+          message_text: retryNotice,
+          status: crMsgId ? 'success' : (checkRetryErr ? 'failed' : 'unknown'),
+          meta_message_id: crMsgId,
+          error_message: checkRetryErr ? String(checkRetryErr.message).replace(/EA[A-Za-z0-9_-]{20,}/g, '[REDACTED_TOKEN]') : null,
+          created_at: new Date().toISOString(),
+          created_at_date: new Date()
+        });
+      }
       return { success: true, delivered: false, retry: true };
     } else {
       console.log(`[MESSAGING] Follow still not detected for sender_ref=${automationTimeline.hashCorrelationId(senderIgsid)}. Sending polite retry prompt.`);
@@ -3099,19 +3243,45 @@ async function executeMessagingJob(job) {
         );
       }
 
+      let followRetryResult = null;
+      let followRetryErr = null;
       await safeDispatchOutbound(recipientIgUserId, job?.worker_id, async (dispatchLease) => {
         try {
-          await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, retryPromptPayload, tokenData.accessToken);
+          followRetryResult = await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, retryPromptPayload, tokenData.accessToken);
         } catch (_) {
           if (dispatchLease && typeof dispatchLease.assertValid === 'function') {
             await dispatchLease.assertValid();
           }
-          await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, {
-            text: `${retryMsg}\n\n👉 Visit Profile: ${profileUrl}`,
-            quick_replies: [{ content_type: 'text', title: confirmBtn, payload: `CHECK_FOLLOW:${targetAutomation.id}:${resolvedCommentId || ''}` }]
-          }, tokenData.accessToken);
+          try {
+            followRetryResult = await instagramService.sendDirectMessage(recipientIgUserId, senderIgsid, {
+              text: `${retryMsg}\n\n👉 Visit Profile: ${profileUrl}`,
+              quick_replies: [{ content_type: 'text', title: confirmBtn, payload: `CHECK_FOLLOW:${targetAutomation.id}:${resolvedCommentId || ''}` }]
+            }, tokenData.accessToken);
+          } catch (fbErr) {
+            followRetryErr = fbErr;
+            throw fbErr;
+          }
         }
       });
+
+      if (db.collections && db.collections().automationEvents) {
+        const frMsgId = followRetryResult?.message_id || followRetryResult?.id || null;
+        await db.collections().automationEvents.insertOne({
+          event_id: crypto.randomUUID(),
+          owner_user_id: targetAutomation.owner_user_id,
+          instagram_user_id: recipientIgUserId,
+          automation_id: targetAutomation.id,
+          from_id: senderIgsid,
+          event_type: 'follow_retry_prompt',
+          delivery_channel: 'private_dm',
+          message_text: retryMsg,
+          status: frMsgId ? 'success' : (followRetryErr ? 'failed' : 'unknown'),
+          meta_message_id: frMsgId,
+          error_message: followRetryErr ? String(followRetryErr.message).replace(/EA[A-Za-z0-9_-]{20,}/g, '[REDACTED_TOKEN]') : null,
+          created_at: new Date().toISOString(),
+          created_at_date: new Date()
+        });
+      }
       return { success: true, delivered: false, follow_retry_sent: true };
     }
   }
@@ -3284,10 +3454,23 @@ app.get('/api/analytics/overview', requireAuth, async (request, response, next) 
       }
       const baseEventFilter = { $and: eventAndClauses };
 
-      // 4. Counts
-      const [countSent, countFailed, countCommentsRaw] = await Promise.all([
-        colEvents.countDocuments({ ...baseEventFilter, event_type: 'private_reply', status: 'success' }),
-        colEvents.countDocuments({ ...baseEventFilter, event_type: 'private_reply', status: 'failed' }),
+      // 4. Direct Message filter: include all private DM types, strictly excluding public replies and webhooks
+      const privateDmCriteria = {
+        ...baseEventFilter,
+        $or: [
+          { delivery_channel: 'private_dm' },
+          { event_type: { $in: ['private_reply', 'resource_delivered', 'follow_prompt', 'follow_retry_prompt', 'verification_retry'] } },
+          { event_type: { $exists: false } },
+          { event_type: null }
+        ],
+        event_type: { $ne: 'public_reply' },
+        delivery_channel: { $ne: 'public_comment' }
+      };
+
+      const [countSent, countFailed, countUnknown, countCommentsRaw] = await Promise.all([
+        colEvents.countDocuments({ ...privateDmCriteria, status: 'success' }),
+        colEvents.countDocuments({ ...privateDmCriteria, status: 'failed' }),
+        colEvents.countDocuments({ ...privateDmCriteria, status: 'unknown' }),
         colEvents.countDocuments({
           ...baseEventFilter,
           $or: [
@@ -3308,8 +3491,8 @@ app.get('/api/analytics/overview', requireAuth, async (request, response, next) 
         if (requestedIgUserId) autoListFilter.$and.push({ $or: igClauses });
         const userAutos = await colAutos.find(autoListFilter).toArray();
         for (const auto of userAutos) {
-          const autoSent = await colEvents.countDocuments({ automation_id: auto.id, status: 'success' });
-          const autoFailed = await colEvents.countDocuments({ automation_id: auto.id, status: 'failed' });
+          const autoSent = await colEvents.countDocuments({ automation_id: auto.id, ...privateDmCriteria, status: 'success' });
+          const autoFailed = await colEvents.countDocuments({ automation_id: auto.id, ...privateDmCriteria, status: 'failed' });
           leaderboard.push({
             id: auto.id,
             name: auto.keyword ? `Keyword: ${auto.keyword}` : 'All Comments',
@@ -3324,7 +3507,7 @@ app.get('/api/analytics/overview', requireAuth, async (request, response, next) 
       // 6. Recent feed
       const recentEvents = await colEvents.find(baseEventFilter).sort({ created_at: -1 }).limit(20).toArray();
       recent = recentEvents.map(e => ({
-        eventType: e.event_type || 'private_reply',
+        eventType: e.event_type || (e.delivery_channel === 'public_comment' ? 'public_reply' : 'private_reply'),
         status: e.status,
         keyword: e.keyword,
         messageText: e.message_text,
@@ -3334,16 +3517,16 @@ app.get('/api/analytics/overview', requireAuth, async (request, response, next) 
       }));
 
       // 7. Daily breakdown
-      const allEventsForDaily = await colEvents.find(baseEventFilter).toArray();
+      const allEventsForDaily = await colEvents.find(privateDmCriteria).toArray();
       const dateMap = {};
       for (const e of allEventsForDaily) {
         const d = String(e.created_at || '').slice(0, 10);
         if (!d) continue;
         if (!dateMap[d]) dateMap[d] = { date: d, count: 0, messagesSent: 0, messagesFailed: 0 };
-        if (e.event_type === 'private_reply' && e.status === 'success') {
+        if (e.status === 'success') {
           dateMap[d].count += 1;
           dateMap[d].messagesSent += 1;
-        } else if (e.event_type === 'private_reply' && e.status === 'failed') {
+        } else if (e.status === 'failed') {
           dateMap[d].messagesFailed += 1;
         }
       }
@@ -3359,14 +3542,14 @@ app.get('/api/analytics/overview', requireAuth, async (request, response, next) 
         requestedIgUserId
           ? db.get(`SELECT
               SUM(CASE WHEN event_type = 'comment_received' THEN 1 ELSE 0 END) AS comments,
-              SUM(CASE WHEN event_type = 'private_reply' AND status = 'success' THEN 1 ELSE 0 END) AS messagesSent,
-              SUM(CASE WHEN event_type = 'private_reply' AND status = 'failed' THEN 1 ELSE 0 END) AS messagesFailed,
+              SUM(CASE WHEN (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received')) AND status = 'success' THEN 1 ELSE 0 END) AS messagesSent,
+              SUM(CASE WHEN (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received')) AND status = 'failed' THEN 1 ELSE 0 END) AS messagesFailed,
               SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS successfulEvents
               FROM automation_events WHERE owner_user_id = ? AND instagram_user_id = ?`, [ownerId, requestedIgUserId])
           : db.get(`SELECT
               SUM(CASE WHEN event_type = 'comment_received' THEN 1 ELSE 0 END) AS comments,
-              SUM(CASE WHEN event_type = 'private_reply' AND status = 'success' THEN 1 ELSE 0 END) AS messagesSent,
-              SUM(CASE WHEN event_type = 'private_reply' AND status = 'failed' THEN 1 ELSE 0 END) AS messagesFailed,
+              SUM(CASE WHEN (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received')) AND status = 'success' THEN 1 ELSE 0 END) AS messagesSent,
+              SUM(CASE WHEN (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received')) AND status = 'failed' THEN 1 ELSE 0 END) AS messagesFailed,
               SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS successfulEvents
               FROM automation_events WHERE owner_user_id = ?`, [ownerId]),
         requestedIgUserId
@@ -3377,14 +3560,14 @@ app.get('/api/analytics/overview', requireAuth, async (request, response, next) 
         requestedIgUserId
           ? db.all(`SELECT substr(created_at,1,10) AS date,
               SUM(CASE WHEN event_type = 'comment_received' THEN 1 ELSE 0 END) AS comments,
-              SUM(CASE WHEN event_type = 'private_reply' AND status = 'success' THEN 1 ELSE 0 END) AS messagesSent,
-              SUM(CASE WHEN event_type = 'private_reply' AND status = 'failed' THEN 1 ELSE 0 END) AS messagesFailed
+              SUM(CASE WHEN (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received')) AND status = 'success' THEN 1 ELSE 0 END) AS messagesSent,
+              SUM(CASE WHEN (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received')) AND status = 'failed' THEN 1 ELSE 0 END) AS messagesFailed
               FROM automation_events WHERE owner_user_id = ? AND instagram_user_id = ? AND created_at >= datetime('now','-29 days')
               GROUP BY substr(created_at,1,10) ORDER BY date ASC`, [ownerId, requestedIgUserId])
           : db.all(`SELECT substr(created_at,1,10) AS date,
               SUM(CASE WHEN event_type = 'comment_received' THEN 1 ELSE 0 END) AS comments,
-              SUM(CASE WHEN event_type = 'private_reply' AND status = 'success' THEN 1 ELSE 0 END) AS messagesSent,
-              SUM(CASE WHEN event_type = 'private_reply' AND status = 'failed' THEN 1 ELSE 0 END) AS messagesFailed
+              SUM(CASE WHEN (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received')) AND status = 'success' THEN 1 ELSE 0 END) AS messagesSent,
+              SUM(CASE WHEN (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received')) AND status = 'failed' THEN 1 ELSE 0 END) AS messagesFailed
               FROM automation_events WHERE owner_user_id = ? AND created_at >= datetime('now','-29 days')
               GROUP BY substr(created_at,1,10) ORDER BY date ASC`, [ownerId])
       ]);
@@ -3401,7 +3584,7 @@ app.get('/api/analytics/overview', requireAuth, async (request, response, next) 
     }
 
     const totalDMs = sent + failed;
-    const deliveryRate = totalDMs > 0 ? Math.round((sent / totalDMs) * 100) : 0;
+    const deliveryRate = totalDMs > 0 ? Math.round((sent / totalDMs) * 100) : null;
 
     return response.json({
       dmsSent: sent,
@@ -3710,22 +3893,31 @@ app.get('/api/analytics/events', requireAuth, async (request, response) => {
         baseAndClauses.push({ created_at: { $gte: since } });
       }
 
-      // Base filter for counting sent, failed, and pending (excluding raw non-DM triggers)
+      // Direct Message filter: include all private DM event types, strictly excluding public replies and webhooks
+      const privateDmCriteria = {
+        $or: [
+          { delivery_channel: 'private_dm' },
+          { event_type: { $in: ['private_reply', 'resource_delivered', 'follow_prompt', 'follow_retry_prompt', 'verification_retry'] } },
+          { event_type: { $exists: false } },
+          { event_type: null }
+        ],
+        event_type: { $ne: 'public_reply' },
+        delivery_channel: { $ne: 'public_comment' }
+      };
+
+      // Base filter for counting sent, failed, pending, unknown private DMs
       const baseFilter = {
         $and: [
           ...baseAndClauses,
-          {
-            $or: [
-              { event_type: 'private_reply' },
-              { event_type: { $exists: false } },
-              { event_type: null }
-            ]
-          }
+          privateDmCriteria
         ]
       };
 
-      // Filter for the paginated list (adds status & search)
-      const listAndClauses = [...baseAndClauses];
+      // Filter for the paginated list (adds status & search) strictly for private DMs
+      const listAndClauses = [
+        ...baseAndClauses,
+        privateDmCriteria
+      ];
 
       if (status === 'sent' || status === 'success') {
         listAndClauses.push({ status: 'success' });
@@ -3733,6 +3925,8 @@ app.get('/api/analytics/events', requireAuth, async (request, response) => {
         listAndClauses.push({ status: 'failed' });
       } else if (status === 'pending') {
         listAndClauses.push({ status: { $in: ['pending', 'queued', 'processing'] } });
+      } else if (status === 'unknown') {
+        listAndClauses.push({ status: 'unknown' });
       }
 
       if (search) {
@@ -3749,12 +3943,13 @@ app.get('/api/analytics/events', requireAuth, async (request, response) => {
 
       const listFilter = { $and: listAndClauses };
 
-      const [events, listTotal, sent, failed, pending] = await Promise.all([
+      const [events, listTotal, sent, failed, pending, unknown] = await Promise.all([
         col.find(listFilter).sort({ created_at: -1 }).skip((page - 1) * limit).limit(limit).toArray(),
         col.countDocuments(listFilter),
         col.countDocuments({ ...baseFilter, status: 'success' }),
         col.countDocuments({ ...baseFilter, status: 'failed' }),
-        col.countDocuments({ ...baseFilter, status: { $in: ['pending', 'queued', 'processing'] } })
+        col.countDocuments({ ...baseFilter, status: { $in: ['pending', 'queued', 'processing'] } }),
+        col.countDocuments({ ...baseFilter, status: 'unknown' })
       ]);
 
       const total = sent + failed + pending;
@@ -3762,6 +3957,12 @@ app.get('/api/analytics/events', requireAuth, async (request, response) => {
       const mappedEvents = events.map(e => {
         const rawSender = e.from_username || e.username || e.from_id || e.instagram_user_id || 'Commenter';
         const cleanSender = String(rawSender).replace(/^@+/, '');
+        let autoName = e.keyword ? `Keyword: ${e.keyword}` : 'Comment to DM';
+        if (e.event_type === 'resource_delivered') autoName = 'Resource Delivery';
+        else if (e.event_type === 'follow_prompt') autoName = 'Follow Verification Prompt';
+        else if (e.event_type === 'follow_retry_prompt') autoName = 'Follow Retry Prompt';
+        else if (e.event_type === 'verification_retry') autoName = 'Verification Error Retry';
+
         return {
           id: e.event_id || e._id,
           senderName: cleanSender,
@@ -3770,7 +3971,7 @@ app.get('/api/analytics/events', requireAuth, async (request, response) => {
           dmPreview: e.message_text || '–',
           dmText: e.message_text || '–',
           buttonText: e.button_text || null,
-          automationName: e.keyword ? `Keyword: ${e.keyword}` : 'Comment to DM',
+          automationName: autoName,
           status: e.status === 'success' ? 'sent' : e.status,
           errorMessage: e.error_message || null,
           timestamp: e.created_at,
@@ -3785,6 +3986,7 @@ app.get('/api/analytics/events', requireAuth, async (request, response) => {
         sent,
         failed,
         pending,
+        unknown,
         listTotal,
         pages: Math.max(1, Math.ceil(listTotal / limit)),
         page,
@@ -3794,19 +3996,25 @@ app.get('/api/analytics/events', requireAuth, async (request, response) => {
       // SQLite fallback
       const events = await db.all(
         requestedIgUserId
-          ? 'SELECT event_type AS eventType, status, keyword, message_text AS messageText, error_message AS errorMessage, created_at AS createdAt FROM automation_events WHERE owner_user_id = ? AND instagram_user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?'
-          : 'SELECT event_type AS eventType, status, keyword, message_text AS messageText, error_message AS errorMessage, created_at AS createdAt FROM automation_events WHERE owner_user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+          ? `SELECT event_type AS eventType, status, keyword, message_text AS messageText, error_message AS errorMessage, created_at AS createdAt
+             FROM automation_events
+             WHERE owner_user_id = ? AND instagram_user_id = ? AND (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received'))
+             ORDER BY created_at DESC LIMIT ? OFFSET ?`
+          : `SELECT event_type AS eventType, status, keyword, message_text AS messageText, error_message AS errorMessage, created_at AS createdAt
+             FROM automation_events
+             WHERE owner_user_id = ? AND (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received'))
+             ORDER BY created_at DESC LIMIT ? OFFSET ?`,
         requestedIgUserId ? [request.user.id, requestedIgUserId, limit, (page - 1) * limit] : [request.user.id, limit, (page - 1) * limit]
       );
       const totals = await db.get(
         requestedIgUserId
           ? `SELECT
-              SUM(CASE WHEN event_type = 'private_reply' AND status = 'success' THEN 1 ELSE 0 END) AS sent,
-              SUM(CASE WHEN event_type = 'private_reply' AND status = 'failed' THEN 1 ELSE 0 END) AS failed
+              SUM(CASE WHEN (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received')) AND status = 'success' THEN 1 ELSE 0 END) AS sent,
+              SUM(CASE WHEN (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received')) AND status = 'failed' THEN 1 ELSE 0 END) AS failed
               FROM automation_events WHERE owner_user_id = ? AND instagram_user_id = ?`
           : `SELECT
-              SUM(CASE WHEN event_type = 'private_reply' AND status = 'success' THEN 1 ELSE 0 END) AS sent,
-              SUM(CASE WHEN event_type = 'private_reply' AND status = 'failed' THEN 1 ELSE 0 END) AS failed
+              SUM(CASE WHEN (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received')) AND status = 'success' THEN 1 ELSE 0 END) AS sent,
+              SUM(CASE WHEN (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received')) AND status = 'failed' THEN 1 ELSE 0 END) AS failed
               FROM automation_events WHERE owner_user_id = ?`,
         requestedIgUserId ? [request.user.id, requestedIgUserId] : [request.user.id]
       );
@@ -3834,6 +4042,7 @@ app.get('/api/analytics/events', requireAuth, async (request, response) => {
         sent,
         failed,
         pending: 0,
+        unknown: 0,
         listTotal: total,
         pages: Math.max(1, Math.ceil(total / limit)),
         page,

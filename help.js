@@ -30,7 +30,7 @@
     },
     {
       q: 'What is the Free plan limit?',
-      a: 'The Free plan allows 1 Instagram account, 3 automations, 300 DMs per month, and 100 AI credits. Keyword triggers only — the "All Comments" trigger is available on Pro and Elite plans.'
+      a: 'The Free plan allows 1 connected Instagram account, 2 active automations, 500 successful DMs per month, and 150 MB storage. Keyword triggers only — the "All Comments" trigger and Follow-to-unlock are available on Pro (₹70/mo) and Elite (₹150/mo) plans.'
     },
     {
       q: 'How do I disconnect an Instagram account?',
@@ -79,7 +79,7 @@
       return 'For automation failures: (1) Check your Instagram account is still connected. (2) Ensure the automation is toggled ON. (3) Check your monthly DM limit. If issues persist, email <strong>support@comment2dm.com</strong> — we\'ll investigate within 24 hours.';
     }
     if (m.includes('limit') || m.includes('quota') || m.includes('free')) {
-      return 'The <strong>Free plan</strong> includes 300 DMs/month, 3 automations, and 1 Instagram account. Upgrade to <strong>Pro</strong> for 5,000 DMs/month or <strong>Elite</strong> for 50,000 DMs/month.';
+      return 'The <strong>Free plan</strong> includes 500 DMs/month, 2 active automations, 1 Instagram account, and 150 MB file storage. Upgrade to <strong>Pro (₹70/month)</strong> for 5,000 DMs/month or <strong>Elite (₹150/month)</strong> for 50,000 DMs/month.';
     }
     if (m.includes('delete') || m.includes('cancel')) {
       return 'To delete your account, go to <strong>Settings → Danger Zone → Delete Account</strong>. To cancel your subscription only, go to <strong>Billing</strong> and select Cancel Subscription.';

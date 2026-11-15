@@ -547,9 +547,10 @@
 
       if (deliveryRate) {
         if (totalDMs === 0) {
-          deliveryRate.textContent = '100%';
+          deliveryRate.textContent = '—';
         } else {
-          deliveryRate.textContent = (data.deliveryRate ?? 100) + '%';
+          const rateVal = typeof data.deliveryRate === 'number' ? data.deliveryRate : Math.round((sentCount / totalDMs) * 100);
+          deliveryRate.textContent = `${rateVal}%`;
         }
       }
 
@@ -560,9 +561,12 @@
         } else if (failedCount > 0) {
           deliveryNote.textContent = `${failedCount} failed replies`;
           deliveryNote.style.color = 'var(--rose)';
-        } else {
+        } else if (sentCount > 0) {
           deliveryNote.textContent = '100% Delivery Success';
           deliveryNote.style.color = 'var(--emerald)';
+        } else {
+          deliveryNote.textContent = 'Ready for comment triggers';
+          deliveryNote.style.color = 'var(--ink-muted)';
         }
       }
 
@@ -592,21 +596,25 @@
             row.style.background = 'var(--surface)';
             row.style.border = '1px solid var(--glass-border)';
 
+            const isPublicReply = item.eventType === 'public_reply';
+            const isComment = item.eventType === 'comment_received';
             const isSuccess = item.status === 'success' || item.status === 'delivered';
             const isFailed = item.status === 'failed';
-            const isComment = item.eventType === 'comment_received';
+            const isUnknown = item.status === 'unknown';
 
-            let label = isComment ? 'Comment detected' : (isFailed ? 'Private DM failed' : 'Private DM sent');
+            let label = isPublicReply ? 'Public Comment Reply' : (isComment ? 'Comment detected' : (isFailed ? 'Private DM failed' : (isUnknown ? 'DM unconfirmed' : 'Private DM sent')));
             let iconSvg = '';
-            if (isComment) {
+            if (isPublicReply) {
+              iconSvg = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent-light);"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>`;
+            } else if (isComment) {
               iconSvg = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#818cf8;"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path></svg>`;
             } else {
-              iconSvg = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:${isSuccess ? 'var(--emerald)' : (isFailed ? 'var(--rose)' : 'var(--amber)')};"><path d="m22 2-7 20-4-9-9-4Z"></path><path d="M22 2 11 13"></path></svg>`;
+              iconSvg = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:${isSuccess ? 'var(--emerald)' : (isFailed ? 'var(--rose)' : (isUnknown ? 'var(--amber)' : 'var(--ink-secondary)'))};"><path d="m22 2-7 20-4-9-9-4Z"></path><path d="M22 2 11 13"></path></svg>`;
             }
 
-            const bgTint = isSuccess ? 'var(--emerald-tint)' : (isFailed ? 'var(--rose-tint)' : 'var(--amber-tint)');
-            const statusColor = isSuccess ? 'var(--emerald)' : (isFailed ? 'var(--rose)' : 'var(--amber)');
-            const statusText = isSuccess ? '✓ Delivered' : (isFailed ? '✗ Failed' : '⏳ Processing');
+            const bgTint = isSuccess ? 'var(--emerald-tint)' : (isFailed ? 'var(--rose-tint)' : (isUnknown ? 'var(--amber-tint)' : 'var(--surface-hover)'));
+            const statusColor = isSuccess ? 'var(--emerald)' : (isFailed ? 'var(--rose)' : (isUnknown ? 'var(--amber)' : 'var(--ink-secondary)'));
+            const statusText = isSuccess ? '✓ Delivered' : (isFailed ? '✗ Failed' : (isUnknown ? '? Unconfirmed' : '⏳ Processing'));
 
             let timeStr = '';
             if (item.createdAt) {

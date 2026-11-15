@@ -8,30 +8,39 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css"/>
+
+  <!-- Instant Theme Sync (Default: Light Mode, Zero Flash) -->
+  <script>
+    (function () {
+      const saved = localStorage.getItem('comment2dm_theme');
+      const theme = saved === 'dark' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+  </script>
   <style>
-    .studio-tabs { display:flex; gap:4px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:5px; flex-wrap:wrap; }
-    .studio-tab { padding:8px 16px; border-radius:9px; border:none; background:transparent; color:rgba(255,255,255,0.45); font-size:0.84rem; font-weight:500; cursor:pointer; transition:all 0.2s; white-space:nowrap; }
+    .studio-tabs { display:flex; gap:4px; background:var(--surface); border:1px solid var(--glass-border); border-radius:12px; padding:5px; flex-wrap:wrap; }
+    .studio-tab { padding:8px 16px; border-radius:9px; border:none; background:transparent; color:var(--ink-secondary); font-size:0.84rem; font-weight:500; cursor:pointer; transition:all 0.2s; white-space:nowrap; }
     .studio-tab.active { background:rgba(99,102,241,0.2); color:#818cf8; }
     .studio-panel { display:none; animation:fadeIn 0.25s ease; }
     .studio-panel.active { display:block; }
     @keyframes fadeIn { from{opacity:0;transform:translateY(8px);} to{opacity:1;transform:translateY(0);} }
-    .glass-card { background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:16px; padding:24px; margin-top:16px; }
+    .glass-card { background:var(--surface); border:1px solid var(--glass-border); border-radius:16px; padding:24px; margin-top:16px; }
     .form-row { margin-bottom:16px; }
-    .form-row label { display:block; font-size:0.8rem; color:rgba(255,255,255,0.45); margin-bottom:6px; font-weight:500; }
-    .form-input { width:100%; padding:10px 14px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1); border-radius:10px; color:#f1f5f9; font-size:0.88rem; outline:none; transition:border 0.2s; box-sizing:border-box; font-family:inherit; }
+    .form-row label { display:block; font-size:0.8rem; color:var(--ink-secondary); margin-bottom:6px; font-weight:500; }
+    .form-input { width:100%; padding:10px 14px; background:var(--surface-hover); border:1px solid var(--glass-border); border-radius:10px; color:var(--ink); font-size:0.88rem; outline:none; transition:border 0.2s; box-sizing:border-box; font-family:inherit; }
     .form-input:focus { border-color:#6366f1; }
     select.form-input { cursor:pointer; }
-    select.form-input option { background:#111116; }
+    select.form-input option { background:var(--surface-raised); }
     .ai-btn { display:inline-flex; align-items:center; gap:8px; padding:11px 22px; background:linear-gradient(135deg,#6366f1,#8b5cf6); border:none; border-radius:12px; color:#fff; font-size:0.9rem; font-weight:600; cursor:pointer; transition:opacity 0.2s; }
     .ai-btn:hover { opacity:0.85; }
     .ai-btn:disabled { opacity:0.5; cursor:not-allowed; }
     .spinner { width:16px; height:16px; border:2px solid rgba(255,255,255,0.3); border-top-color:#fff; border-radius:50%; animation:spin 0.8s linear infinite; }
     @keyframes spin { to{transform:rotate(360deg);} }
-    .result-card { background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:12px; padding:16px; margin-top:10px; position:relative; }
+    .result-card { background:var(--surface); border:1px solid var(--glass-border); border-radius:12px; padding:16px; margin-top:10px; position:relative; }
     .copy-btn { position:absolute; top:12px; right:12px; padding:4px 10px; background:rgba(99,102,241,0.15); border:1px solid rgba(99,102,241,0.25); border-radius:6px; color:#818cf8; font-size:0.72rem; font-weight:600; cursor:pointer; transition:all 0.2s; }
     .copy-btn:hover { background:rgba(99,102,241,0.3); }
-    .result-text { font-size:0.88rem; color:#e2e8f0; line-height:1.6; white-space:pre-wrap; word-break:break-word; padding-right:60px; }
-    .credit-note { font-size:0.76rem; color:rgba(255,255,255,0.3); margin-top:8px; }
+    .result-text { font-size:0.88rem; color:var(--ink); line-height:1.6; white-space:pre-wrap; word-break:break-word; padding-right:60px; }
+    .credit-note { font-size:0.76rem; color:var(--ink-muted); margin-top:8px; }
     .credits-badge { background:rgba(99,102,241,0.12); border:1px solid rgba(99,102,241,0.2); border-radius:20px; padding:5px 14px; font-size:0.8rem; color:#818cf8; font-weight:500; }
     /* Rate Calculator */
     .rate-result { text-align:center; padding:24px; }
@@ -42,56 +51,56 @@
     .benchmark-bar { height:10px; background:rgba(255,255,255,0.06); border-radius:6px; overflow:hidden; margin:8px 0; }
     .benchmark-fill { height:100%; border-radius:6px; background:linear-gradient(90deg,#6366f1,#10b981); transition:width 0.8s ease; }
     /* UTM builder */
-    .utm-output { background:rgba(9,9,11,0.5); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:14px; font-family:monospace; font-size:0.84rem; color:#818cf8; word-break:break-all; margin-top:12px; }
-    .utm-history-item { padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.05); font-size:0.8rem; color:rgba(255,255,255,0.5); display:flex; align-items:center; justify-content:space-between; }
+    .utm-output { background:var(--surface-hover); border:1px solid var(--glass-border); border-radius:10px; padding:14px; font-family:monospace; font-size:0.84rem; color:#818cf8; word-break:break-all; margin-top:12px; }
+    .utm-history-item { padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.05); font-size:0.8rem; color:var(--ink-secondary); display:flex; align-items:center; justify-content:space-between; }
     .utm-history-item:last-child { border-bottom:none; }
     /* Ideas */
     .ideas-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px; margin-top:16px; }
-    .idea-card { background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:14px; padding:18px; }
+    .idea-card { background:var(--surface); border:1px solid var(--glass-border); border-radius:14px; padding:18px; }
     .idea-format { display:inline-flex; align-items:center; gap:4px; padding:3px 10px; border-radius:20px; font-size:0.72rem; font-weight:600; margin-bottom:10px; }
     .idea-format.reel { background:rgba(99,102,241,0.15); color:#818cf8; }
     .idea-format.carousel { background:rgba(245,158,11,0.12); color:#f59e0b; }
     .idea-format.story { background:rgba(16,185,129,0.12); color:#10b981; }
     .idea-format.static { background:rgba(236,72,153,0.12); color:#ec4899; }
-    .idea-title { font-size:0.9rem; font-weight:600; color:#f1f5f9; margin-bottom:6px; }
-    .idea-hook { font-size:0.8rem; color:rgba(255,255,255,0.5); line-height:1.5; }
-    .idea-meta { font-size:0.72rem; color:rgba(255,255,255,0.3); margin-top:8px; }
+    .idea-title { font-size:0.9rem; font-weight:600; color:var(--ink); margin-bottom:6px; }
+    .idea-hook { font-size:0.8rem; color:var(--ink-secondary); line-height:1.5; }
+    .idea-meta { font-size:0.72rem; color:var(--ink-muted); margin-top:8px; }
     /* Slider */
     input[type=range] { width:100%; accent-color:#6366f1; }
     .slider-val { display:inline-block; background:rgba(99,102,241,0.15); color:#818cf8; border-radius:6px; padding:2px 10px; font-size:0.82rem; font-weight:600; margin-left:8px; }
   
     /* Reel Performance Analyzer */
     .reels-summary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px; margin-top:16px; margin-bottom:18px; }
-    .summary-card { background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.08); border-radius:14px; padding:16px; text-align:center; }
-    .summary-card .summary-value { font-size:1.8rem; font-weight:700; color:#f1f5f9; line-height:1.2; margin:6px 0 2px; }
-    .summary-card .summary-label { font-size:0.75rem; color:rgba(255,255,255,0.4); text-transform:uppercase; letter-spacing:0.05em; font-weight:600; }
+    .summary-card { background:var(--surface); border:1px solid var(--glass-border); border-radius:14px; padding:16px; text-align:center; }
+    .summary-card .summary-value { font-size:1.8rem; font-weight:700; color:var(--ink); line-height:1.2; margin:6px 0 2px; }
+    .summary-card .summary-label { font-size:0.75rem; color:var(--ink-secondary); text-transform:uppercase; letter-spacing:0.05em; font-weight:600; }
     .reels-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:16px; margin-top:16px; }
-    .reel-card { background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.08); border-radius:16px; padding:18px; display:flex; flex-direction:column; justify-content:space-between; transition:border-color 0.2s, transform 0.2s; position:relative; }
+    .reel-card { background:var(--surface); border:1px solid var(--glass-border); border-radius:16px; padding:18px; display:flex; flex-direction:column; justify-content:space-between; transition:border-color 0.2s, transform 0.2s; position:relative; }
     .reel-card:hover { border-color:rgba(99,102,241,0.35); transform:translateY(-2px); }
     .reel-header { display:flex; gap:12px; align-items:flex-start; margin-bottom:12px; }
-    .reel-thumb-box { width:52px; height:52px; border-radius:10px; overflow:hidden; background:rgba(255,255,255,0.05); flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+    .reel-thumb-box { width:52px; height:52px; border-radius:10px; overflow:hidden; background:var(--surface-hover); flex-shrink:0; display:flex; align-items:center; justify-content:center; }
     .reel-thumb-img { width:100%; height:100%; object-fit:cover; }
-    .reel-caption-text { font-size:0.84rem; color:#e2e8f0; line-height:1.4; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    .reel-caption-text { font-size:0.84rem; color:var(--ink); line-height:1.4; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
     .reel-metrics-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:12px 0; background:rgba(0,0,0,0.25); border-radius:10px; padding:10px; }
     .metric-pill { font-size:0.76rem; color:rgba(255,255,255,0.6); display:flex; justify-content:space-between; align-items:center; }
     .metric-pill strong { color:#fff; font-weight:600; }
     .metric-status-tag { font-size:0.65rem; padding:2px 6px; border-radius:4px; font-weight:500; }
     .status-retrieved { background:rgba(16,185,129,0.15); color:#10b981; }
-    .status-unavailable { background:rgba(255,255,255,0.06); color:rgba(255,255,255,0.4); }
+    .status-unavailable { background:rgba(255,255,255,0.06); color:var(--ink-secondary); }
     .status-manual { background:rgba(245,158,11,0.15); color:#f59e0b; }
     .tier-badge { display:inline-flex; align-items:center; gap:4px; padding:3px 8px; border-radius:6px; font-size:0.72rem; font-weight:600; }
     .tier-top { background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); }
     .tier-steady { background:rgba(99,102,241,0.15); color:#818cf8; border:1px solid rgba(99,102,241,0.3); }
     .tier-needs-iteration { background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); }
     .formula-banner { background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.2); border-radius:10px; padding:12px 16px; margin:14px 0; font-size:0.82rem; color:rgba(255,255,255,0.7); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
-    .observations-box { background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:12px; padding:14px 18px; margin-bottom:18px; font-size:0.83rem; color:rgba(255,255,255,0.7); }
+    .observations-box { background:var(--surface); border:1px solid var(--glass-border); border-radius:12px; padding:14px 18px; margin-bottom:18px; font-size:0.83rem; color:rgba(255,255,255,0.7); }
     .observations-box li { margin-bottom:6px; }
     .observations-box li:last-child { margin-bottom:0; }
-    .btn-secondary { background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); color:#e2e8f0; border-radius:10px; padding:7px 14px; font-size:0.82rem; font-weight:600; cursor:pointer; transition:all 0.2s; display:inline-flex; align-items:center; gap:6px; }
+    .btn-secondary { background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); color:var(--ink); border-radius:10px; padding:7px 14px; font-size:0.82rem; font-weight:600; cursor:pointer; transition:all 0.2s; display:inline-flex; align-items:center; gap:6px; }
     .btn-secondary:hover { background:rgba(255,255,255,0.1); border-color:rgba(255,255,255,0.2); }
     .insights-modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.75); backdrop-filter:blur(8px); display:none; align-items:center; justify-content:center; z-index:9999; padding:20px; }
     .insights-modal-overlay.show { display:flex; }
-    .insights-modal-card { background:#111116; border:1px solid rgba(255,255,255,0.1); border-radius:20px; width:100%; max-width:540px; max-height:90vh; overflow-y:auto; padding:24px; position:relative; box-shadow:0 24px 48px rgba(0,0,0,0.5); }
+    .insights-modal-card { background:var(--surface-raised); border:1px solid var(--glass-border); border-radius:20px; width:100%; max-width:540px; max-height:90vh; overflow-y:auto; padding:24px; position:relative; box-shadow:0 24px 48px rgba(0,0,0,0.5); }
 
   </style>
 </head>
@@ -126,7 +135,7 @@
         </a>
         <a href="automations.html" data-nav="automations" title="Automations">
           <span class="nav-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect><path d="M6.5 10v7a2 2 0 0 0 2 2h5.5"></path></svg>
           </span>
           <span>Automations</span>
         </a>
@@ -158,7 +167,7 @@
       </nav>
       <div class="sidebar-foot">
         <div class="dm-limit-card" id="dmLimitCard">
-          <div class="dm-limit-header"><span>Monthly DMs</span><strong id="dmLimitText">0 / 300</strong></div>
+          <div class="dm-limit-header"><span>Monthly DMs</span><strong id="dmLimitText">0 / 500</strong></div>
           <div class="dm-progress-track"><div class="dm-progress-fill" id="dmProgressFill" style="width:5%;"></div></div>
           <a href="billing.html" class="btn btn-ghost btn-sm btn-block" style="font-size:0.78rem;padding:5px;">Upgrade Plan ↗</a>
         </div>
@@ -172,17 +181,69 @@
           <button class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="Open navigation menu">☰</button>
           <div><span class="eyebrow" style="margin-bottom:0;">AI Tools</span><h2 style="font-size:1.15rem;font-weight:700;">Creator Studio AI ✨</h2></div>
         </div>
-        <div class="header-user-menu">
-          <a href="help.html" class="notification-bell" title="Help Desk"><span>💬</span></a>
+                <div class="header-user-menu">
+          <!-- Shared Theme Toggle Button -->
+          <button class="theme-toggle-btn" id="themeToggleBtn" type="button" aria-label="Toggle theme" title="Toggle theme">
+            <svg class="moon-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+            <svg class="sun-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="5"></circle>
+              <line x1="12" y1="1" x2="12" y2="3"></line>
+              <line x1="12" y1="21" x2="12" y2="23"></line>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+              <line x1="1" y1="12" x2="3" y2="12"></line>
+              <line x1="21" y1="12" x2="23" y2="12"></line>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+            </svg>
+          </button>
+
+          <!-- Feedback Button -->
+          <button type="button" class="btn btn-ghost btn-sm" id="openFeedbackBtn" title="Share feedback or report an issue" style="font-size:0.82rem; gap:6px; display:inline-flex; align-items:center; padding:6px 12px; border:1px solid var(--glass-border); border-radius:var(--radius-pill);">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+            <span>Feedback</span>
+          </button>
+
+          <a href="help.html" class="notification-bell" title="Support & Help Desk">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          </a>
+
           <div style="position:relative;">
-            <button class="user-profile-trigger" id="userProfileBtn">
+            <button class="user-profile-trigger" id="userProfileBtn" aria-label="User profile menu">
               <div class="user-avatar-circle" id="userAvatarInitial">U</div>
-              <div style="text-align:left;display:flex;flex-direction:column;"><span style="font-size:0.86rem;font-weight:600;color:#fff;" id="topbarUserName">Loading...</span><span class="plan-badge" id="topbarPlanBadge">Free</span></div>
+              <div style="text-align:left; display:flex; flex-direction:column;">
+                <span style="font-size:0.86rem; font-weight:600; color:var(--ink);" id="topbarUserName">Loading...</span>
+                <span class="plan-badge" id="topbarPlanBadge">Free</span>
+              </div>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
             </button>
+
+            <!-- Dropdown Menu -->
             <div class="user-dropdown-menu" id="userDropdownMenu">
-              <a href="settings.html">⚙️ Settings</a><a href="billing.html">💳 Billing</a>
-              <div class="dropdown-divider"></div><a href="#" id="headerLogoutBtn">🚪 Sign out</a>
+              <div style="padding:10px 14px;">
+                <strong style="display:block; font-size:0.88rem; color:var(--ink);" id="dropdownName">User</strong>
+                <small style="color:var(--ink-muted);" id="dropdownEmail">user@domain.com</small>
+              </div>
+              <div class="dropdown-divider"></div>
+              <a href="settings.html" class="user-dropdown-item">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                <span>Account Settings</span>
+              </a>
+              <a href="billing.html" class="user-dropdown-item">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+                <span>Billing & Plans</span>
+              </a>
+              <a href="help.html" class="user-dropdown-item">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                <span>Support Desk</span>
+              </a>
+              <div class="dropdown-divider"></div>
+              <button type="button" class="user-dropdown-item" id="logoutBtn" style="color:var(--rose); width:100%; text-align:left; border:none; background:none; cursor:pointer;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+                <span>Sign out</span>
+              </button>
             </div>
           </div>
         </div>
@@ -195,11 +256,11 @@
               <span class="eyebrow" style="margin:0;">Creator Intelligence</span>
               <span class="badge-dev" style="font-size:0.7rem; padding:2px 8px;">Under Development</span>
             </div>
-            <h1 style="font-size:1.5rem;font-weight:700;color:#f1f5f9; margin-top:4px;">Creator Studio AI</h1>
-            <p style="color:rgba(255,255,255,0.45);font-size:0.86rem;margin-top:4px;">AI-powered creator growth tools and performance intelligence.</p>
+            <h1 style="font-size:1.5rem;font-weight:700;color:var(--ink); margin-top:4px;">Creator Studio AI</h1>
+            <p style="color:var(--ink-secondary);font-size:0.86rem;margin-top:4px;">AI-powered creator growth tools and performance intelligence.</p>
           </div>
           <div style="display:flex;align-items:center;gap:10px;">
-            <span style="font-size:0.8rem;color:rgba(255,255,255,0.4);">Status:</span>
+            <span style="font-size:0.8rem;color:var(--ink-secondary);">Status:</span>
             <span class="badge-dev" style="font-size:0.75rem; padding:4px 10px;">🛠️ Feature in Development</span>
           </div>
         </div>
@@ -212,21 +273,21 @@
           <div style="display:inline-flex; align-items:center; gap:6px; padding:3px 12px; border-radius:20px; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.3); color:#f59e0b; font-size:0.76rem; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:12px;">
             <span>Under Active Development</span>
           </div>
-          <h2 style="font-size:1.45rem; font-weight:700; color:#f1f5f9; margin:0 0 8px;">Creator Studio AI Tools are Coming Soon</h2>
+          <h2 style="font-size:1.45rem; font-weight:700; color:var(--ink); margin:0 0 8px;">Creator Studio AI Tools are Coming Soon</h2>
           <p style="font-size:0.9rem; color:var(--ink-secondary); max-width:620px; margin:0 auto 24px; line-height:1.6;">
             We are currently optimizing our creator intelligence models. To keep the platform cost-free and focus 100% on rock-solid Comment-to-DM delivery, external AI generation is temporarily paused. Zero AI credits are consumed while development is underway.
           </p>
 
           <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px; max-width:700px; margin:0 auto 24px; text-align:left;">
-            <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:14px;">
+            <div style="background:var(--surface); border:1px solid var(--glass-border); border-radius:12px; padding:14px;">
               <div style="color:var(--emerald); font-weight:600; font-size:0.84rem; margin-bottom:4px;">✓ Comment-to-DM Active</div>
               <div style="font-size:0.78rem; color:var(--ink-secondary);">Real-time comment listening and private DM delivery are 100% operational.</div>
             </div>
-            <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:14px;">
+            <div style="background:var(--surface); border:1px solid var(--glass-border); border-radius:12px; padding:14px;">
               <div style="color:var(--emerald); font-weight:600; font-size:0.84rem; margin-bottom:4px;">✓ Follower Verification</div>
               <div style="font-size:0.78rem; color:var(--ink-secondary);">Multi-step follow gate and resource delivery buttons remain fully active.</div>
             </div>
-            <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:14px;">
+            <div style="background:var(--surface); border:1px solid var(--glass-border); border-radius:12px; padding:14px;">
               <div style="color:#f59e0b; font-weight:600; font-size:0.84rem; margin-bottom:4px;">⏳ Zero Credit Deductions</div>
               <div style="font-size:0.78rem; color:var(--ink-secondary);">No credits are consumed or lost during this development phase.</div>
             </div>
@@ -258,11 +319,11 @@
         <div class="studio-panel active glass-card" id="panel-reels-analyzer">
           <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
             <div>
-              <div style="font-size:1.15rem;font-weight:700;color:#f1f5f9;display:flex;align-items:center;gap:8px;">
+              <div style="font-size:1.15rem;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:8px;">
                 <span>📊 Reel Performance Analyzer</span>
                 <span style="font-size:0.72rem;background:rgba(99,102,241,0.15);color:#818cf8;border:1px solid rgba(99,102,241,0.25);border-radius:20px;padding:2px 8px;font-weight:600;">Meta Graph API v21.0</span>
               </div>
-              <div style="font-size:0.82rem;color:rgba(255,255,255,0.4);margin-top:4px;">
+              <div style="font-size:0.82rem;color:var(--ink-secondary);margin-top:4px;">
                 Analyze your Instagram Reels performance using official Meta insights, transparent engagement formulas, and performance benchmarks.
               </div>
             </div>
@@ -277,16 +338,16 @@
           </div>
 
           <!-- Account & Formula Controls Bar -->
-          <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+          <div style="background:var(--surface);border:1px solid var(--glass-border);border-radius:12px;padding:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
             <div style="display:flex;align-items:center;gap:10px;">
-              <span style="font-size:0.8rem;color:rgba(255,255,255,0.45);font-weight:500;">Active Account:</span>
+              <span style="font-size:0.8rem;color:var(--ink-secondary);font-weight:500;">Active Account:</span>
               <div style="display:inline-flex;align-items:center;gap:6px;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.2);border-radius:20px;padding:4px 12px;font-size:0.82rem;color:#818cf8;font-weight:600;" id="activeReelsAccountBadge">
                 <span id="activeReelsAccountUsername">@mysterio_the_legend</span>
               </div>
             </div>
             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
               <div style="display:flex;align-items:center;gap:6px;">
-                <label style="font-size:0.8rem;color:rgba(255,255,255,0.45);font-weight:500;">Formula:</label>
+                <label style="font-size:0.8rem;color:var(--ink-secondary);font-weight:500;">Formula:</label>
                 <select class="form-input" id="formulaSelector" style="padding:6px 10px;font-size:0.82rem;width:auto;">
                   <option value="reach" selected>By Reach: (Interactions / Reach) × 100</option>
                   <option value="views">By Views: (Interactions / Views) × 100</option>
@@ -294,7 +355,7 @@
                 </select>
               </div>
               <div style="display:flex;align-items:center;gap:6px;">
-                <label style="font-size:0.8rem;color:rgba(255,255,255,0.45);font-weight:500;">Date Range:</label>
+                <label style="font-size:0.8rem;color:var(--ink-secondary);font-weight:500;">Date Range:</label>
                 <select class="form-input" id="dateRangeSelector" style="padding:6px 10px;font-size:0.82rem;width:auto;">
                   <option value="all" selected>All Time</option>
                   <option value="7d">Last 7 Days</option>
@@ -303,7 +364,7 @@
                 </select>
               </div>
               <div style="display:flex;align-items:center;gap:6px;">
-                <label style="font-size:0.8rem;color:rgba(255,255,255,0.45);font-weight:500;">Sort:</label>
+                <label style="font-size:0.8rem;color:var(--ink-secondary);font-weight:500;">Sort:</label>
                 <select class="form-input" id="sortSelector" style="padding:6px 10px;font-size:0.82rem;width:auto;">
                   <option value="engagement" selected>Highest Engagement</option>
                   <option value="recent">Most Recent</option>
@@ -349,7 +410,7 @@
 
           <!-- Observations Box -->
           <div class="observations-box" id="observationsContainer">
-            <div style="font-size:0.86rem;font-weight:600;color:#f1f5f9;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+            <div style="font-size:0.86rem;font-weight:600;color:var(--ink);margin-bottom:8px;display:flex;align-items:center;gap:6px;">
               <span>💡</span> <span>Performance Observations</span>
             </div>
             <ul id="observationsList" style="padding-left:18px;margin:0;">
@@ -366,7 +427,7 @@
               </div>
               <button type="button" class="btn btn-ghost btn-sm" id="closeManualFallbackBtn" style="padding:2px 8px;">✕ Close</button>
             </div>
-            <p style="font-size:0.8rem;color:rgba(255,255,255,0.5);margin-bottom:16px;">
+            <p style="font-size:0.8rem;color:var(--ink-secondary);margin-bottom:16px;">
               Use this fallback calculator when Meta API insights are unavailable for a Reel or to evaluate draft concepts before posting.
             </p>
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;">
@@ -405,27 +466,27 @@
             </div>
             <div style="margin-top:16px;display:flex;align-items:center;gap:12px;">
               <button class="ai-btn" id="calculateManualBtn" style="padding:8px 18px;font-size:0.84rem;">📊 Calculate Manual Performance</button>
-              <span style="font-size:0.75rem;color:rgba(255,255,255,0.4);">No AI credits consumed (Deterministic math)</span>
+              <span style="font-size:0.75rem;color:var(--ink-secondary);">No AI credits consumed (Deterministic math)</span>
             </div>
             <div id="manualResultBox" style="margin-top:16px;display:none;"></div>
           </div>
 
           <!-- Reels Grid Container -->
-          <div id="reelsLoadingSkeleton" style="text-align:center;padding:40px 16px;color:rgba(255,255,255,0.4);">
+          <div id="reelsLoadingSkeleton" style="text-align:center;padding:40px 16px;color:var(--ink-secondary);">
             <div class="spinner" style="width:24px;height:24px;margin:0 auto 12px;border-width:3px;"></div>
             <div>Retrieving Reels and official insights from Meta Graph API…</div>
           </div>
           <div class="reels-grid" id="reelsGrid" style="display:none;"></div>
-          <div id="reelsEmptyState" style="display:none;text-align:center;padding:48px 16px;color:rgba(255,255,255,0.4);">
+          <div id="reelsEmptyState" style="display:none;text-align:center;padding:48px 16px;color:var(--ink-secondary);">
             <div style="font-size:2rem;margin-bottom:10px;">🎬</div>
-            <div style="font-size:1rem;font-weight:600;color:#f1f5f9;margin-bottom:4px;">No Reels Analyzed Yet</div>
+            <div style="font-size:1rem;font-weight:600;color:var(--ink);margin-bottom:4px;">No Reels Analyzed Yet</div>
             <div style="font-size:0.84rem;max-width:440px;margin:0 auto 16px;">Connect your Instagram Professional account or use the Manual Fallback Calculator to analyze your content performance.</div>
             <button class="btn-secondary" onclick="document.getElementById('toggleManualFallbackBtn').click();">Use Manual Fallback</button>
           </div>
         </div>
 
         <div class="studio-panel glass-card" id="panel-hooks">
-          <div style="font-size:1rem;font-weight:700;color:#f1f5f9;margin-bottom:4px;">🎬 Reel Hook Generator</div>
+          <div style="font-size:1rem;font-weight:700;color:var(--ink);margin-bottom:4px;">🎬 Reel Hook Generator</div>
           <div style="font-size:0.82rem;color:rgba(255,255,255,0.35);margin-bottom:18px;">Generate scroll-stopping hooks for your reels. Each generation costs 10 AI credits.</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
             <div class="form-row" style="margin-bottom:0;">
@@ -462,7 +523,7 @@
 
         <!-- Panel 2: DM Script Writer -->
         <div class="studio-panel glass-card" id="panel-dm-script">
-          <div style="font-size:1rem;font-weight:700;color:#f1f5f9;margin-bottom:4px;">📝 DM Script Writer</div>
+          <div style="font-size:1rem;font-weight:700;color:var(--ink);margin-bottom:4px;">📝 DM Script Writer</div>
           <div style="font-size:0.82rem;color:rgba(255,255,255,0.35);margin-bottom:18px;">Generate a personalized DM script to convert commenters. Costs 15 AI credits.</div>
           <div class="form-row"><label>Product / Service Name</label><input class="form-input" id="dmProduct" type="text" placeholder="e.g. My Online Fitness Course"></div>
           <div class="form-row">
@@ -495,7 +556,7 @@
 
         <!-- Panel 4: UTM Builder -->
         <div class="studio-panel glass-card" id="panel-utm">
-          <div style="font-size:1rem;font-weight:700;color:#f1f5f9;margin-bottom:4px;">🔗 UTM Link Builder</div>
+          <div style="font-size:1rem;font-weight:700;color:var(--ink);margin-bottom:4px;">🔗 UTM Link Builder</div>
           <div style="font-size:0.82rem;color:rgba(255,255,255,0.35);margin-bottom:18px;">Build trackable links for your Instagram DM campaigns.</div>
           <div class="form-row"><label>Base URL</label><input class="form-input" id="utmUrl" type="url" placeholder="https://yourwebsite.com/product"></div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
@@ -515,14 +576,14 @@
             <button class="copy-btn" style="position:static;margin-top:8px;display:inline-block;" id="copyUtmBtn">📋 Copy</button>
           </div>
           <div id="utmHistory" style="margin-top:24px;display:none;">
-            <div style="font-size:0.84rem;font-weight:600;color:#f1f5f9;margin-bottom:8px;">📜 Recent Links</div>
-            <div id="utmHistoryList" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:10px;overflow:hidden;"></div>
+            <div style="font-size:0.84rem;font-weight:600;color:var(--ink);margin-bottom:8px;">📜 Recent Links</div>
+            <div id="utmHistoryList" style="background:var(--surface);border:1px solid var(--glass-border);border-radius:10px;overflow:hidden;"></div>
           </div>
         </div>
 
         <!-- Panel 5: Content Ideas -->
         <div class="studio-panel glass-card" id="panel-ideas">
-          <div style="font-size:1rem;font-weight:700;color:#f1f5f9;margin-bottom:4px;">💡 Content Ideas Generator</div>
+          <div style="font-size:1rem;font-weight:700;color:var(--ink);margin-bottom:4px;">💡 Content Ideas Generator</div>
           <div style="font-size:0.82rem;color:rgba(255,255,255,0.35);margin-bottom:18px;">Get 7 data-driven content ideas for your niche. Costs 20 AI credits.</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
             <div class="form-row" style="margin-bottom:0;"><label>Niche / Industry</label><input class="form-input" id="ideasNiche" type="text" placeholder="e.g. personal finance, fitness, tech reviews"></div>
@@ -547,8 +608,8 @@
     <div class="insights-modal-card">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px;">
         <div>
-          <span style="font-size:0.75rem;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Meta Graph API Insights</span>
-          <h2 style="font-size:1.1rem;font-weight:700;color:#f1f5f9;margin:2px 0 0;" id="reelInsightsTitle">Reel Insights Breakdown</h2>
+          <span style="font-size:0.75rem;color:var(--ink-secondary);text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Meta Graph API Insights</span>
+          <h2 style="font-size:1.1rem;font-weight:700;color:var(--ink);margin:2px 0 0;" id="reelInsightsTitle">Reel Insights Breakdown</h2>
         </div>
         <button type="button" class="btn btn-ghost btn-sm" id="closeReelInsightsModalBtn" style="padding:4px 8px;font-size:1.1rem;line-height:1;">✕</button>
       </div>
@@ -559,16 +620,16 @@
 
   <!-- Floating Reel Comparison Action Bar -->
   <div id="compareActionBar" style="display:none;position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:#18181f;border:1px solid #6366f1;padding:10px 22px;border-radius:30px;box-shadow:0 14px 36px rgba(0,0,0,0.7);z-index:999;align-items:center;gap:14px;">
-    <span style="font-size:0.85rem;color:#f1f5f9;"><strong id="compareCount" style="color:#818cf8;">0</strong> Reels Selected</span>
+    <span style="font-size:0.85rem;color:var(--ink);"><strong id="compareCount" style="color:#818cf8;">0</strong> Reels Selected</span>
     <button class="ai-btn" id="openCompareModalBtn" style="padding:6px 16px;font-size:0.8rem;">⚖️ Compare Reels</button>
-    <button type="button" class="btn btn-ghost btn-sm" id="clearCompareBtn" style="font-size:0.75rem;padding:2px 8px;color:rgba(255,255,255,0.4);">Clear</button>
+    <button type="button" class="btn btn-ghost btn-sm" id="clearCompareBtn" style="font-size:0.75rem;padding:2px 8px;color:var(--ink-secondary);">Clear</button>
   </div>
 
   <!-- Reel Comparison Modal -->
   <div class="insights-modal-overlay" id="compareModal" role="dialog" aria-modal="true" aria-labelledby="compareModalTitle">
     <div class="insights-modal-card" style="max-width:850px;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-        <h2 style="font-size:1.15rem;font-weight:700;color:#f1f5f9;margin:0;" id="compareModalTitle">⚖️ Side-by-Side Reel Comparison</h2>
+        <h2 style="font-size:1.15rem;font-weight:700;color:var(--ink);margin:0;" id="compareModalTitle">⚖️ Side-by-Side Reel Comparison</h2>
         <button type="button" class="btn btn-ghost btn-sm" id="closeCompareModalBtn" style="padding:4px 8px;font-size:1.1rem;line-height:1;">✕</button>
       </div>
       <div id="compareModalContent" style="overflow-x:auto;"></div>

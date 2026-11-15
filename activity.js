@@ -89,7 +89,10 @@
       const totalDMs = sent + failed;
       const comments = Number(data.commentsProcessed ?? data.comments ?? 0);
       const activeAutos = Number(data.activeAutomations ?? 0);
-      const deliveryRate = totalDMs > 0 ? (data.deliveryRate ?? Math.round((sent / totalDMs) * 100)) : 100;
+      const hasDeliveryData = totalDMs > 0;
+      const deliveryRate = hasDeliveryData
+        ? (typeof data.deliveryRate === 'number' ? data.deliveryRate : Math.round((sent / totalDMs) * 100))
+        : null;
 
       // Update KPI Cards
       const kpiSentEl = document.getElementById('kpiDmsSent');
@@ -101,7 +104,12 @@
 
       if (kpiSentEl) kpiSentEl.textContent = fmt(sent);
       if (kpiSuccessEl) kpiSuccessEl.textContent = fmt(sent);
-      if (kpiDeliveryRateEl) kpiDeliveryRateEl.textContent = `${deliveryRate}% Delivery Rate`;
+      if (kpiDeliveryRateEl) {
+        kpiDeliveryRateEl.textContent = hasDeliveryData ? `${deliveryRate}% Delivery Rate` : 'Not enough delivery data';
+        kpiDeliveryRateEl.style.color = hasDeliveryData
+          ? (deliveryRate >= 90 ? 'var(--emerald)' : (deliveryRate >= 70 ? 'var(--amber)' : 'var(--rose)'))
+          : 'var(--ink-secondary)';
+      }
       if (kpiFailedEl) kpiFailedEl.textContent = fmt(failed);
       if (kpiFailedSubEl) {
         kpiFailedSubEl.innerHTML = failed > 0
@@ -121,7 +129,10 @@
       if (funnelTriggeredEl) funnelTriggeredEl.textContent = fmt(totalDMs);
       if (funnelDeliveredEl) funnelDeliveredEl.textContent = fmt(sent);
       if (funnelTriggerPctEl) funnelTriggerPctEl.textContent = `${pct(totalDMs, comments)} Conversion`;
-      if (funnelDeliverPctEl) funnelDeliverPctEl.textContent = `${deliveryRate}% Delivery`;
+      if (funnelDeliverPctEl) {
+        funnelDeliverPctEl.textContent = hasDeliveryData ? `${deliveryRate}% Delivery` : '–';
+        funnelDeliverPctEl.style.color = hasDeliveryData ? 'var(--emerald)' : 'var(--ink-secondary)';
+      }
 
       // Render Bar Chart
       renderDailyChart(data.dailyDms || []);
@@ -234,9 +245,10 @@
         const handle = String(rawHandle).replace(/^@+/, '');
         const isSent = ev.status === 'sent' || ev.status === 'success';
         const isFailed = ev.status === 'failed';
-        const statusClass = isSent ? 'emerald' : (isFailed ? 'rose' : 'amber');
-        const statusLabel = isSent ? '✓ Delivered' : (isFailed ? '✗ Failed' : '⏳ Processing');
-        const statusColor = isSent ? 'var(--emerald)' : (isFailed ? 'var(--rose)' : 'var(--amber)');
+        const isUnknown = ev.status === 'unknown';
+        const statusClass = isSent ? 'emerald' : (isFailed ? 'rose' : (isUnknown ? 'amber' : 'amber'));
+        const statusLabel = isSent ? '✓ Delivered' : (isFailed ? '✗ Failed' : (isUnknown ? '? Unconfirmed' : '⏳ Processing'));
+        const statusColor = isSent ? 'var(--emerald)' : (isFailed ? 'var(--rose)' : (isUnknown ? 'var(--amber)' : 'var(--ink-secondary)'));
         const commentMsg = ev.commentText || ev.comment_text || '–';
         const dmMsg = ev.dmText || ev.dmPreview || '–';
         const autoName = ev.automationName || (ev.keyword ? `Keyword: ${ev.keyword}` : 'Comment to DM');
