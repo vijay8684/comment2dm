@@ -382,7 +382,8 @@ async function razor() {
 async function planList() {
   const authHeader = Buffer.from(process.env.RAZORPAY_KEY_ID + ':' + process.env.RAZORPAY_KEY_SECRET).toString('base64');
   const r = await fetch('https://api.razorpay.com/v1/plans?count=100', {
-    headers: { Authorization: 'Basic ' + authHeader }
+    headers: { Authorization: 'Basic ' + authHeader },
+    signal: AbortSignal.timeout(10000)
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j?.error?.description || 'Unable to list Razorpay plans.');
@@ -410,7 +411,8 @@ async function ensurePlans() {
             interval: 1,
             item: { name: x.name, amount: x.amount, currency: 'INR', description: x.name + ' for Comment2DM' },
             notes: { comment2dm_plan_key: k, product: 'comment2dm' }
-          })
+          }),
+          signal: AbortSignal.timeout(10000)
         });
         p = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(p?.error?.description || ('Unable to create plan ' + k));

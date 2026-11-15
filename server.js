@@ -3903,9 +3903,14 @@ async function handleGracefulShutdown(signal) {
 
 if (require.main === module) {
   db.initialize().then(async () => {
-    await billing.ensurePlans();
+    // Bind port immediately so cloud providers (Render) detect open port without delay
     app.listen(port, '0.0.0.0', () => {
       console.log(`Comment2DM server is live on port ${port} (HTTPS ready)`);
+    });
+
+    // Synchronize Razorpay subscription plans asynchronously in background
+    billing.ensurePlans().catch((err) => {
+      console.error('Razorpay plan setup note:', err.message);
     });
 
     // Start persistent background worker after database initialization
