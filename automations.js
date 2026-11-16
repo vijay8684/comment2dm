@@ -440,33 +440,23 @@
       }
 
       if (directUploadFailed) {
-        if (progressBar) progressBar.style.width = '70%';
-        if (progressPercent) progressPercent.textContent = '70%';
-
-        const base64Data = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result);
-          reader.onerror = () => reject(new Error('Failed to read file for storage upload.'));
-          reader.readAsDataURL(file);
-        });
+        if (progressBar) progressBar.style.width = '75%';
+        if (progressPercent) progressPercent.textContent = '75%';
 
         const fallbackRes = await fetch('/api/automations/upload-resource', {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
+            'Content-Type': file.type || 'application/octet-stream',
+            'x-filename': encodeURIComponent(file.name),
             ...(window.getAuthHeaders ? window.getAuthHeaders() : {})
           },
           credentials: 'same-origin',
-          body: JSON.stringify({
-            fileName: file.name,
-            fileType: file.type || 'application/octet-stream',
-            fileData: base64Data
-          })
+          body: file
         });
 
         const fallbackData = await fallbackRes.json();
         if (!fallbackRes.ok) {
-          throw new Error(fallbackData.error || 'Fallback upload failed.');
+          throw new Error(fallbackData.error || 'Direct storage upload failed.');
         }
 
         if (progressBar) progressBar.style.width = '100%';

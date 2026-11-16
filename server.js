@@ -109,6 +109,15 @@ app.use(cookieParser());
 app.use('/api', requireSameOriginForStateChanges);
 billing.register(app);
 
+// Allow 15MB binary and JSON payloads specifically for direct resource upload to R2
+app.use('/api/automations/upload-resource', express.raw({
+  type: ['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/octet-stream'],
+  limit: '15mb'
+}));
+app.use('/api/automations/upload-resource', express.json({
+  limit: '15mb'
+}));
+
 app.use(express.json({
   limit: '100kb',
   verify: (req, res, buf) => {
@@ -1327,16 +1336,36 @@ app.get('/api/storage/file/:id', async (request, response) => {
 // Resource Upload Endpoint (Direct memory-to-R2 upload, zero local disk writes)
 app.post('/api/automations/upload-resource', requireAuth, async (request, response) => {
   try {
-    const { fileName, fileType, fileData } = request.body || {};
-    if (!fileData || !fileName) {
-      return response.status(400).json({ error: 'No file data received.' });
+    let base64Buffer = null;
+    let fileName = null;
+    let mimeType = null;
+
+    if (Buffer.isBuffer(request.body) && request.body.length > 0) {
+      base64Buffer = request.body;
+      const rawHeaderName = request.headers['x-filename'];
+      try {
+        fileName = rawHeaderName ? decodeURIComponent(rawHeaderName) : 'uploaded-file';
+      } catch (_) {
+        fileName = rawHeaderName || 'uploaded-file';
+      }
+      mimeType = (request.headers['content-type'] || 'application/octet-stream').toLowerCase().split(';')[0].trim();
+    } else {
+      const { fileName: fName, fileType, fileData } = request.body || {};
+      if (!fileData || !fName) {
+        return response.status(400).json({ error: 'No file data received.' });
+      }
+      const matches = String(fileData).match(/^data:([A-Za-z0-9\/\-+.]+);base64,(.+)$/);
+      if (!matches || matches.length !== 3) {
+        return response.status(400).json({ error: 'Invalid file payload. Base64 encoding required.' });
+      }
+      mimeType = matches[1].toLowerCase();
+      base64Buffer = Buffer.from(matches[2], 'base64');
+      fileName = fName;
     }
-    const matches = String(fileData).match(/^data:([A-Za-z0-9\/\-+.]+);base64,(.+)$/);
-    if (!matches || matches.length !== 3) {
-      return response.status(400).json({ error: 'Invalid file payload. Base64 encoding required.' });
+
+    if (!fileName || !base64Buffer || base64Buffer.length === 0) {
+      return response.status(400).json({ error: 'No file content received.' });
     }
-    const mimeType = matches[1].toLowerCase();
-    const base64Buffer = Buffer.from(matches[2], 'base64');
 
     if (base64Buffer.length > 10 * 1000 * 1000) {
       return response.status(400).json({ error: 'File size exceeds maximum allowed 10MB limit.' });
