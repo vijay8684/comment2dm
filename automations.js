@@ -1205,6 +1205,17 @@
           }
         }
 
+        if (data.autoPausedCount > 0) {
+          // Refresh list from server to reflect paused status of older automations
+          try {
+            const freshRes = await fetch('/api/automations', { headers: window.getAuthHeaders(), credentials: 'same-origin' });
+            if (freshRes.ok) {
+              const freshData = await freshRes.json();
+              userAutomations = freshData.automations || [];
+            }
+          } catch (_) {}
+        }
+
         // Cache update
         try {
           sessionStorage.setItem('comment2dm_cached_automations', JSON.stringify(userAutomations));
@@ -1212,7 +1223,11 @@
 
         renderAutomations();
         closeBuilder();
-        showNotice(id ? 'Automation updated successfully! ⚡' : 'Automation created and active! ⚡');
+        if (data.autoPausedCount > 0) {
+          showNotice(id ? 'Automation updated! Note: An older conflicting automation on this Reel was paused to avoid duplicate DMs.' : 'Automation launched! Note: An older conflicting automation on this Reel was paused to avoid duplicate DMs.');
+        } else {
+          showNotice(id ? 'Automation updated successfully! ⚡' : 'Automation created and active! ⚡');
+        }
 
       } catch (err) {
         showError('Network error. Unable to save automation.');

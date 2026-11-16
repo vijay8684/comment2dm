@@ -991,6 +991,66 @@ app.post('/api/automations', requireAuth, async (request, response, next) => {
 
     const now = new Date().toISOString();
 
+    // Auto-pause any conflicting active automation on the same Reel to prevent duplicate/conflicting DMs
+    let autoPausedCount = 0;
+    if (isEnabled === 1 && selectedMediaId) {
+      let existingActive = [];
+      if (db.collections && db.collections().automations) {
+        existingActive = await db.collections().automations.find({
+          $or: [{ owner_user_id: String(request.user.id) }, { owner_user_id: request.user.id }],
+          media_id: String(selectedMediaId),
+          enabled: { $in: [true, 1, '1'] }
+        }).toArray();
+      } else {
+        existingActive = await db.all(
+          'SELECT * FROM automations WHERE owner_user_id = ? AND media_id = ? AND enabled = 1',
+          [request.user.id, String(selectedMediaId)]
+        );
+      }
+
+      const newKeywordsSet = new Set(cleanKeywords.map(k => k.toLowerCase()));
+      const conflictingIds = [];
+
+      for (const ex of existingActive) {
+        const exTrigger = ex.trigger_type || 'keyword';
+        if (trigger === 'all' || exTrigger === 'all') {
+          conflictingIds.push(ex._id || ex.id);
+        } else {
+          let exKeywords = [];
+          if (Array.isArray(ex.keywords)) {
+            exKeywords = ex.keywords;
+          } else if (typeof ex.keyword === 'string') {
+            exKeywords = ex.keyword.split(',').map(s => s.trim());
+          }
+          const hasOverlap = exKeywords.some(k => newKeywordsSet.has(k.toLowerCase()));
+          if (hasOverlap) {
+            conflictingIds.push(ex._id || ex.id);
+          }
+        }
+      }
+
+      if (conflictingIds.length > 0) {
+        autoPausedCount = conflictingIds.length;
+        if (db.collections && db.collections().automations) {
+          const { ObjectId } = require('mongodb');
+          const objIds = conflictingIds.filter(id => /^[a-f0-9]{24}$/i.test(String(id))).map(id => new ObjectId(String(id)));
+          await db.collections().automations.updateMany(
+            {
+              $or: [
+                { _id: { $in: objIds } },
+                { id: { $in: conflictingIds.map(String) } }
+              ]
+            },
+            { $set: { enabled: false, updated_at: now } }
+          );
+        } else {
+          for (const cId of conflictingIds) {
+            await db.run('UPDATE automations SET enabled = 0, updated_at = ? WHERE id = ?', [now, cId]);
+          }
+        }
+      }
+    }
+
     const result = await db.run(
       `INSERT INTO automations (owner_user_id, instagram_user_id, keyword, dm_message, enabled, created_at, updated_at, media_id, media_url, reply_template, trigger_type, flow, keywords, media_title, media_thumbnail, media_type)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1029,7 +1089,7 @@ app.post('/api/automations', requireAuth, async (request, response, next) => {
       await storageService.linkAutomationReference(request.user.id, result.lastID, flow.delivery.resourceId);
     }
 
-    return response.status(201).json({ automation: created });
+    return response.status(201).json({ automation: created, autoPausedCount });
   } catch (error) {
     return next(error);
   }
@@ -1149,6 +1209,69 @@ app.patch('/api/automations/:id', requireAuth, async (request, response, next) =
     if (flow !== undefined) newFlow = flow;
 
     const now = new Date().toISOString();
+
+    let autoPausedCount = 0;
+    if (newEnabled === 1 && newMediaId) {
+      let existingActive = [];
+      if (db.collections && db.collections().automations) {
+        existingActive = await db.collections().automations.find({
+          $or: [{ owner_user_id: String(request.user.id) }, { owner_user_id: request.user.id }],
+          media_id: String(newMediaId),
+          enabled: { $in: [true, 1, '1'] }
+        }).toArray();
+      } else {
+        existingActive = await db.all(
+          'SELECT * FROM automations WHERE owner_user_id = ? AND media_id = ? AND enabled = 1',
+          [request.user.id, String(newMediaId)]
+        );
+      }
+
+      // Filter out current automation
+      existingActive = existingActive.filter(a => String(a.id || a._id) !== String(automationId));
+
+      const newKeywordsSet = new Set(Array.isArray(newKeywords) ? newKeywords.map(k => String(k).toLowerCase()) : []);
+      const conflictingIds = [];
+
+      for (const ex of existingActive) {
+        const exTrigger = ex.trigger_type || 'keyword';
+        if (newTrigger === 'all' || exTrigger === 'all') {
+          conflictingIds.push(ex._id || ex.id);
+        } else {
+          let exKeywords = [];
+          if (Array.isArray(ex.keywords)) {
+            exKeywords = ex.keywords;
+          } else if (typeof ex.keyword === 'string') {
+            exKeywords = ex.keyword.split(',').map(s => s.trim());
+          }
+          const hasOverlap = exKeywords.some(k => newKeywordsSet.has(String(k).toLowerCase()));
+          if (hasOverlap) {
+            conflictingIds.push(ex._id || ex.id);
+          }
+        }
+      }
+
+      if (conflictingIds.length > 0) {
+        autoPausedCount = conflictingIds.length;
+        if (db.collections && db.collections().automations) {
+          const { ObjectId } = require('mongodb');
+          const objIds = conflictingIds.filter(id => /^[a-f0-9]{24}$/i.test(String(id))).map(id => new ObjectId(String(id)));
+          await db.collections().automations.updateMany(
+            {
+              $or: [
+                { _id: { $in: objIds } },
+                { id: { $in: conflictingIds.map(String) } }
+              ]
+            },
+            { $set: { enabled: false, updated_at: now } }
+          );
+        } else {
+          for (const cId of conflictingIds) {
+            await db.run('UPDATE automations SET enabled = 0, updated_at = ? WHERE id = ?', [now, cId]);
+          }
+        }
+      }
+    }
+
     await db.run(
       `UPDATE automations
        SET instagram_user_id = ?, keyword = ?, dm_message = ?, enabled = ?, updated_at = ?, media_id = ?, media_url = ?, reply_template = ?, trigger_type = ?, flow = ?, keywords = ?, media_title = ?, media_thumbnail = ?, media_type = ?
@@ -1195,7 +1318,7 @@ app.patch('/api/automations/:id', requireAuth, async (request, response, next) =
       }
     }
 
-    return response.json({ automation: updated });
+    return response.json({ automation: updated, autoPausedCount });
   } catch (error) {
     return next(error);
   }
@@ -1775,12 +1898,26 @@ async function deliverFinalResource({
       deliveryText = `${prefixMessage.trim()}\n\n${deliveryText}`;
     }
     let resourceUrl = flow.delivery?.resourceUrl;
-    if (!resourceUrl && flow.delivery?.resourceId) {
+    if (flow.delivery?.resourceId) {
       try {
-        resourceUrl = await storageService.getResourceAccessUrl(automation.owner_user_id, flow.delivery.resourceId);
+        const directUrl = await storageService.getResourceAccessUrl(automation.owner_user_id, flow.delivery.resourceId);
+        if (directUrl && /^https?:\/\//i.test(directUrl)) {
+          resourceUrl = directUrl;
+        }
       } catch (_) {}
     }
-    const buttonText = (flow.delivery?.buttonText || "Open Link ↗").trim().slice(0, 20);
+
+    // Resolve relative storage URLs (/api/storage/file/:id) to full HTTPS URLs so Meta creates an interactive button & clickable link
+    if (resourceUrl && resourceUrl.startsWith('/')) {
+      const publicBase = (
+        process.env.APP_URL ||
+        process.env.RENDER_EXTERNAL_URL ||
+        (process.env.META_REDIRECT_URI ? new URL(process.env.META_REDIRECT_URI).origin : null) ||
+        'https://comment2dm-roq7.onrender.com'
+      ).replace(/\/$/, '');
+      resourceUrl = `${publicBase}${resourceUrl}`;
+    }
+    const buttonText = (flow.delivery?.buttonText || "Open Free Guide ↗").trim().slice(0, 20);
 
     // Free branding attribution if not white-label
     try {
