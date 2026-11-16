@@ -1327,7 +1327,9 @@ app.patch('/api/automations/:id', requireAuth, async (request, response, next) =
 app.delete('/api/automations/:id', requireAuth, async (request, response, next) => {
   try {
     const automationId = request.params.id;
-    if (db.collections) {
+    const targetResourceIds = [];
+
+    if (db.collections && db.collections().automations) {
       const { ObjectId } = require('mongodb');
       const clauses = [
         { id: String(automationId) },
@@ -1343,6 +1345,17 @@ app.delete('/api/automations/:id', requireAuth, async (request, response, next) 
         { owner_user_id: String(request.user.id) },
         { owner_user_id: request.user.id }
       ];
+
+      const existingAuto = await db.collections().automations.findOne({
+        $and: [
+          { $or: clauses },
+          { $or: ownerClauses }
+        ]
+      });
+      if (existingAuto?.flow?.delivery?.resourceId) {
+        targetResourceIds.push(String(existingAuto.flow.delivery.resourceId));
+      }
+
       await db.collections().automations.deleteMany({
         $and: [
           { $or: clauses },
@@ -1350,9 +1363,37 @@ app.delete('/api/automations/:id', requireAuth, async (request, response, next) 
         ]
       });
     } else {
+      const existingAuto = await db.get('SELECT flow FROM automations WHERE id = ? AND owner_user_id = ?', [automationId, request.user.id]);
+      if (existingAuto?.flow) {
+        try {
+          const parsedFlow = typeof existingAuto.flow === 'string' ? JSON.parse(existingAuto.flow) : existingAuto.flow;
+          if (parsedFlow?.delivery?.resourceId) targetResourceIds.push(String(parsedFlow.delivery.resourceId));
+        } catch (_) {}
+      }
       await db.run('DELETE FROM automations WHERE id = ? AND owner_user_id = ?', [automationId, request.user.id]);
     }
+
     await storageService.unlinkAutomationReference(request.user.id, automationId);
+
+    // Auto-reclaim customer Cloudflare R2 storage quota if file is not referenced by any other automation
+    for (const resId of targetResourceIds) {
+      try {
+        let stillInUse = 0;
+        if (db.collections && db.collections().automations) {
+          stillInUse = await db.collections().automations.countDocuments({
+            $or: [{ owner_user_id: String(request.user.id) }, { owner_user_id: request.user.id }],
+            'flow.delivery.resourceId': resId
+          });
+        }
+        if (stillInUse === 0) {
+          await storageService.deleteResource(request.user.id, resId);
+          console.log(`[STORAGE] Auto-deleted unreferenced resource ${resId} from R2 to free customer storage quota.`);
+        }
+      } catch (cleanErr) {
+        console.warn(`[STORAGE AUTO-CLEANUP NOTE]: Failed to delete ${resId} from R2:`, cleanErr.message);
+      }
+    }
+
     return response.status(204).end();
   } catch (error) {
     return next(error);
