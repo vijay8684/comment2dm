@@ -418,17 +418,76 @@
       if (progressBar) progressBar.style.width = '55%';
       if (progressPercent) progressPercent.textContent = '55%';
 
-      // 2. Direct browser-to-R2 PUT upload (presigned URL)
-      const uploadRes = await fetch(presignData.uploadUrl, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': file.type || 'application/octet-stream'
-        },
-        body: file
-      });
+      let directUploadFailed = false;
 
-      if (!uploadRes.ok) {
-        throw new Error(`Upload to storage bucket failed with status ${uploadRes.status}`);
+      // 2. Direct browser-to-R2 PUT upload (presigned URL)
+      try {
+        const uploadRes = await fetch(presignData.uploadUrl, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': file.type || 'application/octet-stream'
+          },
+          body: file
+        });
+
+        if (!uploadRes.ok) {
+          throw new Error(`Upload to storage bucket returned status ${uploadRes.status}`);
+        }
+      } catch (directErr) {
+        // Fallback to server buffer upload if browser CORS / network blocked direct PUT
+        console.warn('[STORAGE] Direct R2 PUT failed or blocked by CORS, falling back to server upload:', directErr.message);
+        directUploadFailed = true;
+      }
+
+      if (directUploadFailed) {
+        if (progressBar) progressBar.style.width = '70%';
+        if (progressPercent) progressPercent.textContent = '70%';
+
+        const base64Data = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(new Error('Failed to read file for storage upload.'));
+          reader.readAsDataURL(file);
+        });
+
+        const fallbackRes = await fetch('/api/automations/upload-resource', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(window.getAuthHeaders ? window.getAuthHeaders() : {})
+          },
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            fileName: file.name,
+            fileType: file.type || 'application/octet-stream',
+            fileData: base64Data
+          })
+        });
+
+        const fallbackData = await fallbackRes.json();
+        if (!fallbackRes.ok) {
+          throw new Error(fallbackData.error || 'Fallback upload failed.');
+        }
+
+        if (progressBar) progressBar.style.width = '100%';
+        if (progressPercent) progressPercent.textContent = '100%';
+        setTimeout(() => { if (progressContainer) progressContainer.style.display = 'none'; }, 500);
+
+        uploadedResourceData = {
+          resourceId: fallbackData.resourceId,
+          url: fallbackData.url,
+          fileName: fallbackData.fileName,
+          fileSize: fallbackData.fileSize
+        };
+
+        if (uploadedFileCard) uploadedFileCard.style.display = 'flex';
+        if (uploadedFileName) uploadedFileName.textContent = fallbackData.fileName;
+        if (uploadedFileSize) uploadedFileSize.textContent = (fallbackData.fileSize / (1000 * 1000)).toFixed(2) + ' MB';
+        if (uploadDropzone) uploadDropzone.style.display = 'none';
+
+        await loadStorageUsage();
+        updateSimulator();
+        return;
       }
 
       if (progressBar) progressBar.style.width = '85%';
