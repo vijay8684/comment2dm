@@ -967,10 +967,11 @@ app.post('/api/automations', requireAuth, async (request, response, next) => {
       if (!autCheck.allowed) {
         if (autCheck.code === 'ENTRY_FEE_REQUIRED') {
           return response.status(403).json({
-            error: autCheck.message || '₹1/month entry access is required to create or activate automations. You can explore all other features for free.',
+            error: autCheck.message || 'Starter Access Pass (₹1 one-time entry fee) is required to create or activate automations. You can explore all other platform features for free.',
             code: 'ENTRY_FEE_REQUIRED',
             requiresPayment: true,
-            entryPrice: autCheck.entryPrice || 1
+            entryPrice: autCheck.entryPrice || 1,
+            accessPass: 'Starter Access Pass — ₹1'
           });
         }
         return response.status(403).json({
@@ -1107,10 +1108,11 @@ app.patch('/api/automations/:id', requireAuth, async (request, response, next) =
       if (!autCheck.allowed) {
         if (autCheck.code === 'ENTRY_FEE_REQUIRED') {
           return response.status(403).json({
-            error: autCheck.message || '₹1/month entry access is required to create or activate automations. You can explore all other features for free.',
+            error: autCheck.message || 'Starter Access Pass (₹1 one-time entry fee) is required to create or activate automations. You can explore all other platform features for free.',
             code: 'ENTRY_FEE_REQUIRED',
             requiresPayment: true,
-            entryPrice: autCheck.entryPrice || 1
+            entryPrice: autCheck.entryPrice || 1,
+            accessPass: 'Starter Access Pass — ₹1'
           });
         }
         return response.status(403).json({

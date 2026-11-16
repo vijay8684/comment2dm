@@ -984,13 +984,13 @@
           key: data.keyId,
           subscription_id: data.subscriptionId,
           name: data.name || 'Comment2DM',
-          description: 'Unlock Automations (₹1/mo Entry Access)',
+          description: 'Starter Access Pass — ₹1 (One-time entry fee)',
           prefill: data.prefill || { email: userEmail },
           theme: { color: '#7655D9' },
           modal: {
             ondismiss: function () {
               unlockEntryFeeBtn.disabled = false;
-              unlockEntryFeeBtn.innerHTML = '<span>Unlock for ₹1 ⚡</span>';
+              unlockEntryFeeBtn.innerHTML = '<span>Unlock Starter Pass for ₹1 ⚡</span>';
             }
           },
           handler: async (response) => {
@@ -1008,13 +1008,13 @@
               });
               const vd = await verifyRes.json();
               if (!verifyRes.ok) throw new Error(vd.error || 'Verification failed');
-              showNotice('🎉 Entry Access Unlocked! Welcome to Comment2DM Automations.');
+              showNotice('🎉 Starter Access Pass Active! Automations unlocked.');
               closeEntryGateModal();
               setTimeout(() => location.reload(), 1500);
             } catch (err) {
               showError('Payment verification failed: ' + err.message);
               unlockEntryFeeBtn.disabled = false;
-              unlockEntryFeeBtn.innerHTML = '<span>Unlock for ₹1 ⚡</span>';
+              unlockEntryFeeBtn.innerHTML = '<span>Unlock Starter Pass for ₹1 ⚡</span>';
             }
           }
         };
@@ -1443,12 +1443,16 @@
         const billData = await billRes.value.json().catch(() => ({}));
         userPlan = (billData.plan || 'free').toLowerCase();
         userEmail = billData.email || '';
-        const entryPricing = billData.entryPricing;
-        const hasPaidEntry = Boolean(billData.hasPaidEntry);
-        if (userPlan === 'free' && entryPricing && entryPricing.is_active && entryPricing.gate_automations_if_unpaid && !hasPaidEntry) {
-          isEntryGated = true;
-          const banner = document.getElementById('entryFeeBanner');
-          if (banner) banner.style.display = 'flex';
+        const isSubscriber = userPlan === 'pro' || userPlan === 'elite' || billData.isAdmin === true;
+        const autoAccess = billData.automationAccess || {};
+        
+        // Active Pro, Elite, or Admin accounts NEVER get gated by entry fee
+        const isGated = !isSubscriber && (autoAccess.isGated === true || (billData.entryPricing?.gate_automations_if_unpaid && !billData.hasPaidEntry));
+        isEntryGated = isGated;
+
+        const banner = document.getElementById('entryFeeBanner');
+        if (banner) {
+          banner.style.display = isGated ? 'flex' : 'none';
         }
         updateSimulator();
       }

@@ -74,12 +74,12 @@ const CANONICAL_DEFAULTS = {
     monthly: 1,
     promotional_price: 1,
     regular_price: 70,
-    payment_model: 'recurring', // 'recurring' | 'one_time' | 'introductory'
-    autopay_enabled: true, // AutoPay for new subscriptions: ON / OFF
+    payment_model: 'one_time', // 'one_time' | 'recurring' | 'introductory'
+    autopay_enabled: false, // AutoPay for new subscriptions: OFF by default for one-time pass
     gate_automations_if_unpaid: true,
     start_date: null,
     end_date: null,
-    badge_text: '₹1 ENTRY OFFER',
+    badge_text: 'STARTER ACCESS PASS — ₹1',
     is_active: true
   }
 };
@@ -510,16 +510,22 @@ async function getEffectivePricing(atDate = new Date()) {
     result.plans.free.amount_paise = entry.monthly * 100;
     result.plans.free.regular_price = entry.regular_price || 70;
     result.plans.free.requires_paid_entry = true;
-    result.plans.free.payment_model = entry.payment_model || 'recurring';
-    result.plans.free.autopay_enabled = entry.autopay_enabled !== false;
+    result.plans.free.payment_model = entry.payment_model || 'one_time';
+    result.plans.free.autopay_enabled = Boolean(entry.autopay_enabled);
     result.plans.free.gate_automations_if_unpaid = entry.gate_automations_if_unpaid !== false;
     result.plans.free.is_sale = true;
-    result.plans.free.badge = entry.badge_text || '₹1 ENTRY';
+    result.plans.free.badge = entry.badge_text || 'STARTER ACCESS PASS — ₹1';
+    result.plans.free.access_name = 'Starter Access Pass — ₹1';
+    result.plans.free.display_period = (entry.payment_model === 'one_time') ? 'one-time entry fee' : 'monthly';
+    result.plans.free.interval = (entry.payment_model === 'one_time') ? 'one_time' : 'monthly';
   } else {
     result.plans.free.requires_paid_entry = false;
-    result.plans.free.payment_model = entry.payment_model || 'recurring';
-    result.plans.free.autopay_enabled = entry.autopay_enabled !== false;
+    result.plans.free.payment_model = entry.payment_model || 'one_time';
+    result.plans.free.autopay_enabled = Boolean(entry.autopay_enabled);
     result.plans.free.gate_automations_if_unpaid = false;
+    result.plans.free.access_name = null;
+    result.plans.free.display_period = 'free forever';
+    result.plans.free.interval = 'monthly';
   }
   result.entry_pricing = {
     ...entry,

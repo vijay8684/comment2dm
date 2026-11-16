@@ -310,6 +310,34 @@
       if (sideStorageFill) sideStorageFill.style.width = storagePct + '%';
       if (sideStorageRemaining) sideStorageRemaining.textContent = `Remaining: ${storageRemaining}`;
 
+      // Starter Access Pass UI handling (Separate access status from base plan)
+      const starterPassSec = document.getElementById('starterPassSection');
+      const starterPassUnpaidSec = document.getElementById('starterPassUnpaidSection');
+      const unlockStarterBtn = document.getElementById('unlockStarterPassBtn');
+
+      if (currentPlan === 'free') {
+        const hasPaid = Boolean(data.hasPaidEntry);
+        const isGated = Boolean(data.entryPricing?.gate_automations_if_unpaid || data.automationAccess?.isGated);
+
+        if (hasPaid) {
+          if (starterPassSec) starterPassSec.style.display = 'block';
+          if (starterPassUnpaidSec) starterPassUnpaidSec.style.display = 'none';
+        } else if (isGated) {
+          if (starterPassUnpaidSec) starterPassUnpaidSec.style.display = 'block';
+          if (starterPassSec) starterPassSec.style.display = 'none';
+          if (unlockStarterBtn) {
+            unlockStarterBtn.onclick = () => initiateCheckout('entry_monthly');
+          }
+        } else {
+          if (starterPassSec) starterPassSec.style.display = 'none';
+          if (starterPassUnpaidSec) starterPassUnpaidSec.style.display = 'none';
+        }
+      } else {
+        // Pro, Elite, or Admin users: NEVER show Starter Access Pass prompts
+        if (starterPassSec) starterPassSec.style.display = 'none';
+        if (starterPassUnpaidSec) starterPassUnpaidSec.style.display = 'none';
+      }
+
       renderPlanCards();
     } catch {
       renderPlanCards();
@@ -341,14 +369,38 @@
       const payments = data.payments || data || [];
       const tbody = document.getElementById('historyBody');
       if (!tbody) return;
-      if (!payments.length) return;
+      if (!payments.length) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:30px;color:var(--ink-muted);">No payment history yet.</td></tr>';
+        return;
+      }
 
       tbody.innerHTML = payments.map(p => {
-        const status = p.status === 'paid' ? '<span style="color:#10b981;">✅ Paid</span>' : p.status === 'failed' ? '<span style="color:#f43f5e;">❌ Failed</span>' : '<span style="color:#f59e0b;">⏳ Pending</span>';
+        const isPaid = p.status === 'paid' || p.status === 'captured';
+        const isFailed = p.status === 'failed';
+        const statusHtml = isPaid
+          ? '<span style="color:var(--emerald); font-weight:600;">✅ Paid</span>'
+          : isFailed
+          ? '<span style="color:var(--rose); font-weight:600;">❌ Failed</span>'
+          : '<span style="color:var(--amber); font-weight:600;">⏳ Pending</span>';
+
         const date = new Date(p.createdAt || p.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-        const amount = p.amount ? `₹${(p.amount / 100).toLocaleString('en-IN')}` : '–';
-        const plan = p.plan ? p.plan.charAt(0).toUpperCase() + p.plan.slice(1) : '–';
-        return `<tr><td>${date}</td><td>${plan}</td><td>${amount}</td><td>${status}</td></tr>`;
+        
+        let planDisplay = p.plan || '–';
+        if (p.isEntryPass || p.plan === 'entry' || p.plan === 'entry_monthly' || p.amount === 100 || String(planDisplay).toLowerCase().includes('starter')) {
+          planDisplay = 'Starter Access Pass — ₹1';
+        } else {
+          planDisplay = planDisplay.charAt(0).toUpperCase() + planDisplay.slice(1);
+        }
+
+        const amount = p.amount ? `₹${(p.amount / 100).toLocaleString('en-IN')}` : (p.isEntryPass ? '₹1' : '–');
+        const paymentTypeNote = p.paymentModel ? `<div style="font-size:0.72rem; color:var(--ink-secondary); font-weight:400;">${p.paymentModel}</div>` : '';
+
+        return `<tr>
+          <td>${date}</td>
+          <td><strong>${planDisplay}</strong>${paymentTypeNote}</td>
+          <td><strong>${amount}</strong></td>
+          <td>${statusHtml}</td>
+        </tr>`;
       }).join('');
     } catch {}
   }

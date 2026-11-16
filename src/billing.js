@@ -17,7 +17,9 @@ const PLANS = {
     currency: 'INR',
     period: 'monthly',
     totalCount: 120,
-    name: 'Comment2DM Entry Monthly'
+    name: 'Starter Access Pass — ₹1',
+    display_name: 'Starter Access Pass — ₹1',
+    payment_model: 'one_time'
   },
   pro_monthly: {
     plan: 'pro',
@@ -412,28 +414,83 @@ async function counts(uid) {
   return { accounts, automations, dmMonthly };
 }
 
+/**
+ * Central automation access and entitlement checker
+ * Ensures active Pro, Elite, and Admin subscribers unconditionally bypass entry gates.
+ */
+async function getAutomationAccess(uid, options = {}) {
+  const e = await entitlement(uid, options);
+  const c = await counts(uid);
+
+  // 1. Pro, Elite subscribers & Admins NEVER get gated by the ₹1 entry fee
+  if (e.isAdmin || e.plan === 'pro' || e.plan === 'elite') {
+    return {
+      allowed: true,
+      canCreate: true,
+      canActivate: true,
+      isGated: false,
+      plan: e.plan,
+      isAdmin: Boolean(e.isAdmin),
+      hasPaidEntry: true,
+      used: c.automations,
+      limit: e.limits?.automations ?? Infinity,
+      message: 'Active subscription entitlements verified.'
+    };
+  }
+
+  // 2. Free tier account gating check
+  const entryPricing = await pricingService.getEntryPricing();
+  const entryActive = entryPricing && entryPricing.is_active && entryPricing.monthly > 0 && entryPricing.gate_automations_if_unpaid;
+
+  if (entryActive && !e.hasPaidEntry) {
+    return {
+      allowed: false,
+      canCreate: false,
+      canActivate: false,
+      isGated: true,
+      code: 'ENTRY_FEE_REQUIRED',
+      requiresPayment: true,
+      entryPrice: entryPricing.monthly || 1,
+      accessPass: 'Starter Access Pass — ₹1',
+      paymentModel: entryPricing.payment_model || 'one_time',
+      message: 'Starter Access Pass (₹1 one-time entry fee) is required to create or activate automations. You can explore all other platform features for free.'
+    };
+  }
+
+  // 3. Paid Starter Pass or entry gate inactive: Free plan limit is 2 active automations
+  const freeLimit = e.limits?.automations ?? 2;
+  const canCreate = c.automations < freeLimit;
+
+  return {
+    allowed: canCreate,
+    canCreate,
+    canActivate: true,
+    isGated: false,
+    plan: 'free',
+    hasPaidEntry: Boolean(e.hasPaidEntry),
+    accessPass: e.hasPaidEntry ? 'Starter Access Pass — ₹1' : null,
+    used: c.automations,
+    limit: freeLimit,
+    message: canCreate ? 'Starter access active.' : `Free plan limit reached (${c.automations}/${freeLimit} automations). Upgrade to Pro or Elite for unlimited automations.`
+  };
+}
+
 async function check(uid, resource, options = {}) {
   const e = await entitlement(uid, options);
   const c = await counts(uid);
 
-  // ₹1 Entry Fee Gating for Automations (Owner can toggle in /vi-tech)
-  if (resource === 'automations' && !e.isAdmin && e.plan === 'free') {
-    const entryPricing = await pricingService.getEntryPricing();
-    const entryActive = entryPricing && entryPricing.is_active && entryPricing.monthly > 0 && entryPricing.gate_automations_if_unpaid;
-    if (entryActive && !e.hasPaidEntry) {
-      return {
-        ...e,
-        used: c.automations,
-        allowed: false,
-        code: 'ENTRY_FEE_REQUIRED',
-        requiresPayment: true,
-        entryPrice: entryPricing.monthly,
-        message: `₹${entryPricing.monthly}/month entry access is required to create or activate automations. You can explore all other features for free.`
-      };
-    }
+  if (resource === 'automations') {
+    const autoAccess = await getAutomationAccess(uid, options);
+    return {
+      ...e,
+      used: c.automations,
+      allowed: autoAccess.allowed,
+      automationAccess: autoAccess,
+      ...(autoAccess.code ? { code: autoAccess.code, requiresPayment: autoAccess.requiresPayment, message: autoAccess.message } : {})
+    };
   }
 
-  const used = resource === 'instagramAccounts' ? c.accounts : resource === 'automations' ? c.automations : c.dmMonthly;
+  const used = resource === 'instagramAccounts' ? c.accounts : c.dmMonthly;
   return { ...e, used, allowed: e.limits[resource] === Infinity || used < e.limits[resource] };
 }
 
@@ -573,7 +630,7 @@ async function create(req, res) {
   );
 
   if (existing) {
-    if (existing.status === 'active') {
+    if (existing.status === 'active' && existing.plan_key !== 'entry_monthly' && existing.plan !== 'entry') {
       return res.status(409).json({ error: 'You already have an active subscription. Cancel it before starting another plan.' });
     }
     if (existing.plan_key === rawKey && existing.razorpay_subscription_id && !req.body?.couponCode) {
@@ -715,6 +772,10 @@ async function verify(req, res) {
   // If there was a reserved coupon for this subscription, confirm redemption
   await couponService.confirmRedemption(sid, pid);
 
+  const isEntry = s.plan_key === 'entry_monthly' || s.plan === 'entry';
+  const itemName = isEntry ? 'Starter Access Pass — ₹1' : (s.plan === 'elite' ? 'Elite Plan' : 'Pro Plan');
+  const paymentModel = isEntry ? 'one_time' : 'recurring';
+
   // Record captured payment
   await d.collection('payments').updateOne(
     { razorpay_payment_id: pid },
@@ -723,10 +784,12 @@ async function verify(req, res) {
         user_id: u.id,
         subscription_id: sid,
         razorpay_payment_id: pid,
-        plan: s.plan,
-        amount: s.amount || PLANS[s.plan_key]?.amount || 7000,
+        plan: isEntry ? 'entry_monthly' : s.plan,
+        item_name: itemName,
+        amount: s.amount || PLANS[s.plan_key]?.amount || (isEntry ? 100 : 7000),
         currency: 'INR',
-        status: 'captured',
+        status: 'paid',
+        payment_model: paymentModel,
         created_at: nowIso
       }
     },
@@ -740,7 +803,8 @@ async function verify(req, res) {
       $set: {
         entry_paid: true,
         entry_paid_at: nowIso,
-        entry_expires_at: currentEndIso
+        entry_expires_at: isEntry ? null : currentEndIso,
+        entry_payment_id: pid
       }
     }
   );
@@ -922,11 +986,21 @@ async function status(req, res) {
     pricingService.getEffectivePricing()
   ]);
 
+  const autoAccess = await getAutomationAccess(u.id, req);
+
   return res.json({
     plan: e.plan,
     isAdmin: !!e.isAdmin,
     hasPaidEntry: Boolean(e.hasPaidEntry),
     entryPricing: effectivePricing.entry_pricing || null,
+    automationAccess: autoAccess,
+    starterPass: {
+      name: 'Starter Access Pass — ₹1',
+      amount: 1,
+      currency: 'INR',
+      paymentModel: effectivePricing.entry_pricing?.payment_model || 'one_time',
+      status: e.hasPaidEntry ? 'Paid' : 'Unpaid'
+    },
     subscription: e.subscription ? { status: e.subscription.status, billingCycle: e.subscription.billing_cycle, currentEnd: e.subscription.current_end } : null,
     limits: {
       instagramAccounts: Number.isFinite(e.limits.instagramAccounts) ? e.limits.instagramAccounts : null,
@@ -956,6 +1030,45 @@ async function status(req, res) {
       storagePercentage: storageUsage.percentage
     }
   });
+}
+
+
+async function history(req, res) {
+  const u = await auth(req);
+  if (!u) return res.status(401).json({ error: 'Authentication required.' });
+
+  try {
+    const d = await store();
+    const rawPayments = await d.collection('payments')
+      .find({ user_id: u.id })
+      .sort({ created_at: -1 })
+      .limit(50)
+      .toArray();
+
+    const payments = rawPayments.map(p => {
+      const isEntry = p.plan === 'entry' || p.plan === 'entry_monthly' || p.amount === 100 || (p.item_name && p.item_name.includes('Starter Access Pass'));
+      const planDisplay = isEntry ? 'Starter Access Pass — ₹1' : (p.plan === 'elite' ? 'Elite' : p.plan === 'pro' ? 'Pro' : (p.plan ? p.plan.charAt(0).toUpperCase() + p.plan.slice(1) : '–'));
+      const paymentModel = isEntry ? 'One-time payment' : 'Monthly subscription';
+      const status = (p.status === 'captured' || p.status === 'paid' || p.status === 'success') ? 'paid' : (p.status === 'failed' ? 'failed' : 'pending');
+
+      return {
+        id: p.razorpay_payment_id || p._id,
+        plan: planDisplay,
+        rawPlan: p.plan,
+        amount: p.amount || (isEntry ? 100 : 7000),
+        currency: p.currency || 'INR',
+        status,
+        paymentModel,
+        isEntryPass: isEntry,
+        created_at: p.created_at || new Date().toISOString()
+      };
+    });
+
+    return res.json({ payments });
+  } catch (err) {
+    console.error('[Billing History Error]:', err.message);
+    return res.json({ payments: [] });
+  }
 }
 
 function getCanonicalPlans() {
@@ -1025,6 +1138,7 @@ async function webhook(req, res) {
 function register(app) {
   app.post('/api/billing/webhook', require('express').raw({ type: 'application/json', limit: '256kb' }), webhook);
   app.get('/api/billing/status', status);
+  app.get('/api/billing/history', history);
   app.get('/api/billing/plans', plansEndpoint);
   app.post('/api/billing/create-subscription', billingRateLimit, require('express').json({ limit: '10kb' }), create);
   app.post('/api/billing/verify-subscription', billingRateLimit, require('express').json({ limit: '10kb' }), verify);
@@ -1051,10 +1165,18 @@ function register(app) {
     const u = await auth(req);
     if (!u) return next();
     try {
-      const r = await check(u.id, 'automations');
-      if (!r.allowed) {
+      const access = await getAutomationAccess(u.id);
+      if (!access.allowed) {
+        if (access.isGated) {
+          return res.status(403).json({
+            error: access.message,
+            code: 'ENTRY_FEE_REQUIRED',
+            requiresPayment: true,
+            entryPrice: access.entryPrice || 1
+          });
+        }
         return res.status(403).json({
-          error: `Your ${r.plan.toUpperCase()} plan allows ${r.limits.automations} active automations. Upgrade to Pro or Elite to create more.`
+          error: access.message || `Your ${access.plan.toUpperCase()} plan allows ${access.limit} active automations. Upgrade to Pro or Elite to create more.`
         });
       }
       next();
@@ -1137,5 +1259,7 @@ module.exports = {
   getCanonicalPlans,
   isAdminEmail,
   getAdminEmails,
-  getActiveSubscription
+  getActiveSubscription,
+  getAutomationAccess,
+  history
 };

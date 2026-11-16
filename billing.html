@@ -264,6 +264,48 @@
               <div style="font-size:0.72rem;color:var(--ink-secondary);margin-top:2px;" id="storageRemainingText">Remaining: 150 MB</div>
             </div>
           </div>
+
+          <!-- Starter Access Pass status indicator (Shown only for Free plan accounts) -->
+          <div id="starterPassSection" style="display:none; margin-top:16px; padding-top:14px; border-top:1px solid var(--glass-border); width:100%;">
+            <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <span style="font-size:1.3rem;">⚡</span>
+                <div>
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <strong style="font-size:0.95rem; color:var(--ink);" id="starterPassTitle">Starter Access Pass — ₹1</strong>
+                    <span class="plan-badge" id="starterPassBadge" style="background:var(--emerald-tint); color:var(--emerald); border:1px solid rgba(16,185,129,0.3); font-size:0.72rem; padding:2px 8px;">✅ Paid (₹1)</span>
+                  </div>
+                  <div style="font-size:0.78rem; color:var(--ink-secondary); margin-top:2px;" id="starterPassSubtitle">
+                    Access: Starter Access Pass • Payment: ₹1 (One-time payment) • Studio & automations unlocked
+                  </div>
+                </div>
+              </div>
+              <div style="font-size:0.8rem; color:var(--ink-muted);">
+                Plan: <strong style="color:var(--ink);">Free</strong>
+              </div>
+            </div>
+          </div>
+
+          <!-- Unpaid Entry Pass section (Shown only when Free plan user needs to unlock Starter Pass) -->
+          <div id="starterPassUnpaidSection" style="display:none; margin-top:16px; padding-top:14px; border-top:1px solid var(--glass-border); width:100%;">
+            <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <span style="font-size:1.3rem;">🔒</span>
+                <div>
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <strong style="font-size:0.95rem; color:var(--ink);">Starter Access Pass</strong>
+                    <span class="plan-badge" style="background:var(--amber-tint); color:var(--amber); border:1px solid rgba(245,158,11,0.3); font-size:0.72rem; padding:2px 8px;">Explore Only (Unpaid)</span>
+                  </div>
+                  <div style="font-size:0.78rem; color:var(--ink-secondary); margin-top:2px;">
+                    A ₹1 one-time entry fee is required to create or activate automations. You can explore all other platform pages for free.
+                  </div>
+                </div>
+              </div>
+              <div>
+                <button type="button" class="btn btn-accent btn-sm" id="unlockStarterPassBtn" style="font-size:0.82rem; padding:6px 14px; box-shadow:0 4px 14px var(--accent-glow);">Unlock Starter Pass for ₹1 ⚡</button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div style="max-width:400px; margin: 24px auto 32px auto; display:flex; gap: 8px;">

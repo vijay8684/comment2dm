@@ -3493,3 +3493,122 @@ p {
   background: var(--surface-raised) !important;
 }
 
+/* ============================================================
+   Comment2DM High-Contrast Light Mode Enhancements
+   Strictly enforces crisp readable dark typography on light surfaces
+   ============================================================ */
+
+[data-theme="light"] body {
+  color: #0D0B12;
+  background-color: #F8F7FA;
+}
+
+[data-theme="light"] .panel-title,
+[data-theme="light"] .settings-panel h1,
+[data-theme="light"] .settings-panel h2,
+[data-theme="light"] .settings-panel h3,
+[data-theme="light"] .page-main-heading,
+[data-theme="light"] .app-main h1,
+[data-theme="light"] .app-main h2,
+[data-theme="light"] .app-main h3 {
+  color: #0D0B12 !important;
+}
+
+[data-theme="light"] .panel-sub,
+[data-theme="light"] .settings-layout p,
+[data-theme="light"] .app-main p {
+  color: #474154;
+}
+
+[data-theme="light"] .form-row label,
+[data-theme="light"] label {
+  color: #474154 !important;
+}
+
+[data-theme="light"] .form-input,
+[data-theme="light"] input:not([type="checkbox"]):not([type="radio"]),
+[data-theme="light"] textarea,
+[data-theme="light"] select {
+  background: #FFFFFF !important;
+  color: #0D0B12 !important;
+  border: 1px solid rgba(118, 85, 217, 0.2) !important;
+}
+
+[data-theme="light"] .settings-tab {
+  color: #474154 !important;
+}
+
+[data-theme="light"] .settings-tab:hover {
+  background: #ECE9F4 !important;
+  color: #0D0B12 !important;
+}
+
+[data-theme="light"] .settings-tab.active {
+  background: rgba(118, 85, 217, 0.14) !important;
+  color: #6D28D9 !important;
+}
+
+[data-theme="light"] .faq-question span {
+  color: #0D0B12 !important;
+}
+
+[data-theme="light"] .faq-arrow {
+  color: #6B6577 !important;
+}
+
+[data-theme="light"] .faq-answer p {
+  color: #474154 !important;
+}
+
+[data-theme="light"] .chat-card {
+  background: #FFFFFF !important;
+}
+
+[data-theme="light"] .chat-header {
+  border-bottom-color: rgba(118, 85, 217, 0.15) !important;
+  color: #0D0B12 !important;
+}
+
+[data-theme="light"] .chat-header strong {
+  color: #0D0B12 !important;
+}
+
+[data-theme="light"] .chat-bubble.bot {
+  background: #ECE9F4 !important;
+  color: #0D0B12 !important;
+  border: 1px solid rgba(118, 85, 217, 0.15) !important;
+}
+
+[data-theme="light"] .chat-time {
+  color: #6B6577 !important;
+}
+
+[data-theme="light"] .theme-toggle-btn {
+  background: #F4F2F8 !important;
+  border-color: rgba(118, 85, 217, 0.22) !important;
+  color: #474154 !important;
+}
+
+[data-theme="light"] .theme-toggle-btn svg {
+  stroke: #474154 !important;
+}
+
+[data-theme="light"] .account-selector {
+  background: #F4F2F8 !important;
+  border-color: rgba(118, 85, 217, 0.15) !important;
+}
+
+[data-theme="light"] .account-username {
+  color: #0D0B12 !important;
+}
+
+[data-theme="light"] .user-profile-trigger {
+  background: #F4F2F8 !important;
+  border-color: rgba(118, 85, 217, 0.15) !important;
+}
+
+[data-theme="light"] #topbarUserName {
+  color: #0D0B12 !important;
+}
+
+
