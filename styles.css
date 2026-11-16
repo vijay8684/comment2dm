@@ -51,6 +51,39 @@
   --shadow-elevated: 0 16px 36px -8px rgba(118, 85, 217, 0.10);
 }
 
+[data-theme="light"] {
+  /* Comment2DM High-Contrast Crisp Light Theme */
+  --bg: #F8F7FA;
+  --bg-secondary: #FFFFFF;
+  --surface: #FFFFFF;
+  --surface-hover: #F4F2F8;
+  --surface-raised: #ECE9F4;
+  --glass: rgba(255, 255, 255, 0.95);
+  --glass-border: rgba(118, 85, 217, 0.14);
+  --glass-border-hover: rgba(118, 85, 217, 0.32);
+
+  --ink: #0D0B12;
+  --ink-secondary: #474154;
+  --ink-muted: #6B6577;
+
+  --accent: #7655D9;
+  --accent-light: #6D28D9;
+  --accent-dark: #4C1D95;
+  --accent-gradient: linear-gradient(135deg, #7655D9 0%, #936BFF 50%, #D946A8 100%);
+  --accent-glow: rgba(118, 85, 217, 0.18);
+
+  --emerald: #059669;
+  --emerald-tint: rgba(5, 150, 105, 0.12);
+  --rose: #E11D48;
+  --rose-tint: rgba(225, 29, 72, 0.12);
+  --amber: #D97706;
+  --amber-tint: rgba(217, 119, 6, 0.12);
+
+  --shadow-sm: 0 2px 8px rgba(13, 11, 18, 0.05);
+  --shadow-card: 0 8px 24px -4px rgba(13, 11, 18, 0.08);
+  --shadow-elevated: 0 16px 36px -8px rgba(118, 85, 217, 0.12);
+}
+
 [data-theme="dark"] {
   /* Comment2DM Obsidian Dark Theme */
   --bg: #0D0B12;
@@ -705,35 +738,40 @@ p {
   padding: 12px;
 }
 
-/* Sidebar Footer: DM Limit Bar & Mini-Pie Gauge */
+/* Sidebar Footer: Dual Progress Bars (DM & Storage) & Mini-Pie Gauge */
 .sidebar-foot {
   padding: 16px;
   border-top: 1px solid var(--glass-border);
-  background: rgba(0, 0, 0, 0.15);
+  background: var(--surface-hover);
 }
 
 .dm-limit-card {
   padding: 14px;
   border-radius: var(--radius-m);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface);
   border: 1px solid var(--glass-border);
 }
 
 .dm-limit-header {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   font-size: 0.8rem;
   color: var(--ink-secondary);
-  margin-bottom: 8px;
+  margin-bottom: 6px;
+}
+.dm-limit-header strong {
+  color: var(--ink);
+  font-weight: 700;
 }
 
 .dm-progress-track {
   width: 100%;
   height: 6px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-raised);
   border-radius: var(--radius-pill);
   overflow: hidden;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .dm-progress-fill {
@@ -741,6 +779,44 @@ p {
   background: var(--accent-gradient);
   border-radius: var(--radius-pill);
   transition: width 0.4s ease;
+}
+
+.storage-limit-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.78rem;
+  color: var(--ink-secondary);
+  margin-top: 6px;
+  margin-bottom: 4px;
+}
+.storage-limit-header strong {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.storage-progress-track {
+  width: 100%;
+  height: 6px;
+  background: var(--surface-raised);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  margin-bottom: 3px;
+}
+
+.storage-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #06b6d4, #3b82f6) !important;
+  border-radius: var(--radius-pill);
+  transition: width 0.4s ease;
+}
+
+.storage-remaining-note {
+  font-size: 0.72rem;
+  color: var(--ink-muted);
+  text-align: right;
+  margin-bottom: 8px;
+  font-weight: 500;
 }
 
 /* Collapsed Mini Pie Gauge */
@@ -2512,9 +2588,53 @@ p {
 @media (max-width: 768px) {
   .app-sidebar {
     transform: translateX(-100%);
+    z-index: 1050;
+    box-shadow: none;
+    transition: transform 0.28s var(--ease-apple);
   }
   .app-sidebar.open {
     transform: translateX(0);
+    box-shadow: 0 0 50px rgba(0, 0, 0, 0.55);
+  }
+  .sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    z-index: 1040;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.25s ease, visibility 0.25s;
+    pointer-events: none;
+  }
+  .sidebar-backdrop.active {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+  }
+  body.sidebar-open {
+    overflow: hidden !important;
+    touch-action: none;
+  }
+  .sidebar-close-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--surface-hover);
+    color: var(--ink-secondary);
+    border: 1px solid var(--glass-border);
+    cursor: pointer;
+    font-size: 1.1rem;
+    line-height: 1;
+    transition: all 0.2s;
+  }
+  .sidebar-close-btn:hover {
+    color: var(--ink);
+    background: var(--surface-raised);
   }
   .app-main {
     margin-left: 0 !important;
@@ -2616,6 +2736,12 @@ p {
   .builder-layout {
     grid-template-columns: 1fr;
     gap: 24px;
+  }
+}
+
+@media (min-width: 769px) {
+  .sidebar-backdrop, .sidebar-close-btn {
+    display: none !important;
   }
 }
 

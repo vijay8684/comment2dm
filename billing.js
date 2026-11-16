@@ -268,10 +268,9 @@
       const data = await res.json();
       currentPlan = (data.plan || 'free').toLowerCase();
       const usedDms = data.usage?.dmMonthly || 0;
-      const isUnlimited = data.isAdmin || data.limits?.dmMonthly === null || data.limits?.dmMonthly === Infinity;
-      const defaultLimit = currentPlan === 'elite' ? 50000 : currentPlan === 'pro' ? 5000 : 500;
-      const dmLimit = isUnlimited ? 'Unlimited' : (data.limits?.dmMonthly || defaultLimit);
-      const dmPct = isUnlimited ? 0 : Math.min(100, Math.round((usedDms / (typeof dmLimit === 'number' ? dmLimit : defaultLimit)) * 100));
+      // Canonical limits: Elite = 50,000, Pro = 5,000, Free = 500. Elite must NEVER show Unlimited.
+      const dmLimit = currentPlan === 'elite' ? 50000 : currentPlan === 'pro' ? 5000 : (typeof data.limits?.dmMonthly === 'number' ? data.limits.dmMonthly : 500);
+      const dmPct = Math.min(100, Math.round((usedDms / dmLimit) * 100));
       const planName = currentPlan.charAt(0).toUpperCase() + currentPlan.slice(1);
 
       // DOM Elements in current plan card
@@ -282,12 +281,12 @@
       if (pn) pn.textContent = planName;
       if (pb) { pb.textContent = currentPlan.toUpperCase(); pb.className = `plan-badge ${currentPlan}`; }
       if (dmBar) dmBar.style.width = dmPct + '%';
-      if (dmTxt) dmTxt.textContent = `${usedDms.toLocaleString()} / ${typeof dmLimit === 'number' ? dmLimit.toLocaleString() : dmLimit}`;
+      if (dmTxt) dmTxt.textContent = `${usedDms.toLocaleString()} / ${dmLimit.toLocaleString()}`;
 
       // Storage metrics in current plan card
       const defaultStorage = currentPlan === 'elite' ? '5 GB' : currentPlan === 'pro' ? '1 GB' : '150 MB';
       const storageUsed = data.usage?.storageFormatted || '0 MB';
-      const storageTotal = data.limits?.storageDisplay || defaultStorage;
+      const storageTotal = currentPlan === 'elite' ? '5 GB' : currentPlan === 'pro' ? '1 GB' : (data.limits?.storageDisplay || defaultStorage);
       const storageRemaining = data.usage?.storageRemainingFormatted || defaultStorage;
       const storagePct = data.usage?.storagePercentage || 0;
 
@@ -303,11 +302,13 @@
       const sideDmFill = document.getElementById('dmProgressFill');
       const sideStorageText = document.getElementById('sidebarStorageText');
       const sideStorageFill = document.getElementById('sidebarStorageFill');
+      const sideStorageRemaining = document.getElementById('sidebarStorageRemaining');
 
-      if (sideDmText) sideDmText.textContent = `${usedDms.toLocaleString()} / ${typeof dmLimit === 'number' ? dmLimit.toLocaleString() : dmLimit}`;
-      if (sideDmFill) sideDmFill.style.width = dmPct + '%';
+      if (sideDmText) sideDmText.textContent = `${usedDms.toLocaleString()} / ${dmLimit.toLocaleString()}`;
+      if (sideDmFill) sideDmFill.style.width = Math.max(5, dmPct) + '%';
       if (sideStorageText) sideStorageText.textContent = `${storageUsed} / ${storageTotal}`;
       if (sideStorageFill) sideStorageFill.style.width = storagePct + '%';
+      if (sideStorageRemaining) sideStorageRemaining.textContent = `Remaining: ${storageRemaining}`;
 
       renderPlanCards();
     } catch {

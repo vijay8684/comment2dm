@@ -293,6 +293,13 @@
           PLANS[1].isSale = true;
           PLANS[1].badge = data.plans.pro.badge;
         }
+        if (data.plans?.free) {
+          if (typeof data.plans.free.price === 'number') PLANS[0].monthly = data.plans.free.price;
+          if (data.plans.free.badge) {
+            PLANS[0].isSale = true;
+            PLANS[0].badge = data.plans.free.badge;
+          }
+        }
         if (data.elite_monthly) PLANS[2].monthly = data.elite_monthly;
         if (data.elite_regular) PLANS[2].regular = data.elite_regular;
         if (data.plans?.elite?.is_sale) {

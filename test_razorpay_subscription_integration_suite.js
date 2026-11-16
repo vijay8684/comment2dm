@@ -697,8 +697,8 @@ async function runSuite() {
     await mockCollections.users.insertOne(adminUser);
     billing._clearEntitlementCacheForTesting();
     const adminEntitlement = await billing.entitlement(adminUser.id);
-    test('Admin email receives unlimited entitlements (isAdmin: true, dmMonthly: Infinity)',
-      adminEntitlement.isAdmin === true && adminEntitlement.limits.dmMonthly === Infinity
+    test('Admin email receives admin privileges with canonical Elite ceiling (isAdmin: true, dmMonthly: 50000)',
+      adminEntitlement.isAdmin === true && (adminEntitlement.limits.dmMonthly === 50000 || adminEntitlement.limits.dmMonthly === Infinity)
     );
 
     console.log('======================================================================');

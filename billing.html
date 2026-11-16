@@ -135,17 +135,18 @@
           <span>Help Desk</span>
         </a>
       </nav>
-      <div class="sidebar-foot">
+            <div class="sidebar-foot">
         <div class="dm-limit-card" id="dmLimitCard">
           <div class="dm-limit-header"><span>Monthly DMs</span><strong id="dmLimitText">0 / 500</strong></div>
           <div class="dm-progress-track"><div class="dm-progress-fill" id="dmProgressFill" style="width:0%;"></div></div>
-          <div class="storage-limit-header" style="display:flex;justify-content:space-between;font-size:0.75rem;color:rgba(255,255,255,0.5);margin-top:8px;"><span>Storage</span><span id="sidebarStorageText">0 MB / 150 MB</span></div>
-          <div class="dm-progress-track" style="margin-top:3px;"><div class="dm-progress-fill" id="sidebarStorageFill" style="width:0%;background:linear-gradient(90deg,#10b981,#3b82f6);"></div></div>
-          <a href="billing.html" class="btn btn-ghost btn-sm btn-block" style="font-size:0.78rem;padding:5px;margin-top:10px;">Upgrade Plan ↗</a>
+          <div class="storage-limit-header"><span>Storage</span><strong id="sidebarStorageText">0 MB / 150 MB</strong></div>
+          <div class="storage-progress-track"><div class="storage-progress-fill" id="sidebarStorageFill" style="width:0%;"></div></div>
+          <div class="storage-remaining-note" id="sidebarStorageRemaining">Remaining: 150 MB</div>
+          <a href="billing.html" class="btn btn-ghost btn-sm btn-block" style="font-size:0.78rem;padding:5px;">Upgrade Plan ↗</a>
         </div>
-        <div class="pie-gauge-collapsed" id="pieGaugeCollapsed">
+        <a href="billing.html" class="pie-gauge-collapsed" id="pieGaugeCollapsed" title="Monthly DM and Storage Usage — Click to Upgrade">
           <div class="pie-gauge" id="pieGaugeCircle"><div class="pie-gauge-inner" id="pieGaugeInner">0%</div></div>
-        </div>
+        </a>
       </div>
     </aside>
 
@@ -237,14 +238,14 @@
         <div class="current-plan-card" id="currentPlanCard">
           <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;">
             <div>
-              <div style="font-size:0.75rem;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Your Current Plan</div>
+              <div style="font-size:0.75rem;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Your Current Plan</div>
               <div style="display:flex;align-items:center;gap:10px;">
                 <span style="font-size:1.4rem;font-weight:700;color:var(--ink);" id="currentPlanName">Free</span>
                 <span class="plan-badge" id="currentPlanBadge">Free</span>
               </div>
             </div>
             <div>
-              <div style="font-size:0.78rem;color:rgba(255,255,255,0.35);margin-bottom:6px;">DMs used this month</div>
+              <div style="font-size:0.78rem;color:var(--ink-muted);margin-bottom:6px;">DMs used this month</div>
               <div style="display:flex;align-items:center;gap:10px;">
                 <div style="width:140px;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">
                   <div id="dmUsageBar" style="height:100%;width:0%;background:linear-gradient(90deg,#6366f1,#ec4899);border-radius:3px;transition:width 0.5s;"></div>
@@ -253,7 +254,7 @@
               </div>
             </div>
             <div>
-              <div style="font-size:0.78rem;color:rgba(255,255,255,0.35);margin-bottom:6px;">Storage used</div>
+              <div style="font-size:0.78rem;color:var(--ink-muted);margin-bottom:6px;">Storage used</div>
               <div style="display:flex;align-items:center;gap:10px;">
                 <div style="width:140px;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">
                   <div id="storageUsageBar" style="height:100%;width:0%;background:linear-gradient(90deg,#10b981,#3b82f6);border-radius:3px;transition:width 0.5s;"></div>

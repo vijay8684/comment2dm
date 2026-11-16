@@ -98,24 +98,17 @@
       </nav>
 
       <!-- Sidebar Footer -->
-      <div class="sidebar-foot">
+            <div class="sidebar-foot">
         <div class="dm-limit-card" id="dmLimitCard">
-          <div class="dm-limit-header">
-            <span>Monthly DMs</span>
-            <strong id="dmLimitText">0 / 500</strong>
-          </div>
-          <div class="dm-progress-track">
-            <div class="dm-progress-fill" id="dmProgressFill" style="width: 5%;"></div>
-          </div>
-          <a href="billing.html" class="btn btn-ghost btn-sm btn-block" style="font-size:0.78rem; padding:6px;">
-            Upgrade Plan ↗
-          </a>
+          <div class="dm-limit-header"><span>Monthly DMs</span><strong id="dmLimitText">0 / 500</strong></div>
+          <div class="dm-progress-track"><div class="dm-progress-fill" id="dmProgressFill" style="width:0%;"></div></div>
+          <div class="storage-limit-header"><span>Storage</span><strong id="sidebarStorageText">0 MB / 150 MB</strong></div>
+          <div class="storage-progress-track"><div class="storage-progress-fill" id="sidebarStorageFill" style="width:0%;"></div></div>
+          <div class="storage-remaining-note" id="sidebarStorageRemaining">Remaining: 150 MB</div>
+          <a href="billing.html" class="btn btn-ghost btn-sm btn-block" style="font-size:0.78rem;padding:5px;">Upgrade Plan ↗</a>
         </div>
-
-        <a href="billing.html" class="pie-gauge-collapsed" id="pieGaugeCollapsed" title="Monthly DM Usage — Click to Upgrade">
-          <div class="pie-gauge" id="pieGaugeCircle">
-            <div class="pie-gauge-inner" id="pieGaugeInner">0%</div>
-          </div>
+        <a href="billing.html" class="pie-gauge-collapsed" id="pieGaugeCollapsed" title="Monthly DM and Storage Usage — Click to Upgrade">
+          <div class="pie-gauge" id="pieGaugeCircle"><div class="pie-gauge-inner" id="pieGaugeInner">0%</div></div>
         </a>
       </div>
     </aside>
@@ -186,6 +179,18 @@
         <!-- Error & Success Notices -->
         <div id="dashboardError" class="form-error" style="display:none; margin-bottom:20px;"></div>
         <div id="automationNotice" class="success-notice" style="display:none; margin-bottom:20px;"></div>
+
+        <!-- Entry Fee Banner (Only shown if unpaid and gated) -->
+        <div id="entryFeeBanner" class="apple-card" style="display:none; margin-bottom:20px; padding:14px 20px; background:linear-gradient(135deg, rgba(118,85,217,0.08), rgba(217,70,168,0.08)); border:1px solid rgba(118,85,217,0.25); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+          <div style="display:flex; align-items:center; gap:12px;">
+            <span style="font-size:1.4rem;">🔒</span>
+            <div>
+              <strong style="font-size:0.88rem; color:var(--ink); display:block;">Automations Locked — ₹1 Entry Fee Required</strong>
+              <span style="font-size:0.8rem; color:var(--ink-secondary);">You can explore the studio, but creating or activating automations requires entry access (₹1/mo).</span>
+            </div>
+          </div>
+          <button type="button" class="btn btn-accent btn-sm" id="bannerUnlockBtn" style="font-size:0.82rem; padding:6px 14px;">Unlock for ₹1 ⚡</button>
+        </div>
 
         <!-- Heading & Top Action -->
         <div style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:16px; margin-bottom:28px;">
@@ -741,6 +746,34 @@ It would mean a lot if you could visit my profile and hit that follow button �
     </div>
   </div>
 
+  <!-- Entry Fee Gate Modal (₹1/mo) -->
+  <div class="modal-overlay" id="entryGateModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); backdrop-filter:blur(8px); z-index:1000; align-items:center; justify-content:center;">
+    <div class="apple-card" style="max-width:440px; width:90%; padding:32px; text-align:center; box-shadow:var(--shadow-elevated); position:relative;">
+      <div style="width:60px; height:60px; border-radius:50%; background:linear-gradient(135deg, var(--accent), #D946A8); display:flex; align-items:center; justify-content:center; margin:0 auto 16px; font-size:1.8rem; color:#fff; box-shadow:0 8px 24px var(--accent-glow);">
+        ⚡
+      </div>
+      <span class="badge" style="background:rgba(118,85,217,0.12); color:var(--accent-light); font-weight:700; font-size:0.75rem; padding:4px 10px; border-radius:var(--radius-pill); border:1px solid rgba(118,85,217,0.25);">₹1 ENTRY OFFER</span>
+      <h3 style="font-size:1.35rem; font-weight:800; margin:12px 0 6px; color:var(--ink);">Unlock Automations</h3>
+      <p style="color:var(--ink-secondary); font-size:0.88rem; line-height:1.5; margin-bottom:20px;">
+        To create, edit and run live Instagram Comment-to-DM workflows, an entry access fee of just <strong>₹1/month</strong> is required. You can explore all other platform pages for free.
+      </p>
+      <div style="background:var(--surface-raised); border:1px solid var(--glass-border); border-radius:var(--radius-m); padding:14px; margin-bottom:20px; text-align:left; font-size:0.82rem; color:var(--ink);">
+        <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+          <span>Entry Access Fee</span>
+          <strong style="color:var(--accent-light);">₹1 / month</strong>
+        </div>
+        <div style="display:flex; justify-content:space-between; color:var(--ink-muted); font-size:0.76rem;">
+          <span>Automations Enabled</span>
+          <span>2 Active Workflows</span>
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; justify-content:center;">
+        <button type="button" class="btn btn-ghost" id="closeEntryGateBtn" style="padding:10px 18px;">Explore Only</button>
+        <button type="button" class="btn btn-accent" id="unlockEntryFeeBtn" style="padding:10px 22px; font-weight:700; box-shadow:0 4px 16px var(--accent-glow);">Unlock for ₹1 ⚡</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Custom Delete Confirmation Modal -->
   <div class="modal-overlay" id="deleteAutomationModal" aria-hidden="true" role="dialog" aria-labelledby="deleteModalTitle">
     <div class="modal-card">
@@ -762,6 +795,7 @@ It would mean a lot if you could visit my profile and hit that follow button �
     </div>
   </div>
 
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <script src="dashboard.js"></script>
   <script src="automations.js"></script>
 </body>

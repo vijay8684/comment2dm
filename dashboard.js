@@ -37,7 +37,40 @@
     });
   }
 
-  // 2. Sidebar Collapsing Logic
+  // 2. Sidebar Collapsing & Mobile Drawer Logic (ChatGPT-style drawer)
+  let sidebarBackdrop = document.querySelector('.sidebar-backdrop');
+  if (!sidebarBackdrop) {
+    sidebarBackdrop = document.createElement('div');
+    sidebarBackdrop.className = 'sidebar-backdrop';
+    document.body.appendChild(sidebarBackdrop);
+  }
+
+  // Create close button in sidebar top if missing
+  const sidebarTop = document.querySelector('.sidebar-top');
+  if (sidebarTop && !document.getElementById('sidebarCloseBtn')) {
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'sidebar-close-btn';
+    closeBtn.id = 'sidebarCloseBtn';
+    closeBtn.setAttribute('aria-label', 'Close sidebar');
+    closeBtn.innerHTML = '✕';
+    sidebarTop.appendChild(closeBtn);
+  }
+
+  function openSidebar() {
+    if (!sidebar) return;
+    sidebar.classList.add('open');
+    if (sidebarBackdrop) sidebarBackdrop.classList.add('active');
+    document.body.classList.add('sidebar-open');
+  }
+
+  function closeSidebar() {
+    if (!sidebar) return;
+    sidebar.classList.remove('open');
+    if (sidebarBackdrop) sidebarBackdrop.classList.remove('active');
+    document.body.classList.remove('sidebar-open');
+  }
+
   const savedCollapsed = localStorage.getItem('comment2dm_sidebar_collapsed') === 'true';
   if (savedCollapsed && sidebar) {
     sidebar.classList.add('collapsed');
@@ -55,10 +88,60 @@
 
   // Mobile menu toggle
   if (mobileMenuToggle && sidebar) {
-    mobileMenuToggle.addEventListener('click', function () {
-      sidebar.classList.toggle('open');
+    mobileMenuToggle.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (sidebar.classList.contains('open')) {
+        closeSidebar();
+      } else {
+        openSidebar();
+      }
     });
   }
+
+  const closeBtnEl = document.getElementById('sidebarCloseBtn');
+  if (closeBtnEl) {
+    closeBtnEl.addEventListener('click', closeSidebar);
+  }
+
+  sidebarBackdrop.addEventListener('click', closeSidebar);
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && sidebar && sidebar.classList.contains('open')) {
+      closeSidebar();
+    }
+  });
+
+  // Nav link click closes mobile drawer
+  document.querySelectorAll('.app-nav a').forEach(link => {
+    link.addEventListener('click', function () {
+      if (window.innerWidth <= 768) {
+        closeSidebar();
+      }
+    });
+  });
+
+  // ChatGPT-style touch gestures
+  let touchStartX = 0;
+  let touchStartY = 0;
+  document.addEventListener('touchstart', function (e) {
+    if (e.touches.length !== 1) return;
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+  }, { passive: true });
+
+  document.addEventListener('touchend', function (e) {
+    if (e.changedTouches.length !== 1) return;
+    const deltaX = e.changedTouches[0].clientX - touchStartX;
+    const deltaY = e.changedTouches[0].clientY - touchStartY;
+
+    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 45) {
+      if (deltaX > 0 && touchStartX <= 35 && window.innerWidth <= 768) {
+        openSidebar();
+      } else if (deltaX < 0 && sidebar && sidebar.classList.contains('open') && window.innerWidth <= 768) {
+        closeSidebar();
+      }
+    }
+  }, { passive: true });
 
   // 3. User Profile Dropdown Menu
   if (userProfileBtn && userDropdownMenu) {
@@ -163,11 +246,11 @@
         planBadge.className = 'plan-badge ' + plan;
       }
 
-      const isUnlimited = data.isAdmin || data.limits?.dmMonthly === null || data.limits?.dmMonthly === Infinity;
-      const defaultLimit = plan === 'elite' ? 50000 : plan === 'pro' ? 5000 : 500;
-      const dmMax = isUnlimited ? 'Unlimited' : (data.limits?.dmMonthly || defaultLimit);
+      // Canonical monthly DM quota: Free: 500, Pro: 5,000, Elite: 50,000
+      // Elite must show 50,000, NEVER "Unlimited"!
+      const dmMax = plan === 'elite' ? 50000 : plan === 'pro' ? 5000 : (typeof data.limits?.dmMonthly === 'number' ? data.limits.dmMonthly : 500);
       const dmUsed = data.usage?.dmMonthly || 0;
-      const pct = isUnlimited ? 0 : Math.min(100, Math.round((dmUsed / (typeof dmMax === 'number' ? dmMax : defaultLimit)) * 100));
+      const pct = Math.min(100, Math.round((dmUsed / dmMax) * 100));
 
       const limitText = document.getElementById('dmLimitText');
       const progressFill = document.getElementById('dmProgressFill');
@@ -175,14 +258,14 @@
       const pieCircle = document.getElementById('pieGaugeCircle');
       const pieGaugeCollapsed = document.getElementById('pieGaugeCollapsed');
 
-      if (limitText) limitText.textContent = `${dmUsed.toLocaleString()} / ${typeof dmMax === 'number' ? dmMax.toLocaleString() : dmMax}`;
+      if (limitText) limitText.textContent = `${dmUsed.toLocaleString()} / ${dmMax.toLocaleString()}`;
       if (progressFill) progressFill.style.width = `${Math.max(5, pct)}%`;
       if (pieInner) pieInner.textContent = `${pct}%`;
       if (pieCircle) {
         pieCircle.style.background = `conic-gradient(var(--accent) ${pct}%, rgba(118, 85, 217, 0.15) 0)`;
       }
       if (pieGaugeCollapsed) {
-        pieGaugeCollapsed.title = `Monthly DMs: ${dmUsed} / ${dmMax} (${pct}%) — Click to Upgrade`;
+        pieGaugeCollapsed.title = `Monthly DMs: ${dmUsed} / ${dmMax.toLocaleString()} (${pct}%) — Click to Upgrade`;
       }
 
       // First-party promotional card (Free plan only)
@@ -191,16 +274,20 @@
         promoCard.style.display = plan === 'free' ? 'block' : 'none';
       }
 
-      // Storage metrics indicator
+      // Canonical Storage metrics indicator: Free: 150 MB, Pro: 1 GB, Elite: 5 GB (Never unlimited for Elite!)
       const defaultStorage = plan === 'elite' ? '5 GB' : plan === 'pro' ? '1 GB' : '150 MB';
       const storageUsed = data.usage?.storageFormatted || '0 MB';
-      const storageTotal = data.limits?.storageDisplay || defaultStorage;
+      const storageTotal = plan === 'elite' ? '5 GB' : plan === 'pro' ? '1 GB' : (data.limits?.storageDisplay || defaultStorage);
       const storagePct = data.usage?.storagePercentage || 0;
+      const storageRemaining = data.usage?.storageRemainingFormatted || (plan === 'elite' ? '5 GB' : plan === 'pro' ? '1 GB' : '150 MB');
 
       const sideStorageText = document.getElementById('sidebarStorageText');
       const sideStorageFill = document.getElementById('sidebarStorageFill');
+      const sideStorageRemaining = document.getElementById('sidebarStorageRemaining');
+
       if (sideStorageText) sideStorageText.textContent = `${storageUsed} / ${storageTotal}`;
       if (sideStorageFill) sideStorageFill.style.width = `${Math.min(100, storagePct)}%`;
+      if (sideStorageRemaining) sideStorageRemaining.textContent = `Remaining: ${storageRemaining}`;
     } catch (e) {}
   }
 
@@ -570,18 +657,22 @@
         }
       }
 
-      // Render recent activity feed
+      // Render recent activity feed (strictly private automated DMs only)
       const container = document.getElementById('activityFeedContainer');
       const emptyState = document.getElementById('activityEmptyState');
-      const recent = data.recent || [];
+      const rawRecent = data.recent || [];
+      const recent = rawRecent.filter(item => {
+        if (item.eventType === 'public_reply' || item.eventType === 'comment_received' || item.deliveryChannel === 'public_comment') return false;
+        if (typeof item.messageText === 'string' && /^(sent to your dm|check inbox)/i.test(item.messageText.trim())) return false;
+        return true;
+      });
 
       if (currentRequestId !== latestOverviewRequestId) return;
 
       if (container) {
+        container.querySelectorAll('.activity-feed-row').forEach(el => el.remove());
         if (recent.length > 0) {
           if (emptyState) emptyState.style.display = 'none';
-          // Remove old rows
-          container.querySelectorAll('.activity-feed-row').forEach(el => el.remove());
 
           recent.slice(0, 10).forEach(item => {
             const row = document.createElement('div');
@@ -596,21 +687,12 @@
             row.style.background = 'var(--surface)';
             row.style.border = '1px solid var(--glass-border)';
 
-            const isPublicReply = item.eventType === 'public_reply';
-            const isComment = item.eventType === 'comment_received';
             const isSuccess = item.status === 'success' || item.status === 'delivered';
             const isFailed = item.status === 'failed';
             const isUnknown = item.status === 'unknown';
 
-            let label = isPublicReply ? 'Public Comment Reply' : (isComment ? 'Comment detected' : (isFailed ? 'Private DM failed' : (isUnknown ? 'DM unconfirmed' : 'Private DM sent')));
-            let iconSvg = '';
-            if (isPublicReply) {
-              iconSvg = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent-light);"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>`;
-            } else if (isComment) {
-              iconSvg = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#818cf8;"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path></svg>`;
-            } else {
-              iconSvg = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:${isSuccess ? 'var(--emerald)' : (isFailed ? 'var(--rose)' : (isUnknown ? 'var(--amber)' : 'var(--ink-secondary)'))};"><path d="m22 2-7 20-4-9-9-4Z"></path><path d="M22 2 11 13"></path></svg>`;
-            }
+            const label = isFailed ? 'Private DM failed' : (isUnknown ? 'DM unconfirmed' : 'Private DM sent');
+            const iconSvg = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:${isSuccess ? 'var(--emerald)' : (isFailed ? 'var(--rose)' : (isUnknown ? 'var(--amber)' : 'var(--ink-secondary)'))};"><path d="m22 2-7 20-4-9-9-4Z"></path><path d="M22 2 11 13"></path></svg>`;
 
             const bgTint = isSuccess ? 'var(--emerald-tint)' : (isFailed ? 'var(--rose-tint)' : (isUnknown ? 'var(--amber-tint)' : 'var(--surface-hover)'));
             const statusColor = isSuccess ? 'var(--emerald)' : (isFailed ? 'var(--rose)' : (isUnknown ? 'var(--amber)' : 'var(--ink-secondary)'));

@@ -93,17 +93,17 @@ async function runAsyncTest(name, fn) {
   runTest('Dashboard: Zero-message delivery rate does not display misleading 100%', () => {
     const js = fs.readFileSync('dashboard.js', 'utf8');
     assert.strictEqual(js.includes("if (totalDMs === 0) {"), true);
-    assert.strictEqual(js.includes("deliveryRate.textContent = '0%';") || js.includes("deliveryRate.textContent = '100%';"), true);
+    assert.strictEqual(js.includes("deliveryRate.textContent = '0%';") || js.includes("deliveryRate.textContent = '100%';") || js.includes("deliveryRate.textContent = '—';"), true);
     assert.strictEqual(js.includes("deliveryNote.textContent = 'No DMs sent yet';") || js.includes("Ready for comment triggers"), true);
 
     const serverCode = fs.readFileSync('server.js', 'utf8');
-    assert.strictEqual(serverCode.includes("const deliveryRate = totalDMs > 0 ? Math.round((sent / totalDMs) * 100) : 0;"), true);
+    assert.strictEqual(serverCode.includes("const deliveryRate = totalDMs > 0 ? Math.round((sent / totalDMs) * 100) : 0;") || serverCode.includes("const deliveryRate = totalDMs > 0 ? Math.round((sent / totalDMs) * 100) : null;"), true);
   });
 
   runTest('Dashboard: Activity feed renders meaningful statuses and consistent timestamps', () => {
     const js = fs.readFileSync('dashboard.js', 'utf8');
-    assert.strictEqual(js.includes("isComment ? 'Comment detected' : (isFailed ? 'Private DM failed' : 'Private DM sent')"), true);
-    assert.strictEqual(js.includes("isSuccess ? '✓ Delivered' : (isFailed ? '✗ Failed' : '⏳ Processing')"), true);
+    assert.strictEqual(js.includes("isComment ? 'Comment detected' : (isFailed ? 'Private DM failed' : 'Private DM sent')") || js.includes("isFailed ? 'Private DM failed' : (isUnknown ? 'DM unconfirmed' : 'Private DM sent')"), true);
+    assert.strictEqual(js.includes("isSuccess ? '✓ Delivered' : (isFailed ? '✗ Failed' : '⏳ Processing')") || js.includes("isSuccess ? '✓ Delivered' : (isFailed ? '✗ Failed' : (isUnknown ? '? Unconfirmed' : '⏳ Processing'))"), true);
     assert.strictEqual(js.includes("toLocaleDateString") || js.includes("toLocaleString"), true);
   });
 

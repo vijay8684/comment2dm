@@ -68,6 +68,19 @@ const CANONICAL_DEFAULTS = {
     monthly: 0,
     amount_paise: 0,
     currency: 'INR'
+  },
+  entry_pricing: {
+    price_type: 'promotional_entry',
+    monthly: 1,
+    promotional_price: 1,
+    regular_price: 70,
+    payment_model: 'recurring', // 'recurring' | 'one_time' | 'introductory'
+    autopay_enabled: true, // AutoPay for new subscriptions: ON / OFF
+    gate_automations_if_unpaid: true,
+    start_date: null,
+    end_date: null,
+    badge_text: '₹1 ENTRY OFFER',
+    is_active: true
   }
 };
 
@@ -102,6 +115,18 @@ async function getPricingCatalog(bypassCache = false) {
           currency: 'INR'
         },
         free: { ...CANONICAL_DEFAULTS.free },
+        entry_pricing: doc.entry_pricing ? {
+          price_type: doc.entry_pricing.price_type || 'free',
+          monthly: typeof doc.entry_pricing.monthly === 'number' ? doc.entry_pricing.monthly : 0,
+          regular_price: typeof doc.entry_pricing.regular_price === 'number' ? doc.entry_pricing.regular_price : 70,
+          payment_model: doc.entry_pricing.payment_model || 'recurring',
+          autopay_enabled: doc.entry_pricing.autopay_enabled !== false,
+          gate_automations_if_unpaid: Boolean(doc.entry_pricing.gate_automations_if_unpaid),
+          start_date: doc.entry_pricing.start_date || null,
+          end_date: doc.entry_pricing.end_date || null,
+          badge_text: doc.entry_pricing.badge_text || '₹1 ENTRY OFFER',
+          is_active: Boolean(doc.entry_pricing.is_active)
+        } : { ...CANONICAL_DEFAULTS.entry_pricing },
         updated_at: doc.updated_at || new Date().toISOString()
       };
       inMemoryCatalogCacheTime = now;
@@ -114,6 +139,7 @@ async function getPricingCatalog(bypassCache = false) {
       pro: { monthly: CANONICAL_DEFAULTS.pro.monthly },
       elite: { monthly: CANONICAL_DEFAULTS.elite.monthly },
       free: { monthly: 0 },
+      entry_pricing: { ...CANONICAL_DEFAULTS.entry_pricing },
       updated_at: new Date().toISOString()
     };
     await database.collection('pricing_catalog').updateOne(
@@ -126,6 +152,7 @@ async function getPricingCatalog(bypassCache = false) {
       pro: { ...CANONICAL_DEFAULTS.pro },
       elite: { ...CANONICAL_DEFAULTS.elite },
       free: { ...CANONICAL_DEFAULTS.free },
+      entry_pricing: { ...CANONICAL_DEFAULTS.entry_pricing },
       updated_at: seeded.updated_at
     };
     inMemoryCatalogCacheTime = now;
@@ -136,9 +163,70 @@ async function getPricingCatalog(bypassCache = false) {
       pro: { ...CANONICAL_DEFAULTS.pro },
       elite: { ...CANONICAL_DEFAULTS.elite },
       free: { ...CANONICAL_DEFAULTS.free },
+      entry_pricing: { ...CANONICAL_DEFAULTS.entry_pricing },
       updated_at: new Date().toISOString()
     };
   }
+}
+
+/**
+ * Retrieve current entry pricing configuration
+ */
+async function getEntryPricing(bypassCache = false) {
+  const catalog = await getPricingCatalog(bypassCache);
+  return catalog.entry_pricing || { ...CANONICAL_DEFAULTS.entry_pricing };
+}
+
+/**
+ * Update promotional entry pricing and AutoPay controls
+ */
+async function updateEntryPricing(config = {}, adminEmail = 'owner', reason = '', ip = '') {
+  const current = await getPricingCatalog(true);
+  const prevEntry = current.entry_pricing || { ...CANONICAL_DEFAULTS.entry_pricing };
+
+  const priceType = config.price_type === 'promotional_entry' ? 'promotional_entry' : 'free';
+  const monthly = priceType === 'free' ? 0 : Math.max(0, Math.round(Number(config.monthly !== undefined ? config.monthly : 1)));
+  const regularPrice = typeof config.regular_price === 'number' && config.regular_price > 0 ? config.regular_price : (prevEntry.regular_price || 70);
+  const paymentModel = ['recurring', 'one_time', 'introductory'].includes(config.payment_model) ? config.payment_model : 'recurring';
+  const autopayEnabled = config.autopay_enabled !== undefined ? Boolean(config.autopay_enabled) : true;
+  const gateUnpaid = config.gate_automations_if_unpaid !== undefined ? Boolean(config.gate_automations_if_unpaid) : (monthly > 0);
+  const isActive = config.is_active !== undefined ? Boolean(config.is_active) : (monthly > 0 && priceType === 'promotional_entry');
+  const badgeText = String(config.badge_text || '₹1 ENTRY OFFER').trim();
+
+  const newEntryPricing = {
+    price_type: priceType,
+    monthly,
+    regular_price: regularPrice,
+    payment_model: paymentModel,
+    autopay_enabled: autopayEnabled,
+    gate_automations_if_unpaid: gateUnpaid,
+    start_date: config.start_date ? new Date(config.start_date).toISOString() : null,
+    end_date: config.end_date ? new Date(config.end_date).toISOString() : null,
+    badge_text: badgeText,
+    is_active: isActive,
+    updated_at: new Date().toISOString()
+  };
+
+  const database = await getDbHandle();
+  await database.collection('pricing_catalog').updateOne(
+    { _id: 'active_catalog' },
+    { $set: { entry_pricing: newEntryPricing, updated_at: new Date().toISOString() } },
+    { upsert: true }
+  );
+
+  inMemoryCatalogCache = null;
+
+  await logAdminAction({
+    actor: adminEmail,
+    action: 'entry_pricing_updated',
+    target: 'pricing_catalog:entry_pricing',
+    prevValue: prevEntry,
+    newValue: newEntryPricing,
+    reason: reason || 'Updated promotional entry pricing and AutoPay controls',
+    ip
+  });
+
+  return newEntryPricing;
 }
 
 /**
@@ -407,6 +495,37 @@ async function getEffectivePricing(atDate = new Date()) {
     active_campaign: null
   };
 
+  const entry = catalog.entry_pricing || { ...CANONICAL_DEFAULTS.entry_pricing };
+  let entryActive = Boolean(entry.is_active && entry.monthly > 0);
+  const nowTime = atDate instanceof Date ? atDate.getTime() : new Date(atDate).getTime();
+  if (entryActive && entry.start_date && new Date(entry.start_date).getTime() > nowTime) {
+    entryActive = false;
+  }
+  if (entryActive && entry.end_date && new Date(entry.end_date).getTime() < nowTime) {
+    entryActive = false;
+  }
+
+  if (entryActive) {
+    result.plans.free.price = entry.monthly;
+    result.plans.free.amount_paise = entry.monthly * 100;
+    result.plans.free.regular_price = entry.regular_price || 70;
+    result.plans.free.requires_paid_entry = true;
+    result.plans.free.payment_model = entry.payment_model || 'recurring';
+    result.plans.free.autopay_enabled = entry.autopay_enabled !== false;
+    result.plans.free.gate_automations_if_unpaid = entry.gate_automations_if_unpaid !== false;
+    result.plans.free.is_sale = true;
+    result.plans.free.badge = entry.badge_text || '₹1 ENTRY';
+  } else {
+    result.plans.free.requires_paid_entry = false;
+    result.plans.free.payment_model = entry.payment_model || 'recurring';
+    result.plans.free.autopay_enabled = entry.autopay_enabled !== false;
+    result.plans.free.gate_automations_if_unpaid = false;
+  }
+  result.entry_pricing = {
+    ...entry,
+    is_currently_active: entryActive
+  };
+
   if (activeCampaign) {
     let campaignAttached = false;
 
@@ -534,6 +653,8 @@ async function ensureRazorpayPlan(planKey, amountPaise, planDisplayName = '') {
 module.exports = {
   CANONICAL_DEFAULTS,
   getPricingCatalog,
+  getEntryPricing,
+  updateEntryPricing,
   updateRegularPrices,
   getActiveCampaign,
   getCampaigns,

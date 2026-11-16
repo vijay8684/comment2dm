@@ -525,6 +525,21 @@ function registerAdminRoutes(app) {
     }
   });
 
+  app.post('/api/admin/pricing/entry-controls', requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const config = req.body || {};
+      const updated = await pricingService.updateEntryPricing(
+        config,
+        req.user.email,
+        config.reason || 'Updated promotional entry pricing and AutoPay controls',
+        req.ip
+      );
+      return res.json({ success: true, entry_pricing: updated });
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+  });
+
   app.post('/api/admin/pricing/campaigns', requireAuth, requireAdmin, async (req, res) => {
     try {
       const campaign = await pricingService.createCampaign(req.body, req.user.email, req.ip);
@@ -580,6 +595,29 @@ function registerAdminRoutes(app) {
     }
   });
 
+  app.delete('/api/admin/coupons/:code', requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const database = await getDbHandle();
+      const code = String(req.params.code || '').trim().toUpperCase();
+      const existing = await database.collection('coupons').findOne({ code });
+      if (!existing) {
+        return res.status(404).json({ error: 'Coupon not found.' });
+      }
+      await database.collection('coupons').deleteOne({ code });
+      await logAdminAction({
+        actor: req.user.email,
+        action: 'coupon_deleted',
+        target: `coupon:${code}`,
+        prevValue: existing,
+        reason: 'Deleted coupon from admin panel',
+        ip: req.ip
+      });
+      return res.json({ success: true, code });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── 6. Subscriptions & Payments Endpoints ─────────────────────────
   app.get('/api/admin/subscriptions', requireAuth, requireAdmin, async (req, res) => {
     try {
@@ -628,6 +666,35 @@ function registerAdminRoutes(app) {
         page: safePage,
         limit: safeLimit
       });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/admin/subscriptions/:id/cancel', requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const database = await getDbHandle();
+      const subId = req.params.id;
+      const sub = await database.collection('subscriptions').findOne({
+        $or: [{ id: subId }, { razorpay_subscription_id: subId }, { _id: subId }]
+      });
+      if (!sub) {
+        return res.status(404).json({ error: 'Subscription not found.' });
+      }
+      await database.collection('subscriptions').updateOne(
+        { _id: sub._id },
+        { $set: { status: 'cancelled', cancelled_at: new Date().toISOString(), updated_at: new Date().toISOString() } }
+      );
+      await logAdminAction({
+        actor: req.user.email,
+        action: 'subscription_cancelled_admin',
+        target: `subscription:${subId}`,
+        prevValue: sub.status,
+        newValue: 'cancelled',
+        reason: req.body?.reason || 'Cancelled by admin from control center',
+        ip: req.ip
+      });
+      return res.json({ success: true, subscriptionId: subId });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
@@ -813,16 +880,54 @@ function registerAdminRoutes(app) {
   // ── 12. Settings Summary Endpoint ─────────────────────────────────
   app.get('/api/admin/settings', requireAuth, requireAdmin, async (req, res) => {
     try {
+      const database = await getDbHandle();
+      const customSettings = await database.collection('system_settings').findOne({ _id: 'general' }) || {};
+
       return res.json({
-        company: 'VI Tech',
-        product: 'Comment2DM',
+        company: customSettings.company || 'VI Tech',
+        product: customSettings.product || 'Comment2DM',
+        support_email: customSettings.support_email || 'support@comment2dm.com',
         admin_email: process.env.ADMIN_EMAIL || 'Not configured',
         razorpay_key_id: process.env.RAZORPAY_KEY_ID ? `${process.env.RAZORPAY_KEY_ID.substring(0, 10)}...` : 'Not configured',
         razorpay_mode: (process.env.RAZORPAY_KEY_ID || '').startsWith('rzp_test_') ? 'Test Mode' : 'Live Mode',
         r2_configured: !!(process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY),
         node_env: process.env.NODE_ENV || 'production',
-        timezone: 'Asia/Kolkata (IST)'
+        timezone: 'Asia/Kolkata (IST)',
+        ...customSettings
       });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/admin/settings', requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const database = await getDbHandle();
+      const { company, support_email, notification_webhook } = req.body || {};
+      const updated = {
+        company: company ? String(company).trim() : 'VI Tech',
+        support_email: support_email ? String(support_email).trim() : 'support@comment2dm.com',
+        notification_webhook: notification_webhook ? String(notification_webhook).trim() : null,
+        updated_at: new Date().toISOString(),
+        updated_by: req.user.email
+      };
+
+      await database.collection('system_settings').updateOne(
+        { _id: 'general' },
+        { $set: updated },
+        { upsert: true }
+      );
+
+      await logAdminAction({
+        actor: req.user.email,
+        action: 'system_settings_updated',
+        target: 'system_settings:general',
+        newValue: updated,
+        reason: 'Updated platform settings from control center',
+        ip: req.ip
+      });
+
+      return res.json({ success: true, settings: updated });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }

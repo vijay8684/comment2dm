@@ -98,24 +98,17 @@
       </nav>
 
       <!-- Sidebar Footer -->
-      <div class="sidebar-foot">
+            <div class="sidebar-foot">
         <div class="dm-limit-card" id="dmLimitCard">
-          <div class="dm-limit-header">
-            <span>Monthly DMs</span>
-            <strong id="dmLimitText">0 / 500</strong>
-          </div>
-          <div class="dm-progress-track">
-            <div class="dm-progress-fill" id="dmProgressFill" style="width: 5%;"></div>
-          </div>
-          <a href="billing.html" class="btn btn-ghost btn-sm btn-block" style="font-size:0.78rem; padding:6px;">
-            Upgrade Plan ↗
-          </a>
+          <div class="dm-limit-header"><span>Monthly DMs</span><strong id="dmLimitText">0 / 500</strong></div>
+          <div class="dm-progress-track"><div class="dm-progress-fill" id="dmProgressFill" style="width:0%;"></div></div>
+          <div class="storage-limit-header"><span>Storage</span><strong id="sidebarStorageText">0 MB / 150 MB</strong></div>
+          <div class="storage-progress-track"><div class="storage-progress-fill" id="sidebarStorageFill" style="width:0%;"></div></div>
+          <div class="storage-remaining-note" id="sidebarStorageRemaining">Remaining: 150 MB</div>
+          <a href="billing.html" class="btn btn-ghost btn-sm btn-block" style="font-size:0.78rem;padding:5px;">Upgrade Plan ↗</a>
         </div>
-
-        <a href="billing.html" class="pie-gauge-collapsed" id="pieGaugeCollapsed" title="Monthly DM Usage — Click to Upgrade">
-          <div class="pie-gauge" id="pieGaugeCircle">
-            <div class="pie-gauge-inner" id="pieGaugeInner">0%</div>
-          </div>
+        <a href="billing.html" class="pie-gauge-collapsed" id="pieGaugeCollapsed" title="Monthly DM and Storage Usage — Click to Upgrade">
+          <div class="pie-gauge" id="pieGaugeCircle"><div class="pie-gauge-inner" id="pieGaugeInner">0%</div></div>
         </a>
       </div>
     </aside>

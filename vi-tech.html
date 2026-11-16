@@ -590,6 +590,84 @@
                 <button type="submit" class="action-btn primary" style="padding:10px 20px;">🚀 Launch Promotion</button>
               </form>
             </div>
+
+            <!-- ⚡ Entry Pricing & AutoPay Controls Card -->
+            <div class="kpi-card" style="grid-column: span 2; margin-top: 16px; border: 1px solid rgba(118, 85, 217, 0.35); background: linear-gradient(135deg, rgba(118, 85, 217, 0.05), rgba(245, 158, 11, 0.04));">
+              <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
+                <div>
+                  <h3 style="font-size:1.15rem; color:var(--ink); margin:0 0 4px;">⚡ ₹1 Entry Pricing & AutoPay Controls</h3>
+                  <p style="font-size:0.84rem; color:var(--ink-secondary); margin:0;">
+                    Charge a minimal entry fee (default ₹1/mo) to unlock automation features, or allow full exploration with automations gated.
+                  </p>
+                </div>
+                <span class="status-badge active" id="entryPricingStatusBadge">ENTRY FEE: ACTIVE</span>
+              </div>
+
+              <form id="entryPricingForm" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:18px; margin-top:16px;">
+                <div>
+                  <label style="display:block; font-size:0.82rem; font-weight:600; margin-bottom:6px;">Entry Offer Active</label>
+                  <select class="search-input" id="entryIsActive" style="width:100%;">
+                    <option value="true">ON (Charge Entry Fee)</option>
+                    <option value="false">OFF (₹0 Free Plan with 2 Automations)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style="display:block; font-size:0.82rem; font-weight:600; margin-bottom:6px;">Promotional Price (₹)</label>
+                  <input type="number" class="search-input" id="entryPromoPrice" min="0" value="1" required style="width:100%;" />
+                </div>
+
+                <div>
+                  <label style="display:block; font-size:0.82rem; font-weight:600; margin-bottom:6px;">Regular Price After Entry (₹)</label>
+                  <input type="number" class="search-input" id="entryRegularPrice" min="1" value="70" required style="width:100%;" />
+                </div>
+
+                <div>
+                  <label style="display:block; font-size:0.82rem; font-weight:600; margin-bottom:6px;">Payment Model</label>
+                  <select class="search-input" id="entryPaymentModel" style="width:100%;">
+                    <option value="recurring">Recurring AutoPay (Monthly)</option>
+                    <option value="introductory">Introductory Offer (₹1 then ₹70/mo)</option>
+                    <option value="one_time">One-Time Fee (30 Days Access)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style="display:block; font-size:0.82rem; font-weight:600; margin-bottom:6px;">AutoPay for New Subs</label>
+                  <select class="search-input" id="entryAutopayEnabled" style="width:100%;">
+                    <option value="true">ON (Require AutoPay)</option>
+                    <option value="false">OFF (Manual Renewal)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style="display:block; font-size:0.82rem; font-weight:600; margin-bottom:6px;">Gate Automations If Unpaid</label>
+                  <select class="search-input" id="entryGateAutomations" style="width:100%;">
+                    <option value="true">YES (Explore Only; Gated Automations)</option>
+                    <option value="false">NO (Allow Free 2 Automations)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style="display:block; font-size:0.82rem; font-weight:600; margin-bottom:6px;">Offer Badge Text</label>
+                  <input type="text" class="search-input" id="entryBadgeText" value="₹1 ENTRY OFFER" required style="width:100%;" />
+                </div>
+
+                <div>
+                  <label style="display:block; font-size:0.82rem; font-weight:600; margin-bottom:6px;">Reason for Change</label>
+                  <input type="text" class="search-input" id="entryUpdateReason" placeholder="e.g. Platform launch entry price promotion" required style="width:100%;" />
+                </div>
+
+                <div style="grid-column: 1 / -1; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-top:8px;">
+                  <div style="font-size:0.82rem; color:var(--ink-secondary);">
+                    Preview: Non-paying visitors can browse all pages for free, but will be prompted to unlock automations for ₹1/mo.
+                  </div>
+                  <button type="submit" class="action-btn primary" id="saveEntryControlsBtn" style="padding:10px 22px;">
+                    💾 Save Entry & AutoPay Controls
+                  </button>
+                </div>
+              </form>
+            </div>
+
           </div>
 
           <!-- Active Campaigns Table -->
@@ -907,6 +985,29 @@
               <div style="display:flex;justify-content:space-between;"><span>Operational Timezone:</span><strong>Asia/Kolkata (IST)</strong></div>
             </div>
           </div>
+        
+            <div class="kpi-card" style="max-width:680px; margin-top:20px;">
+              <h3 style="font-size:1.15rem;margin-bottom:14px;">🛠️ Update Platform Settings</h3>
+              <form id="systemSettingsForm">
+                <div style="margin-bottom:14px;">
+                  <label style="display:block; font-size:0.82rem; font-weight:600; margin-bottom:4px;">Platform Display Name</label>
+                  <input type="text" class="search-input" id="settingPlatformName" value="Comment2DM" style="width:100%;" />
+                </div>
+                <div style="margin-bottom:14px;">
+                  <label style="display:block; font-size:0.82rem; font-weight:600; margin-bottom:4px;">Support Email</label>
+                  <input type="email" class="search-input" id="settingSupportEmail" value="support@comment2dm.com" style="width:100%;" />
+                </div>
+                <div style="margin-bottom:16px;">
+                  <label style="display:block; font-size:0.82rem; font-weight:600; margin-bottom:4px;">Maintenance / Read-Only Mode</label>
+                  <select class="search-input" id="settingMaintenanceMode" style="width:100%;">
+                    <option value="false">Disabled (Normal Operations)</option>
+                    <option value="true">Enabled (Read-Only Mode)</option>
+                  </select>
+                </div>
+                <button type="submit" class="action-btn primary" style="padding:10px 20px;">💾 Save System Settings</button>
+              </form>
+            </div>
+
         </section>
 
       </main>

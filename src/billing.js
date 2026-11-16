@@ -10,6 +10,15 @@ const couponService = require('./services/couponService');
 // Official Canonical Subscription Plan Configurations (Monthly Launch Pricing)
 // Free: ₹0, Pro: ₹70/month (7000 paise), Elite: ₹150/month (15000 paise)
 const PLANS = {
+  entry_monthly: {
+    plan: 'free',
+    cycle: 'monthly',
+    amount: 100, // ₹1 default (100 paise)
+    currency: 'INR',
+    period: 'monthly',
+    totalCount: 120,
+    name: 'Comment2DM Entry Monthly'
+  },
   pro_monthly: {
     plan: 'pro',
     cycle: 'monthly',
@@ -303,13 +312,14 @@ async function entitlement(uid, contextOrOptions = null) {
 
   try {
     const d = await store();
-    const user = await d.collection('users').findOne({ id: uid }, { projection: { email: 1 } });
+    const user = await d.collection('users').findOne({ id: uid }, { projection: { email: 1, entry_paid: 1, entry_expires_at: 1, entry_paid_at: 1 } });
     let result;
 
     if (isAdminEmail(user?.email)) {
       result = {
         plan: 'elite',
         isAdmin: true,
+        hasPaidEntry: true,
         limits: {
           name: 'Comment2DM Admin',
           price: 0,
@@ -317,9 +327,9 @@ async function entitlement(uid, contextOrOptions = null) {
           amount: 0,
           instagramAccounts: Infinity,
           automations: Infinity,
-          dmMonthly: Infinity,
-          storageBytes: 100000000000,
-          storageDisplay: 'Unlimited',
+          dmMonthly: 50000,
+          storageBytes: 5000000000,
+          storageDisplay: '5 GB',
           allCommentsTrigger: true,
           publicReplies: true,
           followToUnlock: true,
@@ -349,8 +359,21 @@ async function entitlement(uid, contextOrOptions = null) {
       const plan = LIMITS[rawPlan]
         ? (rawPlan === 'creator' || rawPlan === 'growth' ? 'pro' : rawPlan === 'scale' ? 'elite' : rawPlan)
         : 'free';
+
+      let hasPaidEntry = Boolean(user?.entry_paid);
+      if (user?.entry_expires_at && new Date(user.entry_expires_at) < new Date()) {
+        hasPaidEntry = false;
+      }
+      if (!hasPaidEntry && s) {
+        if (s.status === 'active' || (s.status === 'cancelled' && s.current_end && new Date(s.current_end) > new Date())) {
+          hasPaidEntry = true;
+        }
+      }
+
       result = {
         plan,
+        isAdmin: false,
+        hasPaidEntry,
         limits: LIMITS[plan] || LIMITS.free,
         subscription: s
       };
@@ -392,6 +415,24 @@ async function counts(uid) {
 async function check(uid, resource, options = {}) {
   const e = await entitlement(uid, options);
   const c = await counts(uid);
+
+  // ₹1 Entry Fee Gating for Automations (Owner can toggle in /vi-tech)
+  if (resource === 'automations' && !e.isAdmin && e.plan === 'free') {
+    const entryPricing = await pricingService.getEntryPricing();
+    const entryActive = entryPricing && entryPricing.is_active && entryPricing.monthly > 0 && entryPricing.gate_automations_if_unpaid;
+    if (entryActive && !e.hasPaidEntry) {
+      return {
+        ...e,
+        used: c.automations,
+        allowed: false,
+        code: 'ENTRY_FEE_REQUIRED',
+        requiresPayment: true,
+        entryPrice: entryPricing.monthly,
+        message: `₹${entryPricing.monthly}/month entry access is required to create or activate automations. You can explore all other features for free.`
+      };
+    }
+  }
+
   const used = resource === 'instagramAccounts' ? c.accounts : resource === 'automations' ? c.automations : c.dmMonthly;
   return { ...e, used, allowed: e.limits[resource] === Infinity || used < e.limits[resource] };
 }
@@ -692,6 +733,18 @@ async function verify(req, res) {
     { upsert: true }
   );
 
+  // Mark entry paid on user document
+  await d.collection('users').updateOne(
+    { id: u.id },
+    {
+      $set: {
+        entry_paid: true,
+        entry_paid_at: nowIso,
+        entry_expires_at: currentEndIso
+      }
+    }
+  );
+
   // Invalidate entitlement cache for user
   globalEntitlementCache.delete(u.id);
 
@@ -862,20 +915,23 @@ async function status(req, res) {
   const u = await auth(req);
   if (!u) return res.status(401).json({ error: 'Authentication required.' });
   const storageService = require('./services/storageService');
-  const [e, c, storageUsage] = await Promise.all([
+  const [e, c, storageUsage, effectivePricing] = await Promise.all([
     entitlement(u.id, req),
     counts(u.id),
-    storageService.getStorageUsage(u.id)
+    storageService.getStorageUsage(u.id),
+    pricingService.getEffectivePricing()
   ]);
 
   return res.json({
     plan: e.plan,
     isAdmin: !!e.isAdmin,
+    hasPaidEntry: Boolean(e.hasPaidEntry),
+    entryPricing: effectivePricing.entry_pricing || null,
     subscription: e.subscription ? { status: e.subscription.status, billingCycle: e.subscription.billing_cycle, currentEnd: e.subscription.current_end } : null,
     limits: {
       instagramAccounts: Number.isFinite(e.limits.instagramAccounts) ? e.limits.instagramAccounts : null,
       automations: Number.isFinite(e.limits.automations) ? e.limits.automations : null,
-      dmMonthly: Number.isFinite(e.limits.dmMonthly) ? e.limits.dmMonthly : null,
+      dmMonthly: e.limits.dmMonthly === Infinity ? 50000 : (Number.isFinite(e.limits.dmMonthly) ? e.limits.dmMonthly : 500),
       storageBytes: e.limits.storageBytes,
       storageDisplay: e.limits.storageDisplay,
       allCommentsTrigger: e.limits.allCommentsTrigger,
@@ -1077,6 +1133,7 @@ module.exports = {
   _clearEntitlementCacheForTesting: () => globalEntitlementCache.clear(),
   PLANS,
   LIMITS,
+  CANONICAL_PLANS: LIMITS,
   getCanonicalPlans,
   isAdminEmail,
   getAdminEmails,

@@ -224,9 +224,8 @@
       const planName = plan.charAt(0).toUpperCase() + plan.slice(1);
 
       const used = data.usage?.dmMonthly || 0;
-      const isUnlimited = data.isAdmin || data.limits?.dmMonthly === null || data.limits?.dmMonthly === Infinity;
-      const limit = isUnlimited ? 'Unlimited' : (data.limits?.dmMonthly || (plan === 'elite' ? 50000 : plan === 'pro' ? 5000 : 300));
-      const pct = isUnlimited ? 0 : Math.min(100, Math.round((used / (typeof limit === 'number' ? limit : 300)) * 100));
+      const limit = plan === 'elite' ? 50000 : plan === 'pro' ? 5000 : (typeof data.limits?.dmMonthly === 'number' ? data.limits.dmMonthly : 500);
+      const pct = Math.min(100, Math.round((used / limit) * 100));
 
       const pn = document.getElementById('billingPlanName');
       const bb = document.getElementById('billingBadge');

@@ -965,6 +965,14 @@ app.post('/api/automations', requireAuth, async (request, response, next) => {
     if (isEnabled === 1) {
       const autCheck = await billing.check(request.user.id, 'automations', { user: request.user });
       if (!autCheck.allowed) {
+        if (autCheck.code === 'ENTRY_FEE_REQUIRED') {
+          return response.status(403).json({
+            error: autCheck.message || '₹1/month entry access is required to create or activate automations. You can explore all other features for free.',
+            code: 'ENTRY_FEE_REQUIRED',
+            requiresPayment: true,
+            entryPrice: autCheck.entryPrice || 1
+          });
+        }
         return response.status(403).json({
           error: `You have reached your limit of ${autCheck.limits.automations} active automations on the ${autCheck.plan} plan. Please upgrade to Pro or Elite for unlimited automations.`
         });
@@ -1097,6 +1105,14 @@ app.patch('/api/automations/:id', requireAuth, async (request, response, next) =
     if (newEnabled === 1 && !existing.enabled) {
       const autCheck = await billing.check(request.user.id, 'automations', { user: request.user });
       if (!autCheck.allowed) {
+        if (autCheck.code === 'ENTRY_FEE_REQUIRED') {
+          return response.status(403).json({
+            error: autCheck.message || '₹1/month entry access is required to create or activate automations. You can explore all other features for free.',
+            code: 'ENTRY_FEE_REQUIRED',
+            requiresPayment: true,
+            entryPrice: autCheck.entryPrice || 1
+          });
+        }
         return response.status(403).json({
           error: `You have reached your limit of ${autCheck.limits.automations} active automations on the ${autCheck.plan} plan. Please upgrade to Pro or Elite for unlimited automations.`
         });
@@ -3460,17 +3476,22 @@ app.get('/api/analytics/overview', requireAuth, async (request, response, next) 
       }
       const baseEventFilter = { $and: eventAndClauses };
 
-      // 4. Direct Message filter: include all private DM types, strictly excluding public replies and webhooks
+      // 4. Direct Message filter: include all private DM types, strictly excluding public replies, comments and webhooks
       const privateDmCriteria = {
         ...baseEventFilter,
-        $or: [
-          { delivery_channel: 'private_dm' },
-          { event_type: { $in: ['private_reply', 'resource_delivered', 'follow_prompt', 'follow_retry_prompt', 'verification_retry'] } },
-          { event_type: { $exists: false } },
-          { event_type: null }
-        ],
-        event_type: { $ne: 'public_reply' },
-        delivery_channel: { $ne: 'public_comment' }
+        $and: [
+          {
+            $or: [
+              { delivery_channel: 'private_dm' },
+              { event_type: { $in: ['private_reply', 'resource_delivered', 'follow_prompt', 'follow_retry_prompt', 'verification_retry'] } },
+              { event_type: { $exists: false } },
+              { event_type: null }
+            ]
+          },
+          { event_type: { $nin: ['public_reply', 'comment_received', 'comment', 'webhook_received'] } },
+          { delivery_channel: { $ne: 'public_comment' } },
+          { message_text: { $not: /^(sent to your dm|check inbox)/i } }
+        ]
       };
 
       const [countSent, countFailed, countUnknown, countCommentsRaw] = await Promise.all([
@@ -3510,8 +3531,8 @@ app.get('/api/analytics/overview', requireAuth, async (request, response, next) 
         }
       }
 
-      // 6. Recent feed
-      const recentEvents = await colEvents.find(baseEventFilter).sort({ created_at: -1 }).limit(20).toArray();
+      // 6. Recent feed (Strictly private automated DMs only)
+      const recentEvents = await colEvents.find(privateDmCriteria).sort({ created_at: -1 }).limit(20).toArray();
       recent = recentEvents.map(e => ({
         eventType: e.event_type || (e.delivery_channel === 'public_comment' ? 'public_reply' : 'private_reply'),
         status: e.status,
@@ -3560,9 +3581,9 @@ app.get('/api/analytics/overview', requireAuth, async (request, response, next) 
               FROM automation_events WHERE owner_user_id = ?`, [ownerId]),
         requestedIgUserId
           ? db.all(`SELECT event_type AS eventType, status, keyword, message_text AS messageText, error_message AS errorMessage, created_at AS createdAt
-              FROM automation_events WHERE owner_user_id = ? AND instagram_user_id = ? ORDER BY created_at DESC LIMIT 20`, [ownerId, requestedIgUserId])
+              FROM automation_events WHERE owner_user_id = ? AND instagram_user_id = ? AND (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received')) ORDER BY created_at DESC LIMIT 20`, [ownerId, requestedIgUserId])
           : db.all(`SELECT event_type AS eventType, status, keyword, message_text AS messageText, error_message AS errorMessage, created_at AS createdAt
-              FROM automation_events WHERE owner_user_id = ? ORDER BY created_at DESC LIMIT 20`, [ownerId]),
+              FROM automation_events WHERE owner_user_id = ? AND (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received')) ORDER BY created_at DESC LIMIT 20`, [ownerId]),
         requestedIgUserId
           ? db.all(`SELECT substr(created_at,1,10) AS date,
               SUM(CASE WHEN event_type = 'comment_received' THEN 1 ELSE 0 END) AS comments,
@@ -3893,14 +3914,19 @@ app.get('/api/analytics/events', requireAuth, async (request, response) => {
 
       // Direct Message filter: include all private DM event types, strictly excluding public replies and webhooks
       const privateDmCriteria = {
-        $or: [
-          { delivery_channel: 'private_dm' },
-          { event_type: { $in: ['private_reply', 'resource_delivered', 'follow_prompt', 'follow_retry_prompt', 'verification_retry'] } },
-          { event_type: { $exists: false } },
-          { event_type: null }
-        ],
-        event_type: { $ne: 'public_reply' },
-        delivery_channel: { $ne: 'public_comment' }
+        $and: [
+          {
+            $or: [
+              { delivery_channel: 'private_dm' },
+              { event_type: { $in: ['private_reply', 'resource_delivered', 'follow_prompt', 'follow_retry_prompt', 'verification_retry'] } },
+              { event_type: { $exists: false } },
+              { event_type: null }
+            ]
+          },
+          { event_type: { $nin: ['public_reply', 'comment_received', 'comment', 'webhook_received'] } },
+          { delivery_channel: { $ne: 'public_comment' } },
+          { message_text: { $not: /^(sent to your dm|check inbox)/i } }
+        ]
       };
 
       // Base filter for counting sent, failed, pending, unknown private DMs
@@ -3997,22 +4023,24 @@ app.get('/api/analytics/events', requireAuth, async (request, response) => {
           ? `SELECT event_type AS eventType, status, keyword, message_text AS messageText, error_message AS errorMessage, created_at AS createdAt
              FROM automation_events
              WHERE owner_user_id = ? AND instagram_user_id = ? AND (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received'))
+               AND (message_text IS NULL OR (LOWER(message_text) NOT LIKE 'sent to your dm%' AND LOWER(message_text) NOT LIKE 'check inbox%'))
              ORDER BY created_at DESC LIMIT ? OFFSET ?`
           : `SELECT event_type AS eventType, status, keyword, message_text AS messageText, error_message AS errorMessage, created_at AS createdAt
              FROM automation_events
              WHERE owner_user_id = ? AND (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received'))
+               AND (message_text IS NULL OR (LOWER(message_text) NOT LIKE 'sent to your dm%' AND LOWER(message_text) NOT LIKE 'check inbox%'))
              ORDER BY created_at DESC LIMIT ? OFFSET ?`,
         requestedIgUserId ? [request.user.id, requestedIgUserId, limit, (page - 1) * limit] : [request.user.id, limit, (page - 1) * limit]
       );
       const totals = await db.get(
         requestedIgUserId
           ? `SELECT
-              SUM(CASE WHEN (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received')) AND status = 'success' THEN 1 ELSE 0 END) AS sent,
-              SUM(CASE WHEN (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received')) AND status = 'failed' THEN 1 ELSE 0 END) AS failed
+              SUM(CASE WHEN (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received')) AND (message_text IS NULL OR (LOWER(message_text) NOT LIKE 'sent to your dm%' AND LOWER(message_text) NOT LIKE 'check inbox%')) AND status = 'success' THEN 1 ELSE 0 END) AS sent,
+              SUM(CASE WHEN (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received')) AND (message_text IS NULL OR (LOWER(message_text) NOT LIKE 'sent to your dm%' AND LOWER(message_text) NOT LIKE 'check inbox%')) AND status = 'failed' THEN 1 ELSE 0 END) AS failed
               FROM automation_events WHERE owner_user_id = ? AND instagram_user_id = ?`
           : `SELECT
-              SUM(CASE WHEN (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received')) AND status = 'success' THEN 1 ELSE 0 END) AS sent,
-              SUM(CASE WHEN (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received')) AND status = 'failed' THEN 1 ELSE 0 END) AS failed
+              SUM(CASE WHEN (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received')) AND (message_text IS NULL OR (LOWER(message_text) NOT LIKE 'sent to your dm%' AND LOWER(message_text) NOT LIKE 'check inbox%')) AND status = 'success' THEN 1 ELSE 0 END) AS sent,
+              SUM(CASE WHEN (event_type IS NULL OR event_type NOT IN ('public_reply', 'comment_received')) AND (message_text IS NULL OR (LOWER(message_text) NOT LIKE 'sent to your dm%' AND LOWER(message_text) NOT LIKE 'check inbox%')) AND status = 'failed' THEN 1 ELSE 0 END) AS failed
               FROM automation_events WHERE owner_user_id = ?`,
         requestedIgUserId ? [request.user.id, requestedIgUserId] : [request.user.id]
       );

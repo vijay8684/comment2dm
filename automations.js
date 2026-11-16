@@ -8,6 +8,8 @@
   // Application State
   let userAccounts = [];
   let userAutomations = [];
+  let isEntryGated = false;
+  let userEmail = '';
   let loadedReels = [];
   let selectedReel = null;
   let keywordsList = ['LINK'];
@@ -937,8 +939,105 @@
     clearSelectedReel();
   }
 
-  if (openCreateBtn) openCreateBtn.addEventListener('click', () => openBuilder(null));
-  if (createFirstBtn) createFirstBtn.addEventListener('click', () => openBuilder(null));
+
+  // ==========================================
+  // Entry Access Gate (₹1/mo) Modal & Checkout
+  // ==========================================
+  const entryGateModal = document.getElementById('entryGateModal');
+  const closeEntryGateBtn = document.getElementById('closeEntryGateBtn');
+  const unlockEntryFeeBtn = document.getElementById('unlockEntryFeeBtn');
+  const bannerUnlockBtn = document.getElementById('bannerUnlockBtn');
+
+  function openEntryGateModal() {
+    if (entryGateModal) entryGateModal.style.display = 'flex';
+  }
+  function closeEntryGateModal() {
+    if (entryGateModal) entryGateModal.style.display = 'none';
+  }
+
+  if (closeEntryGateBtn) closeEntryGateBtn.addEventListener('click', closeEntryGateModal);
+  if (bannerUnlockBtn) bannerUnlockBtn.addEventListener('click', openEntryGateModal);
+  if (entryGateModal) {
+    entryGateModal.addEventListener('click', (e) => {
+      if (e.target === entryGateModal) closeEntryGateModal();
+    });
+  }
+
+  if (unlockEntryFeeBtn) {
+    unlockEntryFeeBtn.addEventListener('click', async () => {
+      unlockEntryFeeBtn.disabled = true;
+      unlockEntryFeeBtn.innerHTML = '<span>Launching Checkout...</span>';
+      try {
+        const res = await fetch('/api/billing/create-subscription', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(window.getAuthHeaders ? window.getAuthHeaders() : {}) },
+          body: JSON.stringify({ planKey: 'entry_monthly' })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to initiate checkout');
+
+        if (!data.keyId || !data.subscriptionId) {
+          throw new Error('Payment gateway credentials unavailable. Please try again later.');
+        }
+
+        const options = {
+          key: data.keyId,
+          subscription_id: data.subscriptionId,
+          name: data.name || 'Comment2DM',
+          description: 'Unlock Automations (₹1/mo Entry Access)',
+          prefill: data.prefill || { email: userEmail },
+          theme: { color: '#7655D9' },
+          modal: {
+            ondismiss: function () {
+              unlockEntryFeeBtn.disabled = false;
+              unlockEntryFeeBtn.innerHTML = '<span>Unlock for ₹1 ⚡</span>';
+            }
+          },
+          handler: async (response) => {
+            try {
+              unlockEntryFeeBtn.innerHTML = '<span>Verifying Payment...</span>';
+              const verifyRes = await fetch('/api/billing/verify-subscription', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...(window.getAuthHeaders ? window.getAuthHeaders() : {}) },
+                body: JSON.stringify({
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_subscription_id: response.razorpay_subscription_id,
+                  razorpay_signature: response.razorpay_signature,
+                  planKey: 'entry_monthly'
+                })
+              });
+              const vd = await verifyRes.json();
+              if (!verifyRes.ok) throw new Error(vd.error || 'Verification failed');
+              showNotice('🎉 Entry Access Unlocked! Welcome to Comment2DM Automations.');
+              closeEntryGateModal();
+              setTimeout(() => location.reload(), 1500);
+            } catch (err) {
+              showError('Payment verification failed: ' + err.message);
+              unlockEntryFeeBtn.disabled = false;
+              unlockEntryFeeBtn.innerHTML = '<span>Unlock for ₹1 ⚡</span>';
+            }
+          }
+        };
+
+        if (typeof Razorpay === 'undefined') {
+          showError('Payment gateway not loaded. Please refresh the page.');
+          unlockEntryFeeBtn.disabled = false;
+          unlockEntryFeeBtn.innerHTML = '<span>Unlock for ₹1 ⚡</span>';
+          return;
+        }
+
+        const rzp = new Razorpay(options);
+        rzp.open();
+      } catch (err) {
+        showError(err.message);
+        unlockEntryFeeBtn.disabled = false;
+        unlockEntryFeeBtn.innerHTML = '<span>Unlock for ₹1 ⚡</span>';
+      }
+    });
+  }
+
+  if (openCreateBtn) openCreateBtn.addEventListener('click', () => { if (isEntryGated) { openEntryGateModal(); return; } openBuilder(null); });
+  if (createFirstBtn) createFirstBtn.addEventListener('click', () => { if (isEntryGated) { openEntryGateModal(); return; } openBuilder(null); });
   if (cancelFormBtn) cancelFormBtn.addEventListener('click', closeBuilder);
   if (cancelFormBtn2) cancelFormBtn2.addEventListener('click', closeBuilder);
 
@@ -1188,6 +1287,10 @@
 
       // Toggle Pause/Activate
       card.querySelector('.toggle-auto-btn').addEventListener('click', async () => {
+        if (isEntryGated && !auto.enabled) {
+          openEntryGateModal();
+          return;
+        }
         const nextState = !auto.enabled;
         try {
           await fetch(`/api/automations/${encodeURIComponent(auto.id)}`, {
@@ -1206,6 +1309,10 @@
 
       // Edit Button
       card.querySelector('.edit-auto-btn').addEventListener('click', () => {
+        if (isEntryGated) {
+          openEntryGateModal();
+          return;
+        }
         openBuilder(auto);
       });
 
@@ -1334,7 +1441,15 @@
 
       if (billRes.status === 'fulfilled' && billRes.value.ok) {
         const billData = await billRes.value.json().catch(() => ({}));
-        userPlan = billData.plan || 'free';
+        userPlan = (billData.plan || 'free').toLowerCase();
+        userEmail = billData.email || '';
+        const entryPricing = billData.entryPricing;
+        const hasPaidEntry = Boolean(billData.hasPaidEntry);
+        if (userPlan === 'free' && entryPricing && entryPricing.is_active && entryPricing.gate_automations_if_unpaid && !hasPaidEntry) {
+          isEntryGated = true;
+          const banner = document.getElementById('entryFeeBanner');
+          if (banner) banner.style.display = 'flex';
+        }
         updateSimulator();
       }
 

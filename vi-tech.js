@@ -320,6 +320,30 @@ document.addEventListener('DOMContentLoaded', () => {
       if (proInp) proInp.value = cat.pro?.monthly || 70;
       if (eliteInp) eliteInp.value = cat.elite?.monthly || 150;
 
+      // Populate Entry Pricing & AutoPay Controls
+      const ep = cat.entry_pricing || {};
+      const entryActive = document.getElementById('entryIsActive');
+      const entryPromo = document.getElementById('entryPromoPrice');
+      const entryReg = document.getElementById('entryRegularPrice');
+      const entryModel = document.getElementById('entryPaymentModel');
+      const entryAutopay = document.getElementById('entryAutopayEnabled');
+      const entryGate = document.getElementById('entryGateAutomations');
+      const entryBadge = document.getElementById('entryBadgeText');
+      const entryStatusBadge = document.getElementById('entryPricingStatusBadge');
+
+      if (entryActive) entryActive.value = String(ep.is_active !== false);
+      if (entryPromo) entryPromo.value = ep.promotional_price !== undefined ? ep.promotional_price : 1;
+      if (entryReg) entryReg.value = ep.regular_price || 70;
+      if (entryModel) entryModel.value = ep.payment_model || 'recurring';
+      if (entryAutopay) entryAutopay.value = String(ep.autopay_enabled !== false);
+      if (entryGate) entryGate.value = String(ep.gate_automations_if_unpaid !== false);
+      if (entryBadge) entryBadge.value = ep.badge_text || '₹1 ENTRY OFFER';
+      if (entryStatusBadge) {
+        const isActive = ep.is_active !== false;
+        entryStatusBadge.textContent = isActive ? `ENTRY FEE: ACTIVE (₹${ep.promotional_price ?? 1}/mo)` : 'ENTRY FEE: OFF (₹0 FREE)';
+        entryStatusBadge.className = `status-badge ${isActive ? 'active' : 'suspended'}`;
+      }
+
       // Render campaigns
       const tbody = document.getElementById('campaignsTableBody');
       const camps = data.campaigns || [];
@@ -366,6 +390,46 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast('❌ ' + err.message, 'error');
     }
   }
+
+
+  // Update Entry & AutoPay Controls
+  document.getElementById('entryPricingForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const is_active = document.getElementById('entryIsActive').value === 'true';
+    const promotional_price = Number(document.getElementById('entryPromoPrice').value);
+    const regular_price = Number(document.getElementById('entryRegularPrice').value);
+    const payment_model = document.getElementById('entryPaymentModel').value;
+    const autopay_enabled = document.getElementById('entryAutopayEnabled').value === 'true';
+    const gate_automations_if_unpaid = document.getElementById('entryGateAutomations').value === 'true';
+    const badge_text = document.getElementById('entryBadgeText').value.trim();
+    const reason = document.getElementById('entryUpdateReason').value.trim();
+
+    try {
+      const res = await fetch('/api/admin/pricing/entry-controls', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          is_active,
+          promotional_price,
+          regular_price,
+          payment_model,
+          autopay_enabled,
+          gate_automations_if_unpaid,
+          badge_text,
+          reason
+        }),
+        credentials: 'same-origin'
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to update entry controls');
+      }
+      showToast('⚡ Entry pricing & AutoPay controls updated!');
+      loadPricing();
+    } catch (err) {
+      showToast('❌ ' + err.message, 'error');
+    }
+  });
 
   // Update Regular Prices
   document.getElementById('regularPriceForm')?.addEventListener('submit', async (e) => {
@@ -484,14 +548,36 @@ document.addEventListener('DOMContentLoaded', () => {
           <td>${c.redemption_count || 0} / ${c.max_redemptions}</td>
           <td><span class="status-badge ${c.is_active ? 'active' : 'suspended'}">${c.is_active ? 'ACTIVE' : 'INACTIVE'}</span></td>
           <td style="font-size:0.75rem;">${c.expiry_date ? new Date(c.expiry_date).toLocaleDateString() : 'Never'}</td>
-          <td>
+          <td style="display:flex;gap:6px;">
             <button class="action-btn toggle-coupon-btn" data-code="${c.code}" data-active="${c.is_active}">
               ${c.is_active ? 'Deactivate' : 'Activate'}
+            </button>
+            <button class="action-btn danger delete-coupon-btn" data-code="${c.code}">
+              Delete
             </button>
           </td>
         </tr>
       `).join('');
 
+
+      tbody.querySelectorAll('.delete-coupon-btn').forEach(b => {
+        b.addEventListener('click', async () => {
+          const code = b.dataset.code;
+          if (!confirm(`Permanently delete coupon ${code}?`)) return;
+          try {
+            const r = await fetch(`/api/admin/coupons/${code}`, {
+              method: 'DELETE',
+              credentials: 'same-origin'
+            });
+            if (!r.ok) {
+              const err = await r.json().catch(() => ({}));
+              throw new Error(err.error || 'Failed to delete coupon');
+            }
+            showToast(`Coupon ${code} deleted.`);
+            loadCoupons();
+          } catch (e) { showToast('❌ ' + e.message, 'error'); }
+        });
+      });
       tbody.querySelectorAll('.toggle-coupon-btn').forEach(b => {
         b.addEventListener('click', async () => {
           const code = b.dataset.code;
@@ -582,8 +668,35 @@ document.addEventListener('DOMContentLoaded', () => {
           <td><code style="font-size:0.75rem;">${s.razorpay_subscription_id || 'N/A'}</code></td>
           <td style="font-size:0.75rem;">${s.current_end ? new Date(s.current_end).toLocaleDateString() : 'N/A'}</td>
           <td>${s.coupon_code ? `<span class="status-badge scheduled">${s.coupon_code}</span>` : '--'}</td>
+          <td>
+            ${s.status === 'active'
+              ? `<button class="action-btn danger cancel-sub-btn" data-id="${s.id || s.razorpay_subscription_id}">Cancel</button>`
+              : `<span style="font-size:0.75rem;color:var(--ink-muted);">--</span>`
+            }
+          </td>
         </tr>
       `).join('');
+
+      tbody.querySelectorAll('.cancel-sub-btn').forEach(b => {
+        b.addEventListener('click', async () => {
+          const id = b.dataset.id;
+          if (!confirm('Cancel this customer subscription at period end?')) return;
+          try {
+            const r = await fetch(`/api/admin/subscriptions/${id}/cancel`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ reason: 'Admin panel manual cancellation' }),
+              credentials: 'same-origin'
+            });
+            if (!r.ok) {
+              const err = await r.json().catch(() => ({}));
+              throw new Error(err.error || 'Failed to cancel subscription');
+            }
+            showToast('Subscription scheduled for cancellation.');
+            loadSubscriptions();
+          } catch (e) { showToast('❌ ' + e.message, 'error'); }
+        });
+      });
     } catch (err) {
       showToast('❌ ' + err.message, 'error');
     }
@@ -781,6 +894,29 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast('❌ ' + err.message, 'error');
     }
   }
+
+
+  // System Settings Form Submit
+  document.getElementById('systemSettingsForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const platform_name = document.getElementById('settingPlatformName').value.trim();
+    const support_email = document.getElementById('settingSupportEmail').value.trim();
+    const maintenance_mode = document.getElementById('settingMaintenanceMode').value === 'true';
+
+    try {
+      const res = await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform_name, support_email, maintenance_mode }),
+        credentials: 'same-origin'
+      });
+      if (!res.ok) throw new Error('Failed to save system settings');
+      showToast('System settings persisted successfully!');
+      loadSettings();
+    } catch (err) {
+      showToast('❌ ' + err.message, 'error');
+    }
+  });
 
   // Refresh Button
   document.getElementById('refreshBtn')?.addEventListener('click', () => {

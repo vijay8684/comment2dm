@@ -204,8 +204,14 @@
       const data = await res.json().catch(() => ({}));
 
       totalPages = data.pages || 1;
-      const events = data.events || [];
-      const totalCount = data.total ?? 0;
+      const rawEvents = data.events || [];
+      const events = rawEvents.filter(ev => {
+        if (ev.eventType === 'public_reply' || ev.delivery_channel === 'public_comment') return false;
+        const msg = String(ev.dmText || ev.dmPreview || '').trim();
+        if (/^(sent to your dm|check inbox)/i.test(msg)) return false;
+        return true;
+      });
+      const totalCount = data.total ?? events.length;
 
       // Update Summary & Pagination
       const countSummaryEl = document.getElementById('logCountSummary');
