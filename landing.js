@@ -327,3 +327,28 @@
     currentYearEl.textContent = new Date().getFullYear();
   }
 })();
+
+// Sync dynamic pricing and active promotional sales on landing page
+(function syncLandingPrices() {
+  fetch('/api/billing/prices')
+    .then(r => r.json())
+    .then(data => {
+      const pPro = document.getElementById('pricePro');
+      const pElite = document.getElementById('priceElite');
+      if (pPro && data.pro_monthly) {
+        if (data.plans?.pro?.is_sale && data.pro_regular) {
+          pPro.innerHTML = `<s style="font-size:0.9rem;opacity:0.6;margin-right:6px;">₹${data.pro_regular}</s> ₹${data.pro_monthly}`;
+        } else {
+          pPro.textContent = `₹${data.pro_monthly}`;
+        }
+      }
+      if (pElite && data.elite_monthly) {
+        if (data.plans?.elite?.is_sale && data.elite_regular) {
+          pElite.innerHTML = `<s style="font-size:0.9rem;opacity:0.6;margin-right:6px;">₹${data.elite_regular}</s> ₹${data.elite_monthly}`;
+        } else {
+          pElite.textContent = `₹${data.elite_monthly}`;
+        }
+      }
+    })
+    .catch(() => {});
+})();

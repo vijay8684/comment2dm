@@ -4,6 +4,8 @@ const { MongoClient, ServerApiVersion } = require('mongodb');
 const Razorpay = require('razorpay');
 const authService = require('./auth/authService');
 const dbModule = require('./db');
+const pricingService = require('./services/pricingService');
+const couponService = require('./services/couponService');
 
 // Official Canonical Subscription Plan Configurations (Monthly Launch Pricing)
 // Free: ₹0, Pro: ₹70/month (7000 paise), Elite: ₹150/month (15000 paise)
@@ -333,10 +335,17 @@ async function entitlement(uid, contextOrOptions = null) {
       };
     } else {
       const s = await d.collection('subscriptions').findOne(
-        { user_id: uid, status: 'active' },
+        { user_id: uid, status: { $in: ['active', 'cancelled'] } },
         { sort: { created_at: -1 } }
       );
-      const rawPlan = s?.plan || 'free';
+      let rawPlan = 'free';
+      if (s) {
+        if (s.status === 'active') {
+          rawPlan = s.plan || 'free';
+        } else if (s.status === 'cancelled' && s.current_end && new Date(s.current_end) > new Date()) {
+          rawPlan = s.plan || 'free';
+        }
+      }
       const plan = LIMITS[rawPlan]
         ? (rawPlan === 'creator' || rawPlan === 'growth' ? 'pro' : rawPlan === 'scale' ? 'elite' : rawPlan)
         : 'free';
@@ -466,16 +475,35 @@ async function ensurePlans() {
   }
 }
 
-async function planId(k) {
+async function planId(k, targetAmount = null) {
   const targetPlan = PLANS[k];
   if (!targetPlan) return null;
-  if (cache.has(k)) return cache.get(k);
+  const effectiveAmount = (typeof targetAmount === 'number' && targetAmount > 0) ? targetAmount : targetPlan.amount;
+  const cacheKey = `${k}_${effectiveAmount}`;
+  if (cache.has(cacheKey)) return cache.get(cacheKey);
+
   const d = await store();
-  const p = await d.collection('billing_plans').findOne({ plan_key: k });
-  if (p?.razorpay_plan_id && (!p?.amount || p?.amount === targetPlan.amount)) {
-    cache.set(k, p.razorpay_plan_id);
+  let p = await d.collection('billing_plans').findOne({ plan_key: k, amount: effectiveAmount });
+  if (!p && effectiveAmount === targetPlan.amount) {
+    p = await d.collection('billing_plans').findOne({ plan_key: k });
+    if (p && p.amount && p.amount !== effectiveAmount) p = null;
+  }
+  if (p?.razorpay_plan_id) {
+    cache.set(cacheKey, p.razorpay_plan_id);
     return p.razorpay_plan_id;
   }
+
+  // Attempt dynamic plan resolution via pricingService
+  try {
+    const pid = await pricingService.ensureRazorpayPlan(k, effectiveAmount, `${targetPlan.name} (₹${effectiveAmount / 100}/mo)`);
+    if (pid) {
+      cache.set(cacheKey, pid);
+      return pid;
+    }
+  } catch (err) {
+    console.error('[Billing Plan ID Resolution Warning]:', err.message);
+  }
+
   await ensurePlans();
   return cache.get(k);
 }
@@ -507,12 +535,12 @@ async function create(req, res) {
     if (existing.status === 'active') {
       return res.status(409).json({ error: 'You already have an active subscription. Cancel it before starting another plan.' });
     }
-    if (existing.plan_key === rawKey && existing.razorpay_subscription_id) {
+    if (existing.plan_key === rawKey && existing.razorpay_subscription_id && !req.body?.couponCode) {
       return res.json({
         keyId: process.env.RAZORPAY_KEY_ID,
         subscriptionId: existing.razorpay_subscription_id,
         planKey: existing.plan_key,
-        amount: PLANS[existing.plan_key]?.amount || x.amount,
+        amount: existing.amount || PLANS[existing.plan_key]?.amount || x.amount,
         currency: 'INR',
         name: 'Comment2DM',
         prefill: {}
@@ -520,7 +548,27 @@ async function create(req, res) {
     }
   }
 
-  const pid = await planId(rawKey);
+  // 1. Calculate effective plan amount taking active promotional campaign into account
+  const effectivePricing = await pricingService.getEffectivePricing();
+  const targetPlanInfo = effectivePricing.plans[x.plan];
+  let payablePaise = targetPlanInfo ? targetPlanInfo.amount_paise : x.amount;
+  let isSale = targetPlanInfo ? targetPlanInfo.is_sale : false;
+  let promoBadge = targetPlanInfo ? targetPlanInfo.badge : null;
+
+  // 2. Validate and apply coupon if provided
+  let couponData = null;
+  const rawCoupon = String(req.body?.couponCode || '').trim().toUpperCase();
+  if (rawCoupon) {
+    const couponValidation = await couponService.validateCoupon(rawCoupon, rawKey, u.id, payablePaise / 100);
+    if (!couponValidation.valid) {
+      return res.status(400).json({ error: couponValidation.error || 'Invalid or expired coupon code.' });
+    }
+    couponData = couponValidation;
+    payablePaise = Math.round(couponValidation.final_rupees * 100);
+  }
+
+  // 3. Resolve matching Razorpay Plan ID for the exact payable amount
+  const pid = await planId(rawKey, payablePaise);
   if (!pid) return res.status(503).json({ error: 'Payment plans are not ready yet. Please try again shortly.' });
 
   const user = await d.collection('users').findOne({ id: u.id }, { projection: { id: 1, name: 1, email: 1 } });
@@ -528,8 +576,24 @@ async function create(req, res) {
     plan_id: pid,
     total_count: x.totalCount,
     customer_notify: 1,
-    notes: { user_id: u.id, plan_key: rawKey }
+    notes: {
+      user_id: u.id,
+      plan_key: rawKey,
+      coupon_code: couponData ? couponData.code : '',
+      payable_amount_paise: payablePaise
+    }
   });
+
+  // 4. If coupon was applied, atomically reserve with TTL
+  if (couponData && couponData.code) {
+    await couponService.reserveCoupon(couponData.code, u.id, s.id, {
+      plan_key: rawKey,
+      plan_name: x.name,
+      original_rupees: couponData.original_rupees,
+      discount_rupees: couponData.discount_rupees,
+      final_rupees: couponData.final_rupees
+    });
+  }
 
   await d.collection('subscriptions').updateOne(
     { razorpay_subscription_id: s.id },
@@ -540,6 +604,8 @@ async function create(req, res) {
         billing_cycle: x.cycle,
         plan_key: rawKey,
         razorpay_plan_id: pid,
+        amount: payablePaise,
+        coupon_applied: couponData ? couponData.code : null,
         status: s.status || 'created',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -552,10 +618,19 @@ async function create(req, res) {
     keyId: process.env.RAZORPAY_KEY_ID,
     subscriptionId: s.id,
     planKey: rawKey,
-    amount: x.amount,
+    amount: payablePaise,
     currency: 'INR',
     name: 'Comment2DM',
-    prefill: { name: user?.name || '', email: user?.email || '' }
+    prefill: { name: user?.name || '', email: user?.email || '' },
+    isSale: isSale,
+    badge: promoBadge,
+    couponApplied: couponData ? {
+      code: couponData.code,
+      discount_rupees: couponData.discount_rupees,
+      final_rupees: couponData.final_rupees,
+      duration: couponData.duration,
+      duration_in_months: couponData.duration_in_months
+    } : null
   });
 }
 
@@ -579,10 +654,47 @@ async function verify(req, res) {
   const s = await d.collection('subscriptions').findOne({ razorpay_subscription_id: sid, user_id: u.id });
   if (!s) return res.status(404).json({ error: 'Subscription record not found.' });
 
+  const nowIso = new Date().toISOString();
+  // Set period to 30 days from now for active cycle
+  const currentEndIso = new Date(Date.now() + 30 * 86400000).toISOString();
+
   await d.collection('subscriptions').updateOne(
     { _id: s._id },
-    { $set: { status: 'active', razorpay_payment_id: pid, updated_at: new Date().toISOString() } }
+    {
+      $set: {
+        status: 'active',
+        razorpay_payment_id: pid,
+        current_start: nowIso,
+        current_end: currentEndIso,
+        updated_at: nowIso
+      }
+    }
   );
+
+  // If there was a reserved coupon for this subscription, confirm redemption
+  await couponService.confirmRedemption(sid, pid);
+
+  // Record captured payment
+  await d.collection('payments').updateOne(
+    { razorpay_payment_id: pid },
+    {
+      $set: {
+        user_id: u.id,
+        subscription_id: sid,
+        razorpay_payment_id: pid,
+        plan: s.plan,
+        amount: s.amount || PLANS[s.plan_key]?.amount || 7000,
+        currency: 'INR',
+        status: 'captured',
+        created_at: nowIso
+      }
+    },
+    { upsert: true }
+  );
+
+  // Invalidate entitlement cache for user
+  globalEntitlementCache.delete(u.id);
+
   return res.json({ verified: true, plan: s.plan });
 }
 

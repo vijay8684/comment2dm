@@ -90,8 +90,8 @@
 
     container.innerHTML = Object.entries(PLANS).map(([key, plan]) => {
       const basePrice = plan.monthlyPrice;
-      const discountAmount = appliedDiscount > 0 ? (basePrice * (appliedDiscount / 100)) : 0;
-      const finalPrice = Math.max(0, basePrice - discountAmount);
+      const discountAmount = appliedDiscount > 0 ? (appliedDiscount > 100 ? appliedDiscount : (basePrice * (appliedDiscount / 100))) : 0;
+      const finalPrice = Math.max(1, basePrice - discountAmount);
 
       const isCurrent = key === currentPlan;
       const isPopular = key === 'pro';
@@ -102,7 +102,9 @@
       }
 
       let originalDisplay = '';
-      if (appliedDiscount > 0 && basePrice > 0) {
+      if (plan.is_sale && plan.regularPrice && plan.regularPrice > basePrice) {
+        originalDisplay = `<s style="opacity:0.5;font-size:0.8rem;margin-right:6px;">₹${plan.regularPrice.toLocaleString('en-IN')}</s>`;
+      } else if (appliedDiscount > 0 && basePrice > 0) {
         originalDisplay = `<s style="opacity:0.5;font-size:0.8rem;margin-right:6px;">₹${basePrice.toLocaleString('en-IN')}</s>`;
       }
 
@@ -147,18 +149,19 @@
         const res = await fetch('/api/billing/validate-coupon', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...(window.getAuthHeaders ? window.getAuthHeaders() : {}) },
-          body: JSON.stringify({ code })
+          body: JSON.stringify({ code, planKey: 'pro_monthly' })
         });
         const data = await res.json();
         if (data.valid) {
-          appliedDiscount = data.discount;
+          appliedDiscount = data.discount_rupees || (typeof data.discount === 'number' ? data.discount : 0);
           appliedCouponCode = code;
-          couponMsg.textContent = `Coupon applied: ${data.discount}% OFF! 🎉`;
+          const label = data.coupon?.discount_type === 'percentage' ? `${data.coupon.discount_value}% OFF` : `₹${data.discount_rupees} OFF`;
+          couponMsg.textContent = `Coupon ${code} applied: ${label}! 🎉 (${data.duration_text || 'First billing cycle'})`;
           couponMsg.style.color = '#10b981';
           couponMsg.hidden = false;
           renderPlanCards();
         } else {
-          couponMsg.textContent = '❌ Invalid or expired coupon code.';
+          couponMsg.textContent = '❌ ' + (data.error || 'Invalid or expired coupon code.');
           couponMsg.style.color = '#f43f5e';
           couponMsg.hidden = false;
           appliedDiscount = 0;
@@ -183,7 +186,7 @@
       const res = await fetch('/api/billing/create-subscription', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(window.getAuthHeaders ? window.getAuthHeaders() : {}) },
-        body: JSON.stringify({ planKey })
+        body: JSON.stringify({ planKey, couponCode: appliedCouponCode || undefined })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to create subscription');
@@ -245,7 +248,14 @@
       if (priceRes.ok) {
         const prices = await priceRes.json();
         PLANS.pro.monthlyPrice = prices.pro_monthly || 70;
+        PLANS.pro.regularPrice = prices.pro_regular || 70;
+        PLANS.pro.is_sale = !!prices.plans?.pro?.is_sale;
+        PLANS.pro.badge = prices.plans?.pro?.badge || null;
+
         PLANS.elite.monthlyPrice = prices.elite_monthly || 150;
+        PLANS.elite.regularPrice = prices.elite_regular || 150;
+        PLANS.elite.is_sale = !!prices.plans?.elite?.is_sale;
+        PLANS.elite.badge = prices.plans?.elite?.badge || null;
       }
 
       // Then fetch user billing status

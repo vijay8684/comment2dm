@@ -261,7 +261,7 @@
               <div class="avatar-section">
                 <div class="avatar-preview" id="avatarPreview">U</div>
                 <div>
-                  <div style="font-size:0.84rem;color:rgba(255,255,255,0.5);margin-bottom:8px;">Profile picture</div>
+                  <div style="font-size:0.84rem;color:var(--ink-secondary);margin-bottom:8px;">Profile picture</div>
                   <button class="avatar-change-btn" id="avatarBtn">Change Avatar</button>
                   <input type="file" id="avatarFileInput" accept="image/*" hidden>
                 </div>
@@ -276,11 +276,11 @@
                   <input class="form-input" id="profileEmail" type="email" readonly>
                 </div>
                 <div class="form-row">
-                  <label for="profilePhone">Phone Number <span style="color:rgba(255,255,255,0.3);font-size:0.75rem;">(optional)</span></label>
+                  <label for="profilePhone">Phone Number <span style="color:var(--ink-muted);font-size:0.75rem;">(optional)</span></label>
                   <input class="form-input" id="profilePhone" type="tel" placeholder="+91 9999 999 999" maxlength="20">
                 </div>
                 <div class="form-row">
-                  <label for="profileBio">Bio <span style="color:rgba(255,255,255,0.3);font-size:0.75rem;">(max 160 chars)</span></label>
+                  <label for="profileBio">Bio <span style="color:var(--ink-muted);font-size:0.75rem;">(max 160 chars)</span></label>
                   <textarea class="form-input" id="profileBio" rows="3" maxlength="160" placeholder="Tell us about yourself…" style="resize:none;"></textarea>
                   <div class="char-counter"><span id="bioCount">0</span>/160</div>
                 </div>
@@ -293,7 +293,7 @@
               <div class="panel-title">Security Settings</div>
               <div class="panel-sub">Change your password and secure your account.</div>
               <div id="oauthNotice" style="display:none;background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.25);border-radius:12px;padding:16px;margin-bottom:20px;font-size:0.86rem;color:#cbd5e1;">
-                <div style="font-weight:600;color:#f1f5f9;margin-bottom:4px;">Google Account</div>
+                <div style="font-weight:600;color:var(--ink);margin-bottom:4px;">Google Account</div>
                 You signed in with Google. Password management is not applicable for OAuth accounts.
               </div>
               <form id="passwordForm">
@@ -323,8 +323,8 @@
               <div style="margin-top:28px;padding-top:20px;border-top:1px solid rgba(255,255,255,0.06);">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
                   <div>
-                    <div style="font-size:0.9rem;color:#e2e8f0;font-weight:500;">Two-Factor Authentication</div>
-                    <div style="font-size:0.78rem;color:rgba(255,255,255,0.35);margin-top:2px;">Add an extra layer of security</div>
+                    <div style="font-size:0.9rem;color:var(--ink);font-weight:500;">Two-Factor Authentication</div>
+                    <div style="font-size:0.78rem;color:var(--ink-muted);margin-top:2px;">Add an extra layer of security</div>
                   </div>
                   <span class="coming-soon-badge">Coming Soon</span>
                 </div>
@@ -362,7 +362,7 @@
                 <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
                   <div>
                     <div style="font-size:0.75rem;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.07em;">Current Plan</div>
-                    <div style="font-size:1.3rem;font-weight:700;color:#f1f5f9;margin-top:2px;" id="billingPlanName">Free</div>
+                    <div style="font-size:1.3rem;font-weight:700;color:var(--ink);margin-top:2px;" id="billingPlanName">Free</div>
                   </div>
                   <span class="plan-badge" id="billingBadge">Free</span>
                 </div>

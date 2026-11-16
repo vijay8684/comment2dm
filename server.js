@@ -17,6 +17,9 @@ const metaRateLimiter = require('./src/services/metaRateLimiter');
 const emailService = require('./src/services/emailService');
 const automationTimeline = require('./src/services/automationTimeline');
 const storageService = require('./src/services/storageService');
+const pricingService = require('./src/services/pricingService');
+const couponService = require('./src/services/couponService');
+const { registerAdminRoutes } = require('./src/adminRoutes');
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
@@ -175,6 +178,9 @@ const staticAssetOptions = {
   }
 };
 
+app.get(['/admin.html', '/vi-tech.html'], (req, res) => {
+  res.redirect(301, '/vi-tech');
+});
 app.use(express.static(path.join(__dirname), staticAssetOptions));
 
 function validateCredentials(body, includeName) {
@@ -3679,15 +3685,7 @@ app.post('/api/feedback', requireAuth, async (request, response, next) => {
   }
 });
 
-app.get('/api/admin/overview', requireAuth, requireAdmin, async (request, response, next) => {
-  try {
-    const users = await authService.listUsers();
-    const instagramAccounts = await instagramService.listAllAccounts();
-    return response.json({ users, instagramAccounts });
-  } catch (error) {
-    return next(error);
-  }
-});
+// Old overview stub removed in favor of VI Tech adminRoutes
 
 // ==========================================
 // Creator Studio AI & Support Chat
@@ -4149,7 +4147,10 @@ app.get('/api/instagram/debug-status', requireAuth, async (request, response) =>
   }
 });
 
-// ── Admin endpoints ─────────────────────────────────────────────────────────
+// ── VI Tech Owner Control Center & Admin Routes ───────────────────────────
+registerAdminRoutes(app);
+
+// ── Legacy Admin Endpoints (Backward Compatible) ─────────────────────────
 app.get('/api/admin/users', requireAdmin, async (request, response) => {
   try {
     const users = db.collections ? await db.collections().users.find({}, { projection: { password: 0 } }).sort({ created_at: -1 }).limit(500).toArray() : [];
@@ -4284,21 +4285,42 @@ app.delete('/api/admin/config/coupon/:code', requireAdmin, async (request, respo
 
 app.get('/api/billing/prices', async (request, response) => {
   try {
-    const col = db.collections ? db.collections().billing_plans : null;
-    const pricesDoc = col ? await col.findOne({ _id: 'global_prices' }) : null;
-    return response.json(pricesDoc || { pro_monthly: 70, elite_monthly: 150 });
-  } catch (err) { return response.json({ pro_monthly: 70, elite_monthly: 150 }); }
+    const effective = await pricingService.getEffectivePricing();
+    return response.json({
+      pro_monthly: effective.plans.pro.price,
+      elite_monthly: effective.plans.elite.price,
+      pro_regular: effective.plans.pro.regular_price,
+      elite_regular: effective.plans.elite.regular_price,
+      plans: effective.plans,
+      active_campaign: effective.active_campaign
+    });
+  } catch (err) {
+    return response.json({ pro_monthly: 70, elite_monthly: 150 });
+  }
 });
 
 app.post('/api/billing/validate-coupon', async (request, response) => {
   try {
-    const { code } = request.body || {};
-    if (!code) return response.status(400).json({ error: 'Code required' });
-    const col = db.collections ? db.collections().coupons : null;
-    const coupon = col ? await col.findOne({ _id: code.toUpperCase() }) : null;
-    if (!coupon) return response.status(404).json({ error: 'Invalid coupon' });
-    return response.json({ valid: true, discount: coupon.discount });
-  } catch (err) { return response.status(500).json({ error: err.message }); }
+    const { code, planKey } = request.body || {};
+    if (!code) return response.status(400).json({ error: 'Coupon code is required.' });
+    const targetPlanKey = planKey || 'pro_monthly';
+    const effective = await pricingService.getEffectivePricing();
+    const planInfo = targetPlanKey.startsWith('elite') ? effective.plans.elite : effective.plans.pro;
+    const u = request.user || null;
+    const result = await couponService.validateCoupon(code, targetPlanKey, u?.id || null, planInfo.price);
+    if (!result.valid) {
+      return response.status(400).json({ valid: false, error: result.error });
+    }
+    return response.json({
+      valid: true,
+      coupon: result.coupon,
+      discount_rupees: result.discount_rupees,
+      final_rupees: result.final_rupees,
+      duration_text: result.duration_text
+    });
+  } catch (err) {
+    return response.status(500).json({ error: err.message });
+  }
 });
 
 // 404 & Error handlers

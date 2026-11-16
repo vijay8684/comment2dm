@@ -255,10 +255,21 @@
       if (!grid) return;
       grid.innerHTML = PLANS.map(p => {
         const price = p.monthly;
+        let orig = '';
+        if (p.isSale && p.regular && p.regular > price) {
+          orig = `<s style="opacity:0.5;font-size:0.85rem;margin-right:6px;">₹${p.regular.toLocaleString('en-IN')}</s>`;
+        }
+        let tag = '';
+        if (p.isSale && p.badge) {
+          tag = `<div class="popular-tag" style="background:linear-gradient(135deg,#ec4899,#f43f5e);top:-12px;">🔥 ${p.badge}</div>`;
+        } else if (p.popular) {
+          tag = '<div class="popular-tag">⭐ Most Popular</div>';
+        }
         return `<div class="plan-card-pub ${p.popular ? 'popular' : ''}">
-          ${p.popular ? '<div class="popular-tag">⭐ Most Popular</div>' : ''}
+          ${tag}
           <div class="plan-name-pub">${p.name}</div>
           <div class="price-pub">
+            ${orig}
             <span class="amount">${price === 0 ? '₹0' : '₹' + price.toLocaleString('en-IN')}</span>
             <span class="period">${price === 0 ? ' forever' : ' / month'}</span>
             <span style="height:18px;display:block;"></span>
@@ -271,6 +282,26 @@
     }
 
     renderPlans();
+
+    // Fetch canonical live pricing & promotions from server
+    fetch('/api/billing/prices')
+      .then(res => res.json())
+      .then(data => {
+        if (data.pro_monthly) PLANS[1].monthly = data.pro_monthly;
+        if (data.pro_regular) PLANS[1].regular = data.pro_regular;
+        if (data.plans?.pro?.is_sale) {
+          PLANS[1].isSale = true;
+          PLANS[1].badge = data.plans.pro.badge;
+        }
+        if (data.elite_monthly) PLANS[2].monthly = data.elite_monthly;
+        if (data.elite_regular) PLANS[2].regular = data.elite_regular;
+        if (data.plans?.elite?.is_sale) {
+          PLANS[2].isSale = true;
+          PLANS[2].badge = data.plans.elite.badge;
+        }
+        renderPlans();
+      })
+      .catch(() => {});
 
     // FAQ
     const faqs = [
